@@ -22,14 +22,14 @@
  * contêiner, uma imagem ou um arquivo que já existe e é diferente — diz o que
  * encontrou e para.
  *
- * Desfazer: `docker rm -f frigg-preview-supervisor`, `docker volume rm
- * frigg-preview-proxy-sockets` e apagar os dois arquivos da sobreposição.
+ * Desfazer: `docker rm -f frigg-preview-supervisor` e apagar os dois arquivos
+ * da sobreposição.
  *
- * Uso: node scripts/provision-preview.mjs [--base /abs] [--porta 8088] [--self-test]
+ * Uso: node scripts/provision-preview.mjs [--base /abs] [--porta 8088] [--atualizar] [--self-test]
  */
 import { spawnSync } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createHash, randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -37,8 +37,7 @@ import { fileURLToPath } from 'node:url'
 const raiz = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 export const CONTEINER = 'frigg-preview-supervisor'
-export const VOLUME_DOS_PROXIES = 'frigg-preview-proxy-sockets'
-export const IMAGEM_DO_SUPERVISOR = 'frigg-preview-supervisor:local'
+export const REPOSITORIO_DA_IMAGEM = 'frigg-preview-supervisor'
 export const IMAGEM_DO_CONSTRUTOR = 'dz23-studio-builder:local'
 export const SOBREPOSICAO_DA_PREVIA = 'dsh-home/profiles/studio/preview.patch.yml'
 export const CONFIGURACAO_DA_PREVIA = 'dsh-home/profiles/studio/preview.local.json'
@@ -126,20 +125,48 @@ export function argumentosDoSupervisor({ base, uid, gid, gidDoDocker, imagemDoSu
     '-v', '/var/run/docker.sock:/var/run/docker.sock:ro',
     '-v', `${c.execucoes}:${c.execucoes}:ro`,
     '-v', `${c.soquetes}:/run/dz23-preview`,
-    '-v', `${VOLUME_DOS_PROXIES}:/run/dz23-preview-proxies`,
+    // PASTA, e não volume nomeado: o Docker repovoa um volume vazio com a
+    // pasta da imagem (dona 10001) e a pessoa perde o acesso aos próprios
+    // soquetes — medido em 19/09/2026. Pasta montada nunca é repovoada.
+    '-v', `${c.proxies}:/run/dz23-preview-proxies`,
     '-v', `${c.tokenDoSupervisor}:/run/secrets/dz23-preview-supervisor-token:ro`,
     '-e', 'DZ23_DOCKER_SOCKET=/var/run/docker.sock',
     '-e', 'DZ23_SUPERVISOR_SOCKET=/run/dz23-preview/supervisor.sock',
     '-e', 'DZ23_SUPERVISOR_TOKEN_FILE=/run/secrets/dz23-preview-supervisor-token',
     '-e', `DZ23_ARTIFACT_ROOT=${c.execucoes}`,
     '-e', 'DZ23_PROXY_SOCKET_ROOT=/run/dz23-preview-proxies',
-    '-e', `DZ23_PROXY_SOCKET_VOLUME=${VOLUME_DOS_PROXIES}`,
+    '-e', `DZ23_PROXY_SOCKET_BIND=${c.proxies}`,
     '-e', `DZ23_RUNTIME_IMAGE_DIGEST=${imagemDoRuntime}`,
     '-e', `DZ23_PROXY_IMAGE_DIGEST=${imagemDoSupervisor}`,
     '-e', 'DZ23_INSTANCE_ID=frigg-local',
     '-e', `DZ23_PROXY_USER=${usuario}`,
     imagemDoSupervisor,
   ]
+}
+
+/**
+ * A etiqueta da imagem, derivada do CONTEÚDO que entra nela.
+ *
+ * Com uma etiqueta fixa (`:local`), uma imagem velha — a que morria por falta
+ * do catálogo de mensagens — seria reaproveitada para sempre, e um conserto no
+ * código nunca chegaria à máquina. Com o conteúdo na etiqueta, código novo é
+ * imagem nova, e a antiga não é tocada.
+ * @param base - a raiz do repositório.
+ * @returns `frigg-preview-supervisor:<12 hex>`.
+ */
+export function etiquetaDaImagem(base) {
+  const hash = createHash('sha256')
+  const incluir = relativo => { hash.update(`${relativo}\0`); hash.update(readFileSync(resolve(base, relativo))); hash.update('\0') }
+  incluir('deploy/preview-supervisor/Dockerfile')
+  incluir('deploy/preview-supervisor/Dockerfile.dockerignore')
+  for (const pasta of ['plugins/preview-supervisor/lib', 'plugins/preview-supervisor/i18n']) {
+    const arquivos = readdirSync(resolve(base, pasta), { recursive: true, withFileTypes: true })
+      .filter(entrada => entrada.isFile())
+      .map(entrada => `${pasta}/${resolve(entrada.parentPath, entrada.name).slice(resolve(base, pasta).length + 1)}`)
+      .sort()
+    for (const arquivo of arquivos) incluir(arquivo)
+  }
+  return `${REPOSITORIO_DA_IMAGEM}:${hash.digest('hex').slice(0, 12)}`
 }
 
 /** Grava um segredo novo, 0600, só se ainda não existe. */
@@ -198,25 +225,33 @@ if (chamadoDiretamente) {
     if (!construtor.ok) throw new Error('A imagem do construtor não está nesta máquina. Rode antes: pnpm builder:install')
     const imagemDoRuntime = construtor.saida
 
-    let supervisor = docker('image', 'inspect', '-f', '{{.Id}}', IMAGEM_DO_SUPERVISOR)
+    const etiqueta = etiquetaDaImagem(raiz)
+    let supervisor = docker('image', 'inspect', '-f', '{{.Id}}', etiqueta)
     if (!supervisor.ok) {
-      const construcao = spawnSync('docker', ['build', '-f', 'deploy/preview-supervisor/Dockerfile', '--build-arg', `DZ23_SUPERVISOR_BASE_IMAGE=${IMAGEM_DO_CONSTRUTOR}`, '-t', IMAGEM_DO_SUPERVISOR, '.'], { cwd: raiz, stdio: 'inherit', env: { ...process.env, DOCKER_BUILDKIT: '1' } })
+      const construcao = spawnSync('docker', ['build', '-f', 'deploy/preview-supervisor/Dockerfile', '--build-arg', `DZ23_SUPERVISOR_BASE_IMAGE=${IMAGEM_DO_CONSTRUTOR}`, '-t', etiqueta, '.'], { cwd: raiz, stdio: 'inherit', env: { ...process.env, DOCKER_BUILDKIT: '1' } })
       if (construcao.status !== 0) throw new Error('A imagem do supervisor não foi construída.')
-      supervisor = docker('image', 'inspect', '-f', '{{.Id}}', IMAGEM_DO_SUPERVISOR)
-      relatorio.imagem = 'CONSTRUIDA'
-    } else relatorio.imagem = 'EXISTENTE'
+      supervisor = docker('image', 'inspect', '-f', '{{.Id}}', etiqueta)
+      relatorio.imagem = `CONSTRUIDA ${etiqueta}`
+    } else relatorio.imagem = `EXISTENTE ${etiqueta}`
     const imagemDoSupervisor = supervisor.saida
 
-    if (!docker('volume', 'inspect', VOLUME_DOS_PROXIES).ok) {
-      const criado = docker('volume', 'create', '--driver', 'local', '-o', 'type=none', '-o', 'o=bind', '-o', `device=${c.proxies}`, VOLUME_DOS_PROXIES)
-      if (!criado.ok) throw new Error(`O volume dos proxies não foi criado: ${criado.erro}`)
-      relatorio.volume = 'CRIADO'
-    } else relatorio.volume = 'EXISTENTE'
-
     const existente = docker('inspect', '-f', '{{.Image}} {{.State.Running}}', CONTEINER)
-    if (existente.ok) {
-      const [imagem, rodando] = existente.saida.split(' ')
-      if (imagem !== imagemDoSupervisor) throw new Error(`Já existe um ${CONTEINER} com OUTRA imagem. Nada foi substituído.`)
+    const atualizar = process.argv.includes('--atualizar')
+    if (existente.ok && existente.saida.split(' ')[0] !== imagemDoSupervisor) {
+      /*
+        O supervisor NÃO guarda estado: ao subir, ele drena o que era dele e
+        recomeça. Trocá-lo por um de código novo é atualização, e não perda —
+        mas continua sendo pedido explicitamente (`--atualizar`), e só este
+        contêiner, pelo nome, é trocado.
+      */
+      if (!atualizar) throw new Error(`Já existe um ${CONTEINER} com OUTRA imagem. Nada foi substituído; para trocá-lo pelo código atual, rode de novo com --atualizar.`)
+      const removido = docker('rm', '-f', CONTEINER)
+      if (!removido.ok) throw new Error(`O ${CONTEINER} antigo não saiu: ${removido.erro}`)
+      relatorio.substituido = 'SIM'
+    }
+    const atual = docker('inspect', '-f', '{{.Image}} {{.State.Running}}', CONTEINER)
+    if (atual.ok) {
+      const [, rodando] = atual.saida.split(' ')
       if (rodando !== 'true' && !docker('start', CONTEINER).ok) throw new Error(`O ${CONTEINER} existe e não iniciou.`)
       relatorio.supervisor = 'EXISTENTE'
     } else {

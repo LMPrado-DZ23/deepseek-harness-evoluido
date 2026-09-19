@@ -8,7 +8,7 @@ const manager = new DockerPreviewSupervisor({
   engine: new DockerEngine({ socketPath: requiredPath('DZ23_DOCKER_SOCKET') }),
   artifactRoot: requiredPath('DZ23_ARTIFACT_ROOT'),
   proxySocketRoot: requiredPath('DZ23_PROXY_SOCKET_ROOT'),
-  proxySocketMount: { type: 'volume', source: requiredName('DZ23_PROXY_SOCKET_VOLUME') },
+  proxySocketMount: proxySocketMountOption(process.env.DZ23_PROXY_SOCKET_BIND),
   runtimeImageDigest: requiredDigest('DZ23_RUNTIME_IMAGE_DIGEST'),
   proxyImageDigest: requiredDigest('DZ23_PROXY_IMAGE_DIGEST'),
   instanceId: requiredName('DZ23_INSTANCE_ID'),
@@ -68,5 +68,23 @@ export function proxyUserOption(value: string | undefined): { readonly proxyUser
   const match = /^(\d{1,10}):(\d{1,10})$/u.exec(value)
   if (match === null || Number(match[1]) === 0 || Number(match[2]) === 0) throw new Error('INVALID_DZ23_PROXY_USER')
   return { proxyUser: value as `${number}:${number}` }
+}
+
+/**
+ * Onde ficam os soquetes dos proxies, do ponto de vista do Docker.
+ *
+ * Na instalação em contêiner é um VOLUME nomeado, e a primeira montagem copia
+ * para ele a pasta da imagem (dona 10001) — é isso que deixa o proxy 10001
+ * escrever ali. Na instalação NATIVA essa cópia é o defeito: medido em
+ * 19/09/2026, a pasta da pessoa virou 10001:10001 na primeira montagem e o
+ * harness perdeu o acesso aos próprios soquetes. Com `DZ23_PROXY_SOCKET_BIND`
+ * (caminho absoluto) a montagem é de PASTA, que o Docker nunca repovoa.
+ * @param bind - o caminho da pasta, ou nada.
+ * @returns a montagem.
+ */
+export function proxySocketMountOption(bind: string | undefined): { readonly type: 'volume' | 'bind'; readonly source: string } {
+  if (bind === undefined || bind === '') return { type: 'volume', source: requiredName('DZ23_PROXY_SOCKET_VOLUME') }
+  if (!bind.startsWith('/') || bind.includes('\0') || bind.includes('\\') || bind.split('/').includes('..')) throw new Error('INVALID_DZ23_PROXY_SOCKET_BIND')
+  return { type: 'bind', source: bind }
 }
 

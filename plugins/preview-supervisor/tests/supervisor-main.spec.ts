@@ -213,3 +213,29 @@ describe('DZ23_PROXY_USER: o proxy como o usuário do harness nativo', () => {
     } finally { delete process.env.DZ23_PROXY_USER }
   })
 })
+
+describe('DZ23_PROXY_SOCKET_BIND: pasta em vez de volume, na instalação nativa', () => {
+  it('sem a variável, continua o volume nomeado', async () => {
+    const { proxySocketMountOption } = await import('../src/supervisor-main.js')
+    expect(proxySocketMountOption(undefined)).toEqual({ type: 'volume', source: 'dz23-preview-proxy-sockets' })
+  })
+
+  it('com a variável, é uma pasta', async () => {
+    const { proxySocketMountOption } = await import('../src/supervisor-main.js')
+    expect(proxySocketMountOption('/dados/p/.frigg/preview/proxies')).toEqual({ type: 'bind', source: '/dados/p/.frigg/preview/proxies' })
+  })
+
+  it.each(['relativo/x', '/a/../b', '/a\\b'])('recusa %s', async valor => {
+    const { proxySocketMountOption } = await import('../src/supervisor-main.js')
+    expect(() => proxySocketMountOption(valor)).toThrow('INVALID_DZ23_PROXY_SOCKET_BIND')
+  })
+
+  it('o valor chega ao supervisor', async () => {
+    process.env.DZ23_PROXY_SOCKET_BIND = '/dados/p/proxies'
+    vi.spyOn(process, 'once').mockImplementation((() => process) as typeof process.once)
+    try {
+      await import('../src/supervisor-main.js')
+      expect(state.managerOptions[0]).toMatchObject({ proxySocketMount: { type: 'bind', source: '/dados/p/proxies' } })
+    } finally { delete process.env.DZ23_PROXY_SOCKET_BIND }
+  })
+})

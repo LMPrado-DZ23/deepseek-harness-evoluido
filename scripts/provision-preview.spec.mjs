@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CONTEINER, VOLUME_DOS_PROXIES, argumentosDoSupervisor, sobreposicaoDaPrevia } from './provision-preview.mjs'
+import { CONTEINER, argumentosDoSupervisor, etiquetaDaImagem, sobreposicaoDaPrevia } from './provision-preview.mjs'
 
 const A = `sha256:${'a'.repeat(64)}`
 const B = `sha256:${'b'.repeat(64)}`
@@ -32,7 +32,10 @@ describe('o contêiner do supervisor', () => {
     expect(par('-e', `DZ23_PROXY_IMAGE_DIGEST=${A}`)).toBe(true)
     expect(par('-e', `DZ23_RUNTIME_IMAGE_DIGEST=${B}`)).toBe(true)
     expect(par('--name', CONTEINER)).toBe(true)
-    expect(par('-v', `${VOLUME_DOS_PROXIES}:/run/dz23-preview-proxies`)).toBe(true)
+    // Pasta, e não volume: o Docker não repovoa pasta com a dona da imagem.
+    expect(par('-v', '/dados/p/.frigg/preview/proxies:/run/dz23-preview-proxies')).toBe(true)
+    expect(par('-e', 'DZ23_PROXY_SOCKET_BIND=/dados/p/.frigg/preview/proxies')).toBe(true)
+    expect(args.some(item => item.startsWith('DZ23_PROXY_SOCKET_VOLUME='))).toBe(false)
   })
 
   it('o token vai por arquivo montado, nunca por variável', () => {
@@ -76,5 +79,13 @@ describe('a sobreposição da prévia', () => {
   it('nenhuma expressão nem variável', () => {
     expect(texto).not.toContain('!!js')
     expect(texto).not.toContain('process.env')
+  })
+})
+
+describe('a etiqueta da imagem vem do conteúdo', () => {
+  it('é estável para o mesmo código e tem o formato certo', () => {
+    const raiz = new URL('..', import.meta.url).pathname
+    expect(etiquetaDaImagem(raiz)).toMatch(/^frigg-preview-supervisor:[a-f0-9]{12}$/u)
+    expect(etiquetaDaImagem(raiz)).toBe(etiquetaDaImagem(raiz))
   })
 })

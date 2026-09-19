@@ -9,5 +9,8 @@ RUN install -d -o 10001 -g 10001 -m 0770 /run/dz23-preview /run/dz23-preview-pro
 USER 10001:10001
 WORKDIR /opt/dz23-preview-supervisor
 COPY --chown=10001:10001 plugins/preview-supervisor/lib ./lib
+# O catálogo de mensagens: `lib/i18n.js` o lê de `../i18n` ao carregar. Sem
+# esta linha a imagem não subia (medido em 19/09/2026, primeira execução real).
+COPY --chown=10001:10001 plugins/preview-supervisor/i18n ./i18n
 ENTRYPOINT []
 CMD ["node", "/opt/dz23-preview-supervisor/lib/supervisor-main.js"]

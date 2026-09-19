@@ -3,3 +3,5 @@
 !plugins/preview-supervisor/
 !plugins/preview-supervisor/lib/
 !plugins/preview-supervisor/lib/**
+!plugins/preview-supervisor/i18n/
+!plugins/preview-supervisor/i18n/**
