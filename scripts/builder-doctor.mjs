@@ -31,7 +31,7 @@
  *
  * Uso: node scripts/builder-doctor.mjs [--self-test]
  */
-import { existsSync, statfsSync } from 'node:fs'
+import { existsSync, readFileSync, statfsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -129,11 +129,17 @@ export function conferenciasDoConstrutor(observado) {
     titulo: 'A imagem do construtor',
     ...(observado.imagemPresente === true
       ? { estado: 'OK', viu: observado.imagemReferencia ?? 'presente nesta máquina' }
-      : {
-        estado: 'FALTA', viu: 'não está nesta máquina',
-        porque: 'É ela que roda o código gerado sem rede, com o sistema de arquivos somente leitura e sem permissão de sistema.',
-        faca: 'Construa-a a partir de `deploy/builder/Dockerfile` — e note que ela ainda não tem um instalador reproduzível (ABRIR-05).',
-      }),
+      : observado.digestFixado !== undefined
+        ? {
+          estado: 'FALTA', viu: 'o digest está fixado, e a imagem não está mais no Docker',
+          porque: 'O arquivo `runtime/builder-image-digest` aponta para uma imagem que este Docker não tem — ela foi removida, ou o arquivo veio de outra máquina.',
+          faca: 'node scripts/setup-templates.mjs --approve-t2 --replace-existing',
+        }
+        : {
+          estado: 'FALTA', viu: 'nunca foi construída aqui',
+          porque: 'É ela que roda o código gerado sem rede, com o sistema de arquivos somente leitura e sem permissão de sistema. Construí-la baixa a imagem base e as dependências FIXADAS — por isso o comando pede a aprovação T2 explícita.',
+          faca: 'node scripts/setup-templates.mjs --approve-t2',
+        }),
     bloqueia: true,
   })
   lista.push({
@@ -298,6 +304,23 @@ export function espacoOndeAsImagensMoram(raizDoDocker, sonda) {
   return {}
 }
 
+/**
+ * O digest que `scripts/setup-templates.mjs` fixou, ou nada.
+ *
+ * Lido do MESMO arquivo que o setup grava e que as provas de isolamento leem —
+ * uma leitura só, e um formato só: `sha256:` seguido de 64 hexadecimais.
+ * Qualquer outra coisa não é digest, e tratá-la como tal mandaria o Docker
+ * procurar lixo.
+ * @param base - a raiz do repositório.
+ * @returns o digest, ou `undefined`.
+ */
+export function lerDigestFixado(base) {
+  try {
+    const texto = readFileSync(resolve(base, 'runtime/builder-image-digest'), 'utf8').trim()
+    return /^sha256:[0-9a-f]{64}$/u.test(texto) ? texto : undefined
+  } catch { return undefined }
+}
+
 /** Os sistemas de arquivos que o provisionamento aceita. */
 export const SISTEMAS_SUPORTADOS = Object.freeze(['ext4', 'xfs'])
 
@@ -309,7 +332,21 @@ export const SISTEMAS_SUPORTADOS = Object.freeze(['ext4', 'xfs'])
  */
 export async function observarConstrutor(base = raiz, sonda = SONDA_DO_CONSTRUTOR) {
   const docker = sonda.docker()
-  const imagem = spawnSync('docker', ['image', 'inspect', 'dz23-studio/builder:local'], { encoding: 'utf8', timeout: 15_000 })
+  /*
+    A IMAGEM É PROCURADA PELO DIGEST FIXADO, e não por tag.
+
+    A primeira versão deste conferidor procurava `dz23-studio/builder:local` —
+    uma tag que eu INVENTEI, enquanto o caminho que já existe
+    (`scripts/setup-templates.mjs`) marca `dz23-studio-builder:local` e grava o
+    ID em `runtime/builder-image-digest`. Duas verdades sobre o nome da mesma
+    imagem, e a minha estava errada. A ADR-020 já dizia qual vale: o runtime só
+    aceita o ID `sha256:` completo, nunca tag mutável — então é por ele que se
+    procura.
+  */
+  const digestFixado = lerDigestFixado(base)
+  const imagem = digestFixado === undefined
+    ? { status: 1 }
+    : spawnSync('docker', ['image', 'inspect', digestFixado], { encoding: 'utf8', timeout: 15_000 })
   const sistema = sonda.sistemaDeArquivos(base)
   const bloqueados = await sonda.rede(ENDERECOS_DO_BUILD)
   return {
@@ -318,8 +355,9 @@ export async function observarConstrutor(base = raiz, sonda = SONDA_DO_CONSTRUTO
     dockerDaemon: docker.cliente ? docker.daemon : false,
     dockerServidor: docker.servidor,
     arquitetura: process.arch,
+    digestFixado,
     imagemPresente: imagem.status === 0,
-    imagemReferencia: imagem.status === 0 ? 'dz23-studio/builder:local' : undefined,
+    imagemReferencia: imagem.status === 0 ? digestFixado : undefined,
     ...espacoOndeAsImagensMoram(docker.raiz, sonda),
     redeAlcancavel: bloqueados.length === 0,
     redeBloqueada: bloqueados,

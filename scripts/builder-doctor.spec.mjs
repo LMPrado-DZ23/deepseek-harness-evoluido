@@ -116,3 +116,37 @@ describe('onde o espaco e medido', () => {
     expect(item?.estado).toBe('NAO_SEI')
   })
 })
+
+describe('a imagem e procurada pelo digest FIXADO', () => {
+  /*
+    A primeira versão procurava uma tag que eu inventei, enquanto o caminho que
+    já existe — `scripts/setup-templates.mjs` — grava o ID em
+    `runtime/builder-image-digest`. A ADR-020 diz qual vale: o runtime só aceita
+    o `sha256:` completo, nunca tag mutável.
+  */
+  it('le o digest do arquivo que o setup grava, e so aceita a forma completa', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { lerDigestFixado } = await import('./builder-doctor.mjs')
+    const base = mkdtempSync(join(tmpdir(), 'digest-'))
+    mkdirSync(join(base, 'runtime'))
+    expect(lerDigestFixado(base)).toBeUndefined()
+    writeFileSync(join(base, 'runtime/builder-image-digest'), `sha256:${'a'.repeat(64)}\n`)
+    expect(lerDigestFixado(base)).toBe(`sha256:${'a'.repeat(64)}`)
+    // Tag não é digest, e tratá-la como tal mandaria o Docker procurar lixo.
+    writeFileSync(join(base, 'runtime/builder-image-digest'), 'dz23-studio-builder:local\n')
+    expect(lerDigestFixado(base)).toBeUndefined()
+  })
+
+  it('nunca construida e fixada-e-sumida sao respostas DIFERENTES', () => {
+    const nunca = conferenciasDoConstrutor({ ...pronto(), imagemPresente: false }).find(item => item.id === 'imagem')
+    const sumida = conferenciasDoConstrutor({ ...pronto(), imagemPresente: false, digestFixado: `sha256:${'b'.repeat(64)}` })
+      .find(item => item.id === 'imagem')
+    expect(nunca?.faca).toBe('node scripts/setup-templates.mjs --approve-t2')
+    // Com o digest fixado, o setup recusa sem `--replace-existing` — mandar o
+    // comando sem ele seria mandar a pessoa bater numa recusa.
+    expect(sumida?.faca).toBe('node scripts/setup-templates.mjs --approve-t2 --replace-existing')
+    expect(nunca?.viu).not.toBe(sumida?.viu)
+  })
+})
