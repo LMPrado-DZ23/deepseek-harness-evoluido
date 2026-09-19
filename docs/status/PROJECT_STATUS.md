@@ -16,7 +16,33 @@
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
 - `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
-- `atualizado_em`: 2026-09-18
+- `atualizado_em`: 2026-09-19
+
+## O QUE ACABOU DE ACONTECER — 19/09/2026 (WSL2 do titular, jornada real)
+
+**Direção nova do titular, com a tela na mão:** "a ideia é ele fazer tudo que o
+Manus faz"; "está limitado de caracteres, não tem opção de anexar arquivo".
+A prioridade passou a ser o AGENTE GERAL, sem abandonar a jornada do aplicativo.
+
+- **Jornada do aplicativo (EB-04):** o `qwen2.5-coder:7b` escreveu um contador
+  CORRETO, que passou na instalação do construtor isolado. O `next build`
+  recusou por falta de `'use client'`, e hoje o FRIGG completa essa linha
+  (ABRIR-08h). Falta rodar de novo até a verificação e ABRIR a prévia.
+- **Prévia pessoal (ABRIR-08g/08i):** borda local + supervisor como a própria
+  pessoa, de pé no WSL2. Abrir o FRIGG em `http://studio.dz23.localhost:8088`
+  (o `pnpm studio` imprime o endereço com o convite).
+- **Agente geral (AGENTE-GERAL-01..03):** a conversa abre na instalação
+  pessoal, nasce no Ollama, tem as ferramentas do preset `standard` do Harness
+  com regra de política para cada uma, pasta de trabalho por espaço com envio
+  de qualquer arquivo e download, e mostra quando o turno falha.
+- **Achados que valem para tudo:** uma entrada de sobreposição SUBSTITUI a
+  configuração inteira do plugin (medido com `--dump-config`); a lista de hosts
+  confiáveis agora vem só da identidade; pedidos que esperam o modelo usam a
+  espera longa (o navegador desiste aos ~300 s).
+
+**Próximo:** medir a conversa com o modelo local no WSL2; mostrar plano, lista
+de tarefas e ferramentas na conversa; tarefas agendadas; conectores MCP como
+ferramentas; rodar a jornada do aplicativo até a prévia aberta.
 
 ## O QUE ACABOU DE ACONTECER — 18/09/2026, fim da tarde
 
