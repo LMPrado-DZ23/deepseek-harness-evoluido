@@ -134,7 +134,7 @@ if (chamadoDiretamente) {
       gerenteVivo: async registro => gerenteVivoPeloPid(pidArquivo, registro),
       iniciarGerente: async registro => {
         const log = openSync(`${diretorioDaInstalacao}/gerente.log`, 'a', 0o600)
-        const filho = spawn(process.execPath, [resolve(raiz, 'plugins/builder-supervisor/lib/start-builder-manager.js'), '--registry', registro], {
+        const filho = spawn(process.execPath, [resolve(raiz, 'plugins/builder-supervisor/lib/start-builder-manager.js'), '--registry', registro, '--roots-base', `${base}/builder`], {
           detached: true, stdio: ['ignore', log, log],
         })
         writeFileSync(pidArquivo, `${String(filho.pid)}\n`, { mode: 0o600 })

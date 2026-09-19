@@ -1,7 +1,8 @@
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { BUILDER_MANAGER_EXIT, BUILDER_MANAGER_TEST_ONLY, BuilderRuntimeManager, createBuilderRuntimeSlotStarter, executeBuilderRuntimeManagerCli, runBuilderRuntimeManager, wrapBuilderSupervisorWithGlobalCapacity, type BuilderManagedRuntime, type BuilderRuntimeManagerDependencies, type BuilderRuntimeManagerRuntime, type BuilderRuntimeSlotStartRuntime } from '../src/manager-main.js'
+import { raizesDoConstrutorEm } from '../src/installer.js'
+import { BUILDER_MANAGER_EXIT, BUILDER_MANAGER_TEST_ONLY, argumentosDoGerente, BuilderRuntimeManager, createBuilderRuntimeSlotStarter, executeBuilderRuntimeManagerCli, runBuilderRuntimeManager, wrapBuilderSupervisorWithGlobalCapacity, type BuilderManagedRuntime, type BuilderRuntimeManagerDependencies, type BuilderRuntimeManagerRuntime, type BuilderRuntimeSlotStartRuntime } from '../src/manager-main.js'
 import { FairGlobalBuilderCapacity } from '../src/manager-capacity.js'
 import type { BuilderRpcMethods, PrepareRequest } from '../src/protocol.js'
 import { MemoryBuilderRuntimeHealthStore } from '../src/manager-health.js'
@@ -1029,6 +1030,24 @@ describe('manager process lifecycle', () => {
     await expect(executeBuilderRuntimeManagerCli(['--registry', 'file:///definitely-missing/runtime-registry.json'])).resolves.toBe(BUILDER_MANAGER_EXIT.usage)
     expect(write).toHaveBeenCalled()
     write.mockRestore()
+  })
+
+  it('--roots-base: as raízes da instalação pessoal, as mesmas do instalador — e nada fora disso', () => {
+    const registro = 'file:/dados/frigg/builder/config/manager/runtime-registry.json'
+    expect(argumentosDoGerente(['--registry', registro])).toEqual({ registryReference: registro })
+    expect(argumentosDoGerente(['--registry', registro, '--roots-base', '/dados/frigg/builder'])).toEqual({
+      registryReference: registro, roots: raizesDoConstrutorEm('/dados/frigg/builder'),
+    })
+    expect(argumentosDoGerente(['--registry', registro, '--roots-base', 'relativo'])).toBeUndefined()
+    expect(argumentosDoGerente(['--registry', registro, '--outra', '/dados'])).toBeUndefined()
+    expect(argumentosDoGerente(['--registry', registro, '--roots-base'])).toBeUndefined()
+  })
+
+  it('a CLI entrega as raízes pedidas ao gerente, e não as de produção', async () => {
+    const registro = 'file:/dados/frigg/builder/config/manager/runtime-registry.json'
+    const run = vi.fn(async () => BUILDER_MANAGER_EXIT.ok)
+    expect(await executeBuilderRuntimeManagerCli(['--registry', registro, '--roots-base', '/dados/frigg/builder'], run)).toBe(BUILDER_MANAGER_EXIT.ok)
+    expect(run).toHaveBeenCalledWith({ registryReference: registro, roots: raizesDoConstrutorEm('/dados/frigg/builder') })
   })
 
   it('retains authority when both initialization cleanup and final shutdown cannot close a runtime', async () => {

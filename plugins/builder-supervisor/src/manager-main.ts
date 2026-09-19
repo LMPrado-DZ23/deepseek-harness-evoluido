@@ -32,10 +32,12 @@ import {
 import {
   loadPinnedBuilderSupervisorConfig,
   PRODUCTION_BUILDER_ROOT_POLICY,
+  validateBuilderSupervisorRootPolicy,
   type BuilderSupervisorResolvedConfig,
   type BuilderSupervisorRootPolicy,
 } from './supervisor-config.js'
 import { listenBuilderUnix } from './unix-server.js'
+import { raizesDoConstrutorEm } from './installer.js'
 import { isTerminalState } from './model.js'
 import { DockerEngine, type DockerEnginePort } from './docker-engine.js'
 import { ensureTemplateStoreVolume } from './template-store-volume.js'
@@ -476,9 +478,39 @@ export async function runBuilderRuntimeManager(options: {
   }
 }
 
-export async function executeBuilderRuntimeManagerCli(argv: readonly string[]): Promise<number> {
-  if (argv.length !== 2 || argv[0] !== '--registry' || typeof argv[1] !== 'string' || !argv[1].startsWith('file:/')) return BUILDER_MANAGER_EXIT.usage
-  return runBuilderRuntimeManager({ registryReference: argv[1] })
+/**
+ * Os argumentos do gerente, ou `undefined` quando eles não servem.
+ *
+ * `--roots-base` existe porque o gerente só sabia as raízes de PRODUÇÃO
+ * (`/etc`, `/var/lib`, `/run`), e o instalador — que prepara uma instalação
+ * pessoal sob a pasta de dados, sem root — o iniciava com o registro gravado
+ * lá: o registro não batia com as raízes de produção e o gerente morria em
+ * `INVALID_RUNTIME_REGISTRY`. Medido em 19/09/2026, na primeira instalação
+ * real. As raízes saem da MESMA função que o instalador usa
+ * (`raizesDoConstrutorEm`), e passam pela mesma validação de sempre.
+ * @param argv - os argumentos.
+ * @returns o registro e, quando pedidas, as raízes.
+ */
+export function argumentosDoGerente(argv: readonly string[]): { readonly registryReference: string; readonly roots?: BuilderSupervisorRootPolicy } | undefined {
+  if ((argv.length !== 2 && argv.length !== 4) || argv[0] !== '--registry' || typeof argv[1] !== 'string' || !argv[1].startsWith('file:/')) return undefined
+  if (argv.length === 2) return { registryReference: argv[1] }
+  if (argv[2] !== '--roots-base' || typeof argv[3] !== 'string') return undefined
+  try {
+    const roots = raizesDoConstrutorEm(argv[3])
+    validateBuilderSupervisorRootPolicy(roots)
+    return { registryReference: argv[1], roots }
+  } catch { return undefined }
+}
+
+export async function executeBuilderRuntimeManagerCli(
+  argv: readonly string[],
+  // Injetável só para o teste conferir que as raízes CHEGAM ao gerente: a
+  // montagem é onde elas se perdiam (ver `argumentosDoGerente`).
+  run: typeof runBuilderRuntimeManager = runBuilderRuntimeManager,
+): Promise<number> {
+  const argumentos = argumentosDoGerente(argv)
+  if (argumentos === undefined) return BUILDER_MANAGER_EXIT.usage
+  return run(argumentos)
 }
 
 export function createBuilderRuntimeSlotStarter(runtime: BuilderRuntimeSlotStartRuntime = DEFAULT_SLOT_START_RUNTIME): BuilderRuntimeManagerDependencies['startSlot'] {
