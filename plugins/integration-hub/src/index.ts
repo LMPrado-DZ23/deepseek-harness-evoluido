@@ -338,8 +338,8 @@ export function hubRepository(
 export async function apply(ctx: Context, config: IntegrationHubConfig = {}): Promise<void> {
   const port = ctx.webServer.port
   const defaultHost = `127.0.0.1:${port}`; const defaultOrigin = `http://localhost:${port}`
-  const allowedHosts = config.allowedHosts ?? [defaultHost, `localhost:${port}`]
-  const allowedOrigins = config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`]
+  // A confiança vem da IDENTIDADE quando este plugin não recebe uma própria.
+  const { allowedHosts, allowedOrigins } = ctx.studioIdentity.service.confiancaPara(port, config)
   const channel = hubChannel(config.channel)
   // Before the domain is served and before anything is provided: a `dev` channel that is not a
   // personal, loopback-only installation stops the Studio here.

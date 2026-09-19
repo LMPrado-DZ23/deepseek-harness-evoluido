@@ -12,5 +12,10 @@
   "enviando": "Enviando…",
   "anexar": "Anexar arquivo",
   "anexarIndisponivel": "Anexar arquivo ainda não existe neste produto.",
-  "rota": "Onde o texto é processado"
+  "rota": "Onde o texto é processado",
+  "anexoCortado": "O arquivo {nome} não coube inteiro: {cortados} caracteres ficaram de fora. Confira o fim do pedido.",
+  "anexoGrande": "O arquivo {nome} é grande demais para entrar no pedido. Anexe um trecho menor.",
+  "anexoFalhou": "Não consegui ler o arquivo {nome}. Só arquivos de texto (txt, md, csv, json…) entram no pedido.",
+  "anexoOk": "O conteúdo de {nome} entrou no pedido. Você pode editá-lo antes de enviar.",
+  "anexoMarca": "Anexo"
 }

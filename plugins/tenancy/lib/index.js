@@ -71,8 +71,7 @@ export async function apply(ctx, config = {}) {
         handler: createTenancyHttpHandler({
             service,
             identity: ctx.studioIdentity.service,
-            allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
-            allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
+            ...ctx.studioIdentity.service.confiancaPara(port, config),
         }),
     }), 'dz23-studio-tenancy.http');
 }

@@ -55,6 +55,7 @@ function context(users: readonly IdentityUser[] = [owner]) {
     storageDomain: { open: vi.fn((_spec: { readonly name: string }) => Promise.resolve(domains[opened++]!)) },
     webServer: { host: '127.0.0.1', port: 4321, register: vi.fn((candidate: WebRoute) => { route = candidate; return vi.fn() }) },
     studioIdentity: { service: {
+      confiancaPara: (port: number, propria: { allowedHosts?: readonly string[]; allowedOrigins?: readonly string[] } = {}) => ({ allowedHosts: propria.allowedHosts ?? [`127.0.0.1:${String(port)}`, `localhost:${String(port)}`], allowedOrigins: propria.allowedOrigins ?? [`http://localhost:${String(port)}`, `http://127.0.0.1:${String(port)}`] }),
       userRecords: vi.fn(() => users),
       setEnrollmentResolver: vi.fn((resolver: typeof enrollmentResolver) => { enrollmentResolver = resolver; return vi.fn() }),
       setUserProvisioner: vi.fn((resolver: typeof provisioner) => { provisioner = resolver; return vi.fn() }),

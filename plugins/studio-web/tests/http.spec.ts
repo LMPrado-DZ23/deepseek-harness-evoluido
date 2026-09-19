@@ -242,7 +242,7 @@ describe('authenticated Studio web surface', () => {
     const effects: string[] = []
     const ctx = {
       webServer: { port: 3210, register: (value: Record<string, unknown>) => { registrations.push(value); return () => undefined } },
-      studioIdentity: { service: {} as StudioIdentityService },
+      studioIdentity: { service: { confiancaPara: (port: number, propria: { allowedHosts?: readonly string[]; allowedOrigins?: readonly string[] } = {}) => ({ allowedHosts: propria.allowedHosts ?? [`127.0.0.1:${String(port)}`, `localhost:${String(port)}`], allowedOrigins: propria.allowedOrigins ?? [`http://localhost:${String(port)}`, `http://127.0.0.1:${String(port)}`] }) } as unknown as StudioIdentityService },
       studioPreview: { frameSource: 'http://*.dz23.localhost:4179' },
       studioTenancy: { service: {} },
       sessionController: {},

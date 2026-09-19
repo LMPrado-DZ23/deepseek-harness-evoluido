@@ -1,6 +1,8 @@
 import { MenuDoCompositor } from '../tarefa/MenuDoCompositor'
 import type { IntegracaoDoMenu } from '../tarefa/menusDoCompositor'
-import { ArrowUp, Cpu } from 'lucide-react'
+import { ArrowUp, Cpu, Paperclip } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ARQUIVO_MAXIMO_BYTES, LIMITE_DO_PEDIDO, TIPOS_DE_ANEXO, anexarAoPedido } from './anexo'
 import { STUDIO_CATEGORIES, type Category } from '../categories'
 import { PendingButton } from '../PendingButton'
 import { creationBlocked, privacyNotice, routeReasonNotice, type PrivacyProfile } from '../presentation'
@@ -67,6 +69,19 @@ export interface HomeScreenProps {
  * que quem esperou 3 segundos sem resposta precisava ouvir.
  */
 export function HomeScreen(props: HomeScreenProps) {
+  const seletor = useRef<HTMLInputElement>(null)
+  const [avisoDoAnexo, setAvisoDoAnexo] = useState<string | null>(null)
+  const anexar = async (arquivo: File): Promise<void> => {
+    const trocar = (texto: string) => texto.replace('{nome}', arquivo.name)
+    if (arquivo.size > ARQUIVO_MAXIMO_BYTES) { setAvisoDoAnexo(trocar(home.anexoGrande)); return }
+    let conteudo: string
+    try { conteudo = await arquivo.text() } catch { setAvisoDoAnexo(trocar(home.anexoFalhou)); return }
+    // Binário disfarçado de texto: o caractere nulo não aparece em texto de verdade.
+    if (conteudo.includes('\u0000')) { setAvisoDoAnexo(trocar(home.anexoFalhou)); return }
+    const juntado = anexarAoPedido(props.brief, arquivo.name, conteudo)
+    props.setBrief(juntado.texto)
+    setAvisoDoAnexo(juntado.cortados > 0 ? trocar(home.anexoCortado).replace('{cortados}', String(juntado.cortados)) : trocar(home.anexoOk))
+  }
   const semTipo = props.categoryBasis === 'none' && props.brief.trim() !== ''
   return <div className="dz-home">
     <h1 className="dz-home-titulo">{home.tituloInicio} <span>{home.tituloAcento}</span></h1>
@@ -75,16 +90,14 @@ export function HomeScreen(props: HomeScreenProps) {
       O COMPOSITOR da referência: uma pílula, com a linha de ações embaixo e o
       envio como botão circular à direita.
 
-      O que ele NÃO tem, e a ausência é deliberada: anexo, microfone e seletor
-      de computador aparecem no vídeo e NÃO existem neste produto. Desenhá-los
-      apagados seria o botão mudo que a decisão proíbe; desenhá-los funcionando
-      seria mentira. O que existe de verdade — onde o texto é processado — está
-      lá, porque é uma informação que muda o que acontece com o que a pessoa
-      escreve.
+      O ANEXO existe desde 19/09/2026 (ver `anexo.ts`): arquivo de texto, que
+      entra no pedido visível e editável. Microfone e seletor de computador
+      continuam fora: desenhá-los apagados seria o botão mudo que a decisão
+      proíbe; desenhá-los funcionando seria mentira.
     */}
     <div className="dz-compositor">
       <label className="sr-only" htmlFor="brief">{home.compositorRotulo}</label>
-      <textarea id="brief" maxLength={1000} value={props.brief} rows={3}
+      <textarea id="brief" maxLength={LIMITE_DO_PEDIDO} value={props.brief} rows={3}
         onChange={event => props.setBrief(event.target.value)} placeholder={home.compositorPlaceholder}
         /*
           ENVIAR pelo teclado, com a MESMA condição do botão — inclusive o
@@ -102,6 +115,10 @@ export function HomeScreen(props: HomeScreenProps) {
           <span>{props.route ?? t.privacy.routeUnavailable}</span>
         </span>
         {/* Os MENUS do compositor (F08/F09), com o que este Studio tem ligado. */}
+        <input ref={seletor} type="file" accept={TIPOS_DE_ANEXO} className="sr-only" tabIndex={-1} aria-hidden="true"
+          onChange={event => { const arquivo = event.target.files?.[0]; event.target.value = ''; if (arquivo !== undefined) void anexar(arquivo) }} />
+        <button type="button" className="dz-menu-botao" aria-label={home.anexar} title={home.anexar}
+          onClick={() => seletor.current?.click()}><Paperclip aria-hidden="true" /></button>
         <MenuDoCompositor qual="habilidades" integracoes={props.integracoes ?? null} />
         <MenuDoCompositor qual="plugins" integracoes={props.integracoes ?? null} />
         <span className="dz-contador" aria-live="polite">{props.brief.length} {t.idea.counter}</span>
@@ -112,6 +129,7 @@ export function HomeScreen(props: HomeScreenProps) {
           ariaLabel={t.idea.continue} icone={<ArrowUp aria-hidden="true" />}
           disabled={!props.ready || creationBlocked(props.privacy, props.localRoute)} action={props.create} />
       </div>
+      {avisoDoAnexo === null ? null : <p className="dz-compositor-aviso" role="status">{avisoDoAnexo}</p>}
     </div>
 
     <div className="dz-atalhos" role="group" aria-label={home.atalhosRotulo}>

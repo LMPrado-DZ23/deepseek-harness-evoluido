@@ -147,6 +147,34 @@ export declare class StudioIdentityService {
      */
     get requestTrustConfigured(): boolean;
     /**
+     * Os hosts e origens confiáveis, como a identidade os declarou.
+     *
+     * UMA verdade para todas as bordas. Cada plugin (apps, hub, espaço, web,
+     * missão) tinha a SUA cópia de "127.0.0.1:porta e localhost:porta" — e a
+     * missão nem deixava configurar. Medido em 19/09/2026: abrir o FRIGG pelo
+     * host da prévia (`studio.dz23.localhost`) passou na identidade e bateu em
+     * "Host não autorizado" em quatro outros lugares. Os plugins agora partem
+     * desta lista quando não recebem uma própria.
+     */
+    get requestTrust(): {
+        readonly allowedHosts: readonly string[];
+        readonly allowedOrigins: readonly string[];
+    } | undefined;
+    /**
+     * A confiança que uma borda de plugin usa: a PRÓPRIA, quando o plugin recebeu
+     * uma; senão a da identidade; senão o loopback desta porta.
+     * @param port - a porta do servidor.
+     * @param propria - a configuração do plugin, quando há.
+     * @returns hosts e origens.
+     */
+    confiancaPara(port: number, propria?: {
+        readonly allowedHosts?: readonly string[] | undefined;
+        readonly allowedOrigins?: readonly string[] | undefined;
+    }): {
+        readonly allowedHosts: readonly string[];
+        readonly allowedOrigins: readonly string[];
+    };
+    /**
      * Recusa requisição de host ou origem que a borda não aceita.
      * @param host - o cabeçalho `Host`.
      * @param origin - o cabeçalho `Origin`, quando houver.

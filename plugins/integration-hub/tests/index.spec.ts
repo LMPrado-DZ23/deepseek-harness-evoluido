@@ -35,7 +35,7 @@ function fakeContext(bindHost = '127.0.0.1') {
     storageDomain: { open: vi.fn(async () => domain) },
     credentials: credentials({}),
     webServer: { port: 3210, host: bindHost, register: vi.fn((spec: { kind: string; path: string }) => { registered.push(spec); return () => undefined }) },
-    studioIdentity: { service: {} }, studioTenancy: { service: {} },
+    studioIdentity: { service: { confiancaPara: (port: number, propria: { allowedHosts?: readonly string[]; allowedOrigins?: readonly string[] } = {}) => ({ allowedHosts: propria.allowedHosts ?? [`127.0.0.1:${String(port)}`, `localhost:${String(port)}`], allowedOrigins: propria.allowedOrigins ?? [`http://localhost:${String(port)}`, `http://127.0.0.1:${String(port)}`] }) } }, studioTenancy: { service: {} },
     studioPromptToApp: { service: { project: vi.fn(), runs: vi.fn(() => []) } },
     provide: provided,
     effect: (factory: () => () => unknown) => { disposers.push(factory()) },

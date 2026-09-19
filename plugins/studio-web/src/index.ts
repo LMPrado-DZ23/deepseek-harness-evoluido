@@ -297,8 +297,7 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
     handler: createStudioWebHandler({
       distDirectory, identity: ctx.studioIdentity.service,
       assistantConversations,
-      allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
-      allowedOrigins: config.allowedOrigins ?? defaultOrigins,
+      ...ctx.studioIdentity.service.confiancaPara(port, config),
       previewFrameSources: config.previewFrameSources ?? [ctx.studioPreview.frameSource],
       // Lidos a cada pedido, nunca capturados na montagem: a ordem entre
       // plugins não é garantida, e um serviço que sobe depois deste precisa

@@ -292,3 +292,9 @@
 .dz-enviar-redondo svg { width: 20px; height: 20px; }
 .dz-enviar-redondo:disabled { opacity: 0.45; cursor: not-allowed; }
 .dz-enviar-redondo[aria-busy="true"] { opacity: 0.7; }
+
+.dz-compositor-aviso {
+  margin: var(--dz-2) 0 0;
+  color: var(--dz-text-secondary);
+  font-size: 0.8125rem;
+}

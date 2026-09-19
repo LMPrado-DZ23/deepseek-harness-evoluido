@@ -137,8 +137,8 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
       service,
       identity: ctx.studioIdentity.service,
       tenancy: ctx.studioTenancy.service,
-      allowedHosts: [defaultHost, `localhost:${String(port)}`],
-      allowedOrigins: [`http://localhost:${String(port)}`, `http://${defaultHost}`],
+      // A missão não tinha configuração nenhuma: a lista era escrita aqui.
+      ...ctx.studioIdentity.service.confiancaPara(port),
       runs: () => ctx.studioAgents.runs(),
     }),
   }), 'dz23-studio-mission.http')

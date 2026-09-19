@@ -589,8 +589,9 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
         async path => readFile(path, 'utf8'),
         listTreeFiles,
       ),
-      allowedHosts: config.allowedHosts ?? [defaultHost, `localhost:${port}`],
-      allowedOrigins: config.allowedOrigins ?? [defaultOrigin, `http://${defaultHost}`],
+      // A confiança vem da IDENTIDADE quando este plugin não recebe uma
+      // própria (ver `confiancaPara`): uma lista só, e não seis cópias.
+      ...ctx.studioIdentity.service.confiancaPara(port, config),
     }),
   }), 'studio-prompt-to-app.http')
 }
