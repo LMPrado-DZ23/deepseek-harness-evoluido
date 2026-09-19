@@ -10,6 +10,16 @@
  */
 export const ESTADOS_DE_TENTAR_DE_NOVO: ReadonlySet<string> = new Set(['INTERRUPTED', 'BUILD_FAILED', 'TESTS_FAILED', 'CANCELLED'])
 
+/**
+ * O resultado de uma criação que PAROU POR FALTA DE ALGO FORA DAQUI (o
+ * construtor não respondeu, por exemplo). Ele não é estado de projeto: uma
+ * tentativa bloqueada devolve o projeto ao estado em que estava, que é sempre
+ * um dos que o servidor aceita recomeçar. Medido em 19/09/2026 no WSL2 do
+ * titular: depois de um bloqueio, a tela não oferecia ação nenhuma — nem
+ * tentar de novo, nem iniciar —, e a única saída era mexer no banco.
+ */
+export const RESULTADO_BLOQUEADO = 'BLOCKED_EXTERNAL'
+
 export function podeTentarDeNovo(estado: string | undefined): boolean {
-  return estado !== undefined && ESTADOS_DE_TENTAR_DE_NOVO.has(estado)
+  return estado !== undefined && (ESTADOS_DE_TENTAR_DE_NOVO.has(estado) || estado === RESULTADO_BLOQUEADO)
 }

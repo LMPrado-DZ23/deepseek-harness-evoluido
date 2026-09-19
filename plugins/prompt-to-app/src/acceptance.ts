@@ -84,7 +84,13 @@ export function acceptanceChecks(spec: AppSpecV1, category: StudioProjectCategor
   })
   spec.entities.forEach((entity, entityIndex) => {
     checks.push({ id: `entity-${entityIndex}`, label: `entity:${entity.name}`, title: t('checks.titleEntity', { name: entity.name }), kind: 'entity', expected: entity.name, status: 'PENDING' })
-    entity.fields.forEach((field, fieldIndex) => checks.push({ id: `entity-${entityIndex}-field-${fieldIndex}`, label: `field:${typeof field === 'string' ? field : field.name}`, title: t('checks.titleField', { name: typeof field === 'string' ? field : field.name }), kind: 'entity', expected: typeof field === 'string' ? field : field.name, status: 'PENDING' }))
+    // O campo de ESTADO do aplicativo (`app-state`) é nome interno — `total_copos`
+    // —, e não texto que a pessoa lê: exigi-lo na tela era exigir que o
+    // aplicativo mostrasse o próprio código. Medido em 19/09/2026: foi o que
+    // sobrou reprovando no contador que já funcionava. Ele continua na lista,
+    // como NÃO CONFERIDO POR MÁQUINA, e a aprovação carrega o aviso.
+    const interno = entity.kind === 'app-state'
+    entity.fields.forEach((field, fieldIndex) => checks.push({ id: `entity-${entityIndex}-field-${fieldIndex}`, label: `field:${typeof field === 'string' ? field : field.name}`, title: t('checks.titleField', { name: typeof field === 'string' ? field : field.name }), kind: 'entity', expected: typeof field === 'string' ? field : field.name, status: interno ? 'NOT_AUTOMATED' : 'PENDING' }))
   })
   spec.acceptance_criteria.forEach((criterion, index) => {
     const literal = extractLiteral(criterion)
@@ -127,7 +133,21 @@ export async function writeAcceptanceArtifacts(runDirectory: string, spec: AppSp
   await writeFile(resolve(runDirectory, 'tests', 'e2e', 'appspec.spec.ts'), generatedPlaywright(checks), 'utf8')
 }
 
-function extractLiteral(criterion: string): string | undefined { const match=/["“]([^"”]{2,})["”]/u.exec(criterion); return match?.[1]?.trim()||undefined }
+/**
+ * O texto entre aspas que o critério EXIGE na tela.
+ *
+ * Um texto apresentado como EXEMPLO ("por exemplo \"Faltam 5 copos\"") não é
+ * exigência: ele descreve um estado que só existe depois de a pessoa usar o
+ * aplicativo, e exigi-lo na tela inicial obrigava o modelo a escrever um valor
+ * falso para passar. Medido em 19/09/2026 no contador de copos.
+ */
+function extractLiteral(criterion: string): string | undefined {
+  const match = /["“]([^"”]{2,})["”]/u.exec(criterion)
+  if (match === null) return undefined
+  const antes = criterion.slice(0, match.index)
+  if (/(por exemplo|exemplo|ex\.|e\.g\.)\s*:?\s*$/iu.test(antes)) return undefined
+  return match[1]?.trim() || undefined
+}
 
 function generatedPlaywright(checks: readonly AcceptanceCheck[]): string {
   const authRequired = checks.some(check => check.kind === 'auth' || check.kind === 'crud' || check.flow?.submit_requires_auth === true || check.flow?.list_requires_auth === true)

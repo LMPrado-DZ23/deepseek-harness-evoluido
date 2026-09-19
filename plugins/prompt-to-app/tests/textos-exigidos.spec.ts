@@ -30,8 +30,18 @@ const SAIDA_REAL = [
 describe('os textos que a verificação procura', () => {
   it('são os nomes de página, seção, entidade e os literais dos critérios, sem repetir', () => {
     expect(textosExigidos(acceptanceChecks(spec))).toEqual([
-      'Contagem de Copos de Água', 'Contador de Copos', 'Meta de 8 Copos', 'total_copos', 'Somar copo',
+      'Contagem de Copos de Água', 'Contador de Copos', 'Meta de 8 Copos', 'Somar copo',
     ])
+  })
+
+  it('campo de ESTADO e texto dado como EXEMPLO não são exigidos na tela, mas continuam na lista como não conferidos', () => {
+    const comExemplo = { ...spec, acceptance_criteria: ['Mostre quanto falta, por exemplo "Faltam 5 copos".', 'Ao chegar a 8, mostre "Meta cumprida!".'] } as unknown as AppSpecV1
+    const checks = acceptanceChecks(comExemplo)
+    expect(checks.find(check => check.id === 'entity-0-field-0')).toMatchObject({ expected: 'total_copos', status: 'NOT_AUTOMATED' })
+    expect(checks.find(check => check.id === 'criterion-0')).toMatchObject({ status: 'NOT_AUTOMATED' })
+    expect(checks.find(check => check.id === 'criterion-1')).toMatchObject({ expected: 'Meta cumprida!', status: 'PENDING' })
+    const banco = { ...spec, entities: [{ name: 'Pedido', kind: 'database', fields: [{ name: 'cliente', type: 'text', required: true }] }] } as unknown as AppSpecV1
+    expect(acceptanceChecks(banco).find(check => check.id === 'entity-0-field-0')).toMatchObject({ status: 'PENDING' })
   })
 
   it('o que faltou é lido da saída real do Playwright, com as cores removidas', () => {
