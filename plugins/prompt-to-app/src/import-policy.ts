@@ -68,7 +68,42 @@ export function assertGeneratedSource(files: readonly GeneratedFile[], perfil: P
       interativo: uma tela declarativa não tem corpo de função para preencher.
     */
     if (perfil === 'interativo') assertSemEsboco(file.path, source)
+    if (perfil === 'interativo') assertClienteDeclarado(file.path, source)
   }
+}
+
+/**
+ * Arquivo com estado ou evento precisa declarar `'use client'`.
+ *
+ * Medido em 19/09/2026 na primeira jornada real que chegou ao construtor: o
+ * qwen2.5-coder:7b escreveu um contador CORRETO — `useState`, `onClick`,
+ * "Faltam N copos", "Meta cumprida!" — e o `next build` recusou porque
+ * `app/page.tsx` (do template, servidor) importava um arquivo com `useState`
+ * sem a diretiva. A tentativa inteira (instalação e montagem, minutos) foi
+ * gasta numa linha que dá para conferir aqui, antes do disco, com a causa
+ * exata. A diretiva não entra sozinha: o texto do modelo não é reescrito.
+ * @param path - o arquivo.
+ * @param source - a árvore.
+ */
+export function assertClienteDeclarado(path: string, source: ts.SourceFile): void {
+  if (temDiretivaCliente(source)) return
+  let motivo: string | undefined
+  const walk = (node: ts.Node): void => {
+    if (motivo !== undefined) return
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && /^use[A-Z]/u.test(node.expression.text)) motivo = node.expression.text
+    else if (ts.isJsxAttribute(node) && /^on[A-Z]/u.test(node.name.getText(source))) motivo = node.name.getText(source)
+    ts.forEachChild(node, walk)
+  }
+  walk(source)
+  if (motivo !== undefined) throw new GeneratedFileRejectedError(t('errors.generatedUseClient', { path, construct: motivo }))
+}
+
+function temDiretivaCliente(source: ts.SourceFile): boolean {
+  for (const statement of source.statements) {
+    if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) return false
+    if (statement.expression.text === 'use client') return true
+  }
+  return false
 }
 
 export const assertGeneratedImports = assertGeneratedSource

@@ -29,6 +29,15 @@ const aqui = dirname(fileURLToPath(import.meta.url))
 const resposta = (nome: string) => readFileSync(join(aqui, 'modelo-real', nome), 'utf8')
 
 const arquivosDe = (nome: string) => generatedOutputSchema.parse(decodeModelJson(resposta(nome))).files
+/*
+  A gravação é mantida como o modelo a devolveu. Em 19/09/2026 a primeira
+  jornada real que chegou ao `next build` mostrou que um arquivo com estado sem
+  `'use client'` não compila (a página do template é de servidor), e a política
+  passou a recusá-lo antes do disco. O jogo v7 NÃO tinha a diretiva: ele nunca
+  teria compilado. `comDiretiva` é a mesma saída com essa uma linha — o que o
+  reparo pediria —, para que os demais casos continuem medindo o resto.
+*/
+const comDiretiva = (arquivos: ReturnType<typeof arquivosDe>) => arquivos.map(arquivo => arquivo.path.endsWith('.tsx') ? { ...arquivo, content: `'use client'\n${arquivo.content}` } : arquivo)
 const codigoDe = (nome: string) => arquivosDe(nome).find(arquivo => arquivo.path.endsWith('.tsx'))?.content ?? ''
 
 describe('a primeira tentativa: jogo completo, recusado por um atributo', () => {
@@ -59,7 +68,8 @@ describe('a rodada de reparo: o mesmo jogo, aceito', () => {
     // Primeira vez nesta missão que um modelo real escreveu um aplicativo que
     // passa em tudo. Antes disto, todo o caminho era provado contra dublê.
     const arquivos = arquivosDe('jogo-v7.json')
-    expect(() => assertGeneratedSource(arquivos, 'interativo')).not.toThrow()
+    expect(() => assertGeneratedSource(arquivos, 'interativo')).toThrow("'use client'")
+    expect(() => assertGeneratedSource(comDiretiva(arquivos), 'interativo')).not.toThrow()
   })
 
   it('o `style` saiu e o `className` entrou', () => {
@@ -83,7 +93,7 @@ describe('a rodada de reparo: o mesmo jogo, aceito', () => {
   })
 
   it('o aplicativo NÃO é um esboço: nenhuma função tem corpo vazio', () => {
-    expect(() => assertGeneratedSource(arquivosDe('jogo-v7.json'), 'interativo')).not.toThrow()
+    expect(() => assertGeneratedSource(comDiretiva(arquivosDe('jogo-v7.json')), 'interativo')).not.toThrow()
   })
 })
 
@@ -102,6 +112,6 @@ describe('o que ficou POR RESOLVER, escrito aqui para não sumir', () => {
     */
     const conteudo = arquivosDe('jogo-v7.json').find(arquivo => arquivo.path === 'content/app.json')?.content ?? ''
     expect(JSON.parse(conteudo)).toEqual({})
-    expect(() => assertGeneratedSource(arquivosDe('jogo-v7.json'), 'interativo')).not.toThrow()
+    expect(() => assertGeneratedSource(comDiretiva(arquivosDe('jogo-v7.json')), 'interativo')).not.toThrow()
   })
 })

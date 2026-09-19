@@ -186,3 +186,30 @@ function validEnvironment(): Readonly<Record<(typeof envKeys)[number], string>> 
     DZ23_SUPERVISOR_SOCKET: '/run/dz23-preview/supervisor.sock',
   }
 }
+
+describe('DZ23_PROXY_USER: o proxy como o usuário do harness nativo', () => {
+  it('sem a variável, a opção não existe e vale o padrão 10001', async () => {
+    const { proxyUserOption } = await import('../src/supervisor-main.js')
+    expect(proxyUserOption(undefined)).toEqual({})
+    expect(proxyUserOption('')).toEqual({})
+  })
+
+  it('aceita uid:gid de usuário comum', async () => {
+    const { proxyUserOption } = await import('../src/supervisor-main.js')
+    expect(proxyUserOption('1000:1000')).toEqual({ proxyUser: '1000:1000' })
+  })
+
+  it.each(['0:0', '0:1000', '1000:0', 'root', '1000', '1000:1000:1', ' 1000:1000'])('recusa %s', async valor => {
+    const { proxyUserOption } = await import('../src/supervisor-main.js')
+    expect(() => proxyUserOption(valor)).toThrow('INVALID_DZ23_PROXY_USER')
+  })
+
+  it('o valor chega ao supervisor', async () => {
+    process.env.DZ23_PROXY_USER = '1000:1000'
+    vi.spyOn(process, 'once').mockImplementation((() => process) as typeof process.once)
+    try {
+      await import('../src/supervisor-main.js')
+      expect(state.managerOptions[0]).toMatchObject({ proxyUser: '1000:1000' })
+    } finally { delete process.env.DZ23_PROXY_USER }
+  })
+})

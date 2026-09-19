@@ -18,7 +18,8 @@ import { studioProjectCategorySchema } from '../src/model.js'
 */
 
 /** Um tabuleiro de verdade: estado, função própria, evento e índice calculado. */
-const JOGO = `import { useState } from 'react'
+const JOGO = `'use client'
+import { useState } from 'react'
 
 export function Tabuleiro() {
   const [casas, setCasas] = useState<string[]>(Array(9).fill(''))

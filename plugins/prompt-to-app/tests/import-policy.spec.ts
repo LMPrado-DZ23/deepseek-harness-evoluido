@@ -580,3 +580,35 @@ describe('importação local: a recusa diz o caminho certo (jornada real de 19/0
     expect(() => assertGeneratedSource([app('left-pad')])).toThrow(/não permitido: left-pad$/u)
   })
 })
+
+describe("perfil interativo: estado e evento exigem 'use client' (jornada real de 19/09)", () => {
+  const contador = (topo: string) => ({ path: 'src/GeneratedApp.tsx', content: `${topo}import { useState } from 'react'\nexport default function App(){const [n,setN]=useState(0);return <main><p>{n}</p><button onClick={()=>{setN(n+1)}}>+1</button></main>}` })
+
+  it('o contador que o modelo real escreveu, sem a diretiva, é recusado com a causa exata', () => {
+    expect(() => assertGeneratedSource([contador('')], 'interativo')).toThrow("Ponha 'use client'; como a PRIMEIRA linha")
+    expect(() => assertGeneratedSource([contador('')], 'interativo')).toThrow('usa useState')
+  })
+
+  it('com a diretiva, passa', () => {
+    expect(() => assertGeneratedSource([contador("'use client'\n")], 'interativo')).not.toThrow()
+    expect(() => assertGeneratedSource([contador('"use client";\n')], 'interativo')).not.toThrow()
+  })
+
+  it('evento sem estado também exige', () => {
+    const so = { path: 'src/GeneratedApp.tsx', content: "export default function App(){const f=()=>{return 1};return <button onClick={f}>ok</button>}" }
+    expect(() => assertGeneratedSource([so], 'interativo')).toThrow('usa onClick')
+  })
+
+  it('a diretiva fora do topo não vale', () => {
+    const tarde = { path: 'src/GeneratedApp.tsx', content: "import { useState } from 'react'\n'use client'\nexport default function App(){const [n]=useState(0);return <p>{n}</p>}" }
+    expect(() => assertGeneratedSource([tarde], 'interativo')).toThrow('usa useState')
+  })
+
+  it('arquivo sem estado nem evento não precisa', () => {
+    expect(() => assertGeneratedSource([{ path: 'src/lib/meta.ts', content: 'export const META = 8' }], 'interativo')).not.toThrow()
+  })
+
+  it('o gerador interativo recebe a regra', () => {
+    expect(generationRules('interativo').join('\n')).toContain("começa com a linha 'use client'")
+  })
+})

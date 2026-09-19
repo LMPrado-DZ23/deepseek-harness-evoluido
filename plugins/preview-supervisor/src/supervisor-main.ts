@@ -12,6 +12,7 @@ const manager = new DockerPreviewSupervisor({
   runtimeImageDigest: requiredDigest('DZ23_RUNTIME_IMAGE_DIGEST'),
   proxyImageDigest: requiredDigest('DZ23_PROXY_IMAGE_DIGEST'),
   instanceId: requiredName('DZ23_INSTANCE_ID'),
+  ...proxyUserOption(process.env.DZ23_PROXY_USER),
 })
 const token = (await readFile(tokenFile, 'utf8')).trim()
 const controller = new AbortController()
@@ -49,3 +50,23 @@ function requiredDigest(name: string): `sha256:${string}` {
   if (value === undefined || !/^sha256:[a-f0-9]{64}$/u.test(value)) throw new Error(`INVALID_${name}`)
   return value as `sha256:${string}`
 }
+
+/**
+ * O dono do soquete do proxy. OPCIONAL: sem ele, `10001:10001`, como na
+ * instalação em contêiner, em que o harness e o proxy são o mesmo usuário.
+ *
+ * Na instalação NATIVA (o FRIGG rodando como a pessoa, no WSL2) o harness é o
+ * usuário dela, e o soquete 0660 de um proxy 10001 fica inalcançável sem criar
+ * grupo no sistema. Este valor põe o proxy como o usuário do harness. Root é
+ * recusado: o proxy fica na rede do aplicativo gerado, e root ali seria a
+ * única coisa que o isolamento não pode aceitar.
+ * @param value - `uid:gid`, ou nada.
+ * @returns a opção do supervisor.
+ */
+export function proxyUserOption(value: string | undefined): { readonly proxyUser?: `${number}:${number}` } {
+  if (value === undefined || value === '') return {}
+  const match = /^(\d{1,10}):(\d{1,10})$/u.exec(value)
+  if (match === null || Number(match[1]) === 0 || Number(match[2]) === 0) throw new Error('INVALID_DZ23_PROXY_USER')
+  return { proxyUser: value as `${number}:${number}` }
+}
+

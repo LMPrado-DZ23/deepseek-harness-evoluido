@@ -35,7 +35,8 @@ export default GeneratedApp;
 `
 
 /** O mesmo jogo, com o corpo escrito. */
-const JOGO_COM_COMPORTAMENTO = `import { useState } from 'react'
+const JOGO_COM_COMPORTAMENTO = `'use client'
+import { useState } from 'react'
 
 export function Tabuleiro() {
   const [casas, setCasas] = useState<string[]>(Array(9).fill(''))
