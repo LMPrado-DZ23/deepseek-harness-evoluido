@@ -2,6 +2,7 @@ import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { describe, expect, it } from 'vitest'
 import type { RouteHealthRecord, RouteSwitchEvent } from '../src/model.ts'
 import {
+  DEFAULT_ROUTE_CIRCUIT,
   ROUTE_FAILURE_MESSAGE,
   ROUTE_PRIVACY_PROFILES,
   StudioRouteHealthService,
@@ -907,6 +908,50 @@ describe('a rota local sem alternativa', () => {
     await h.service.setRouteEnabled(scope, 'ollama', false)
     await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' }))
       .resolves.toMatchObject({ route: undefined, reasonCode: 'LOCAL_BLOCKED' })
+  })
+
+  it('a tentativa tem LIMITE: tres falhas seguidas abrem o circuito e a tempestade para', async () => {
+    /*
+      Dar a chamada de volta a uma rota caída não pode virar tentar sempre.
+      O limite já existe e é o CIRCUITO — `failureThreshold` conta falhas
+      SEGUIDAS, e não taxa de erro. Sem este caso, a meia-abertura do perfil
+      `privado-local` seria uma tentativa por pedido, para sempre: cada pessoa
+      que chegasse pagaria o tempo de espera de um servidor que não responde.
+    */
+    /*
+      O TETO É AFIRMADO AQUI, e não lido da constante.
+
+      A primeira versão deste caso repetia `failureThreshold` vezes e conferia
+      que o circuito abriu — e sobreviveu à sabotagem que subiu o limite para
+      999, porque a expectativa subia junto. Era o mesmo defeito que `IB-11`
+      cobrou na remoção de cookie: medir COERÊNCIA onde é preciso medir
+      COBERTURA. O fato de fora é a promessa do produto: quem está esperando
+      paga o tempo de espera do servidor UMA vez por tentativa, e "alguns
+      punhados" não é promessa nenhuma.
+    */
+    expect(DEFAULT_ROUTE_CIRCUIT.failureThreshold).toBeLessThanOrEqual(5)
+    const TETO_DE_TENTATIVAS = 5
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    for (let tentativa = 0; tentativa < TETO_DE_TENTATIVAS; tentativa += 1) {
+      await collect(h.service.streamWithFallback(scope, { ...options, provider: 'ollama' },
+        () => chunks(error()), () => chunks(), true))
+    }
+    expect(h.service.circuit(scope, 'ollama')).toBe('OPEN')
+    await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' }))
+      .resolves.toMatchObject({ route: undefined, reasonCode: 'LOCAL_BLOCKED' })
+  })
+
+  it('antes do limite, cada tentativa AINDA acontece — a recuperacao e possivel', async () => {
+    // O contrário do caso acima, e ele é o que impede "consertar" a tempestade
+    // fechando a porta: enquanto o circuito não abriu, a rota é tentada.
+    const h = service()
+    await h.service.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    await collect(h.service.streamWithFallback(scope, { ...options, provider: 'ollama' },
+      () => chunks(error()), () => chunks(), true))
+    expect(h.service.circuit(scope, 'ollama')).toBe('CLOSED')
+    await expect(h.service.chooseRoute(scope, 'T0', { privacy: 'local-only' }))
+      .resolves.toMatchObject({ route: 'ollama' })
   })
 
   it('NAO CONFIGURADA nao e rota que caiu, e continua recusada', async () => {

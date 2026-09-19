@@ -900,3 +900,24 @@ describe('a sessao sintetica do modo pessoal', () => {
     expect(service.personalSession()).toBeUndefined()
   })
 })
+
+describe('a porta pessoal fecha quando existe gente', () => {
+  /*
+    A REGRA QUE NÃO PODE INVERTER: ausência de cookie NÃO escolhe modo pessoal.
+
+    O modo pessoal é a instalação recém-baixada, presa ao endereço local, onde
+    NÃO HÁ ninguém registrado — e por isso entrar não existe. No instante em que
+    existe uma pessoa, entrar passa a ser a única porta, e a falta de cookie
+    volta a ser recusa. Sem este caso, a porta que `ABRIR-02` abriu poderia
+    virar, num conserto distraído, "sem cookie? então é pessoal" — que é a
+    forma mais barata de servir o produto inteiro a quem alcançar o endereço.
+  */
+  it('com UMA pessoa registrada, nao ha sessao pessoal nem no endereco local', async () => {
+    const h = makeHarness()
+    h.service.setBindHost('127.0.0.1')
+    expect(h.service.personalSession()).toBeDefined()
+    await login(h)
+    expect(h.service.personalSession()).toBeUndefined()
+    expect(h.service.isPersonalMode('127.0.0.1')).toBe(false)
+  })
+})

@@ -165,18 +165,48 @@ a `BLOCKED_EXTERNAL` no passo `build` em zero milissegundo — antes de chamar o
 modelo. O supervisor de construção não está provisionado nesta instalação
 (`/etc/dz23-studio/builder`, socket próprio, imagem do construtor). É `ABRIR-05`.
 
-**`ABRIR-05` está BLOQUEADA POR DISCO neste ambiente**, e nada foi apagado para
-contornar: provisionar o construtor exige a imagem de `deploy/builder/Dockerfile`
-(base Playwright), e sobram 4,5 GB — o Ollama e o modelo local ocupam 4,1 GB.
+## O AMBIENTE DE CONSTRUÇÃO, MEDIDO NOS DOIS LADOS — 19/09/2026
+
+Eu tinha escrito que a saída para `ABRIR-05` era a máquina do titular, "onde há
+880 GB". **Medi**, e a frase estava certa no número e errada na conclusão.
+
+**No WSL2 do titular** (`DESKTOP-PRADO`, Ubuntu 24.04, kernel WSL2): 12 núcleos,
+31,9 GB de RAM com 28,9 livres, **880 GB livres de verdade**, e Docker **cliente
+e servidor 29.6.1** funcionando, contexto `default`, `overlayfs`, com 13 imagens
+já lá (Coolify, Traefik, Redis, Postgres — a pilha dele, que não se toca).
+
+E **nenhuma saída de rede**: `registry-1.docker.io`, `mcr.microsoft.com` e
+`github.com` devolvem `000`; `docker pull hello-world` morre em
+`dial tcp 54.237.130.1:443: i/o timeout`. O DNS RESOLVE (github.com →
+4.228.31.150) e o gateway responde ao ping — o que falha é o TCP/443 para fora.
+Sem isso não há como puxar a imagem base nem buscar Node e pnpm dentro do build.
+
+Duas coisas a mais, medidas e que também bloqueiam: o checkout de lá é o
+`/mnt/c/Users/zodyp/deepseek-harness-evoluido` — o caminho que o `COMECAR.md`
+manda **não** usar (ele pede clone em `ext4`) —, e o **submódulo não está
+inicializado** (`third_party/deepseek-harness` vazio). O Ollama do Windows
+também não é alcançável de dentro do WSL2.
+
+**Neste contêiner**: rede e Docker funcionam, e o que falta é disco — 4,4 GB
+livres para uma imagem de base Playwright que não cabe. Nada foi apagado:
 `CLAUDE.md` proíbe limpar disco, `node_modules` e worktrees sem a palavra do
-titular, e as três árvores em `/home/claude/gate*` somam 5 GB. **É decisão do
-Prado:** liberar espaço aqui, ou rodar a perna de construção na máquina dele,
-onde há Docker e 880 GB livres no WSL2.
+titular.
+
+**Então o bloqueio não é "falta disco": é que cada ambiente tem metade do que a
+construção precisa.** As saídas, e todas dependem dele: liberar espaço aqui; ou
+destravar a saída 443 do WSL2 (e ali ainda faltam clonar em `ext4`, inicializar
+o submódulo e alcançar um modelo); ou receber a imagem do construtor por um
+caminho autorizado que não exija rede na hora.
+
+**`ABRIR-06` está entregue:** os cinco defeitos de montagem ganharam regressão
+no nível em que moram, e a peça central é `pnpm prove:frigg-boot` — ela SOBE o
+produto pelo caminho real e pergunta a ele. Restaurar cada um dos três defeitos
+que impediam abrir derruba a prova, com assinatura própria. Ela não precisa de
+Docker nem de modelo, e por isso entrou na CI.
 
 **As próximas são, nesta ordem:** `PLAN-01` (perguntas adaptativas — a decisão
-de desenho já está escrita no DAG, para a próxima sessão executar e não
-decidir), `ABRIR-03` e, assim que houver disco ou máquina, `ABRIR-05` e o resto
-da jornada.
+de desenho já está escrita no DAG, para executar e não decidir), `ABRIR-03` e,
+assim que houver ambiente completo, `ABRIR-05` e o resto da jornada.
 
 ## DIRETIVA DO TITULAR — 18/09/2026: REAPROVEITAR ANTES DE REIMPLEMENTAR
 

@@ -43,6 +43,7 @@
     "prove:postgres-soak": "node scripts/prove-postgres-soak.mjs",
     "prove:storage-migration": "node scripts/prove-storage-migration.mjs",
     "prove:runtime": "node scripts/prove-runtime.mjs",
+    "prove:frigg-boot": "node scripts/prove-studio-boot.mjs --self-test && node scripts/prove-studio-boot.mjs",
     "prove:studio-runtime": "node scripts/prove-studio-runtime.mjs",
     "prove:builder-isolation": "tsx scripts/prove-builder-isolation.mjs",
     "prove:container-hardening": "tsx scripts/prove-container-hardening.mjs --self-test",

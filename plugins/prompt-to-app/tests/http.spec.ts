@@ -124,7 +124,7 @@ async function fixture(options: {
   const requestAs = (org: string, path: string, init: RequestInit = {}) => request(path, {
     ...init, headers: { ...(init.headers ?? {}), cookie: `${SESSION_COOKIE}=session:${org}; ${CSRF_COOKIE}=csrf` },
   })
-  return { request, requestAs, service, repository, identity, tenancy, jobs, planner, allowedHosts, host, lastPlanned: () => planned }
+  return { request, requestAs, service, repository, identity, tenancy, jobs, planner, model, allowedHosts, host, lastPlanned: () => planned }
 }
 
 /**
@@ -878,5 +878,71 @@ describe('levar consigo o espaço de trabalho', () => {
     const corpo = await (await f.request('/export')).json() as { org_id: string; exported_by: string }
     expect(corpo.org_id).toBeTruthy()
     expect(corpo.exported_by).toBeTruthy()
+  })
+})
+
+describe('a sintese da especificacao que falha NAO vira beco', () => {
+  /*
+    MEDIDO no produto montado em 18/09/2026, e é o defeito que esta regressão
+    guarda: a síntese roda DEPOIS da última resposta e chama o modelo. Com a
+    falha, o turno já está gravado — as perguntas ficam respondidas, a
+    especificação não existe, e as três saídas recusam: `/plan` diz que a
+    especificação não existe, `/revise` diz que ainda não houve resultado, e
+    responder de novo dizia que as perguntas já foram respondidas.
+
+    Os dois casos abaixo prendem as duas metades: as RESPOSTAS ficam, e a
+    RECUPERAÇÃO funciona sem pedir nenhuma delas de novo.
+  */
+  const perguntas = ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']
+
+  async function ateAUltimaResposta(f: Awaited<ReturnType<typeof fixture>>): Promise<string> {
+    const criada = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    return criada.project.project_id
+  }
+
+  it('a falha preserva as respostas, e a retomada NAO pede nenhuma de novo', async () => {
+    const f = await fixture()
+    const projectId = await ateAUltimaResposta(f)
+    // As duas primeiras respostas não chamam o modelo; a terceira dispara a síntese.
+    for (const answer of perguntas.slice(0, 2)) {
+      expect((await f.request(`/projects/${projectId}/intake/answer`, {
+        method: 'POST', body: JSON.stringify({ answer, recommend: false }),
+      })).status).toBe(200)
+    }
+    const modelo = f.model.complete as unknown as { mockRejectedValueOnce: (erro: Error) => void }
+    modelo.mockRejectedValueOnce(new Error('MODELO_FORA'))
+    const queFalhou = await f.request(`/projects/${projectId}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: perguntas[2], recommend: false }),
+    })
+    expect(queFalhou.status).toBeGreaterThanOrEqual(500)
+
+    // AS RESPOSTAS FICARAM — inclusive a terceira, que já estava gravada quando
+    // a síntese quebrou. Pedi-las de novo seria cobrar da pessoa o erro do modelo.
+    const dona = { userId: 'user-1', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' as const }
+    const turnos = await f.service.intakeTurns(dona, projectId)
+    expect(turnos.map(turno => turno.answer)).toEqual(perguntas)
+
+    // E A RETOMADA FUNCIONA: o mesmo pedido, sem resposta nova, refaz a síntese.
+    const retomada = await f.request(`/projects/${projectId}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: '', recommend: false }),
+    })
+    expect(retomada.status).toBe(201)
+    expect((await retomada.json() as { spec?: unknown }).spec).toBeDefined()
+  })
+
+  it('com a especificacao JA gravada, responder de novo continua sendo recusado', async () => {
+    // A porta de retomada não pode virar porta de refazer: com a especificação
+    // no lugar, a recusa por reenvio é a resposta certa.
+    const f = await fixture()
+    const projectId = await ateAUltimaResposta(f)
+    for (const answer of perguntas) {
+      await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+    }
+    const denovo = await f.request(`/projects/${projectId}/intake/answer`, {
+      method: 'POST', body: JSON.stringify({ answer: '', recommend: false }),
+    })
+    expect(denovo.status).toBe(409)
   })
 })

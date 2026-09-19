@@ -280,6 +280,15 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test
 
+      - name: FRIGG boot proof
+        # Os TRÊS defeitos que impediam o produto de abrir — o `dsh` sem
+        # `--profile`, o serviço inexistente pedido pelo `business` e a
+        # interface exigindo cookie em instalação pessoal — moravam na
+        # MONTAGEM, e nenhum teste unitário podia pegá-los. Esta prova sobe o
+        # produto pelo caminho real e PERGUNTA a ele. Não precisa de Docker nem
+        # de modelo: subir não é construir, e subir não é gerar.
+        run: pnpm prove:frigg-boot
+
       - name: Container hardening proof
         # Nenhuma prova `prove:*` rodava na CI. Esta é a que responde por um
         # fato que nenhum teste unitário alcança: o contêiner do construtor não
