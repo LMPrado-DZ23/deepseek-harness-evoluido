@@ -206,11 +206,21 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
       await this.options.engine.createVolume(resources.volume, { ...labels, 'dz23.resource': 'workspace' }, { type: 'tmpfs', device: 'tmpfs', o: `size=${this.#limits.workspaceBytes},uid=10001,gid=10001,mode=0700` }, signal)
       volumeCreated = true
       anchor = await this.options.engine.createContainer(resources.anchor, containerBody(this.options.imageDigest, ['sleep', 'infinity'], labels, 'anchor', this.#limits, [{ Type: 'volume', Source: resources.volume, Target: '/workspace', ReadOnly: false }]), signal)
+      /*
+        A âncora SOBE antes de receber os arquivos. O volume da área de trabalho
+        é `tmpfs`, e um `tmpfs` só é montado quando algum contêiner que o usa
+        está rodando: copiar para um contêiner apenas CRIADO grava na camada
+        dele, e o `tmpfs` vazio é montado por cima na partida. Medido em
+        19/09/2026 no Docker real, na primeira criação com modelo real: o
+        `install` respondeu "No package.json found in /workspace" — o código
+        gerado estava certo e tinha ido parar debaixo da montagem. O dublê não
+        tem montagem, e por isso a ordem antiga passava em todos os testes.
+      */
+      await this.options.engine.startContainer(anchor, signal)
       if (artifact.archiveHandle !== undefined) {
         if (this.options.engine.putArchiveHandle === undefined) throw new BuilderSupervisorError('RECOVERY_FAILED')
         await this.options.engine.putArchiveHandle(anchor, '/workspace', artifact.archiveHandle, artifact.archiveBytes, signal)
       } else await this.options.engine.putArchive(anchor, '/workspace', artifact.archivePath, artifact.archiveBytes, signal)
-      await this.options.engine.startContainer(anchor, signal)
       this.#buildIds.set(buildRef, buildId)
     } catch (error) {
       const rollbackErrors: unknown[] = []

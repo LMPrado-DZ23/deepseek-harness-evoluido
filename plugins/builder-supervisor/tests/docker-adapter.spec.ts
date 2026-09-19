@@ -34,6 +34,13 @@ describe('server-authoritative Docker builder adapter', () => {
       await expect(create(unsupported).prepare(buildRef, 'unsupported', { ...artifact, archivePath: path, archiveHandle: handle }, new AbortController().signal)).rejects.toThrow('RECOVERY_FAILED')
     } finally { await handle.close(); await rm(root, { recursive: true, force: true }) }
   })
+  it('os arquivos entram com a âncora RODANDO, senão somem debaixo do tmpfs da área de trabalho', async () => {
+    const engine = new FakeEngine()
+    await create(engine).prepare(buildRef, 'run-tmpfs', artifact, new AbortController().signal)
+    expect(engine.archives.filter(row => row.destination === '/workspace')).toHaveLength(1)
+    expect(engine.archivesLostUnderTmpfs).toBe(0)
+  })
+
   it('mounts the validated volume root read-only and installs from its materialized tree', async () => {
     const engine = new FakeEngine()
     const adapter = create(engine)
@@ -513,8 +520,12 @@ class FakeEngine implements DockerEnginePort {
     const body = object(bodyValue); const id = `${String(this.created.length + 1).padStart(12, 'a')}`
     this.created.push({ name, body }); this.containers.push({ Id: id, Labels: labels(body), Names: [`/${name}`], State: 'created' }); return id
   }
-  async putArchive(_container: string, destination: string, _archivePath: string, archiveBytes: number): Promise<void> {
+  /** Arquivos copiados para um contêiner que não estava rodando: num volume `tmpfs`, somem na partida. */
+  archivesLostUnderTmpfs = 0
+  async putArchive(container: string, destination: string, _archivePath: string, archiveBytes: number): Promise<void> {
     if (this.archiveFailure) throw new Error('archive failed')
+    // Como o Docker de verdade: o `tmpfs` só existe montado enquanto o contêiner roda.
+    if (destination === '/workspace' && this.containers.find(value => value.Id === container)?.State !== 'running') this.archivesLostUnderTmpfs += 1
     this.archives.push({ destination, bytes: archiveBytes })
   }
   async putArchiveHandle(_container: string, destination: string, _archiveHandle: FileHandle, archiveBytes: number): Promise<void> {
