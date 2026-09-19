@@ -211,9 +211,16 @@ falta tem nome: **o instalador reproduzível do construtor** (`ABRIR-08`). O
 README do supervisor já dizia que o `provision-cli` "não provisiona volume
 Docker nem torna o serviço ativo" — isso não é bloqueio externo, é trabalho.
 
-**As próximas são, nesta ordem:** `ABRIR-08` (o instalador — engenharia, que dá
-para escrever e testar sem o ambiente completo), `PLAN-01`, `ABRIR-03` e, quando
-houver um ambiente com as duas metades, `ABRIR-05` e o resto da jornada.
+**O conferidor já rodou na máquina do titular** e reproduziu a medição feita à
+mão — com duas correções que a mão não viu: ele media o disco do CLONE (203 GB
+em `/mnt/c`) em vez da raiz do Docker (879 GB em `/var/lib/docker`), e procurava
+a imagem por uma tag que eu inventei, quando o caminho que JÁ EXISTE
+(`scripts/setup-templates.mjs --approve-t2`) grava o digest em
+`runtime/builder-image-digest`. As duas corrigidas, com sabotagem.
+
+**As próximas são, nesta ordem:** `ABRIR-08` (o instalador — o mapa das quatro
+peças que ele orquestra já está no DAG), `PLAN-01`, `ABRIR-03` e, quando houver
+um ambiente com as duas metades, `ABRIR-05` e o resto da jornada.
 
 ## DIRETIVA DO TITULAR — 18/09/2026: REAPROVEITAR ANTES DE REIMPLEMENTAR
 
