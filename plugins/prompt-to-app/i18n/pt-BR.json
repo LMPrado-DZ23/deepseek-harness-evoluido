@@ -51,6 +51,8 @@
     "generatedFileType": "O modelo tentou criar um tipo de arquivo não permitido: {path}",
     "generatedContentPath": "O modelo tentou criar um arquivo de conteúdo fora da lista permitida: {path}",
     "generatedImport": "O arquivo {path} tentou importar um módulo não permitido: {module}",
+    "generatedImportHint": "O arquivo {path} tentou importar um módulo não permitido: {module}. O arquivo {target} existe; de {path}, importe-o exatamente como \"{suggestion}\".",
+    "generatedImportMissing": "O arquivo {path} tentou importar um módulo não permitido: {module}. Nenhum arquivo desta resposta tem esse caminho: inclua o arquivo na resposta e importe-o por caminho relativo (começando com ./), ou escreva o componente dentro de {path}.",
     "generatedSource": "O arquivo {path} tentou usar uma construção não permitida: {construct}",
     "generatedSensitiveLiteral": "A especificação contém um segredo ou dado pessoal real. Use somente nomes de campos e exemplos fictícios.",
     "templateSymlink": "Link simbólico proibido no template: {path}",
@@ -122,7 +124,8 @@
   "values": {
     "confirmed": "confirmado",
     "notConfirmed": "não confirmado",
-    "dynamicImport": "<dinâmico>"
+    "dynamicImport": "<dinâmico>",
+    "componenteProprio": "componente próprio não pode ser tag: escreva o conteúdo dele com elementos HTML aqui mesmo, neste arquivo"
   },
   "checks": {
     "auth": "acesso: sem sessão recebe 401 e login por código funciona",
@@ -182,11 +185,13 @@
     "failureAcrossRuns": "Esta mesma falha já apareceu em {runs} tentativa(s) anterior(es) deste projeto, a última em {when}. Se a abordagem for a mesma de antes, o resultado tende a ser o mesmo.",
     "researchNote": "{claim}\nTrecho da fonte, palavra por palavra: \"{excerpt}\"\nFonte: {url}",
     "planNoNetwork": "O aplicativo gerado NÃO tem acesso à rede: {apis} são recusados antes de o código chegar ao disco. NÃO planeje etapa que dependa de serviço externo, API de terceiro, envio de e-mail, pagamento, mapa, login social ou consulta a endereço por CEP. Se a pessoa pediu algo assim, planeje a parte que funciona sem rede e diga no critério de aceite o que ficou de fora.",
+    "planSemComponenteProprio": "Não planeje componentes visuais em arquivos separados (como src/components/Contador.tsx): um componente próprio usado como tag JSX é recusado na geração. A tela inteira fica em src/GeneratedApp.tsx; um arquivo separado só serve para dados ou funções sem JSX.",
     "planLocalOnly": "Tudo que o aplicativo guarda fica no banco local dele. Pode planejar cadastro, lista, busca, filtro, edição, remoção, relatório e exportação a partir desses dados.",
     "ruleModules": "Importe SOMENTE destes módulos: {modules}. E destes prefixos de caminho: {prefixes}. Qualquer outro import é recusado antes de o código chegar ao disco.",
     "ruleTags": "NÃO use estas tags: {tags}. Elas são recusadas antes de o código chegar ao disco.",
     "ruleAttributes": "NÃO use estes atributos: {attributes}. Eles são recusados antes de o código chegar ao disco.",
     "ruleGlobals": "NÃO use estes nomes globais nem estas APIs: {globals}. Eles são recusados antes de o código chegar ao disco.",
+    "ruleSemComponenteProprio": "NÃO crie componente próprio para usar como tag JSX (como <Contador />), nem no mesmo arquivo nem em outro: só são aceitas como tag as tags HTML e os componentes protegidos das fachadas indicadas. Escreva a tela com elementos HTML diretamente em src/GeneratedApp.tsx.",
     "ruleUrls": "Todo endereço em href, src, action e semelhantes precisa começar com https://, ou ser um caminho interno começando com /.",
     "planOutro": "Este aplicativo não tem formato predefinido: foi a pessoa que descreveu o que ele faz. Não force sobre ele um formato de página institucional, catálogo, cadastro ou painel. Use `app-state` para o que muda enquanto a pessoa usa e não precisa sobreviver ao recarregamento — tabuleiro, placar, rodada, passo atual, seleção. Use `database` só para o que precisa continuar existindo depois de fechar. Os critérios de aceitação são a única descrição do que ele tem de fazer: escreva-os verificáveis, cada um dizendo uma coisa observável na tela.",
     "ruleDeclarativo": "A tela gerada deve usar somente JSX declarativo com elementos HTML e componentes das fachadas protegidas indicadas no plano. Não use chamadas de função, construtores, componentes locais dinâmicos, atributos espalhados, atributos de evento (`onClick` e afins) nem acesso a propriedade por índice calculado.",

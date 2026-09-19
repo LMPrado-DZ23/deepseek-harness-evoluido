@@ -545,3 +545,38 @@ describe('a recusa diz o que USAR no lugar, quando existe um lugar', () => {
     expect(mensagem).not.toMatch(/No lugar de/u)
   })
 })
+
+describe('importação local: a recusa diz o caminho certo (jornada real de 19/09)', () => {
+  const contador = { path: 'src/components/Counter.tsx', content: "export default function Counter(){return <p>0</p>}" }
+  const app = (modulo: string) => ({ path: 'src/GeneratedApp.tsx', content: `import Counter from '${modulo}'\nexport default function App(){return <main><Counter /></main>}` })
+
+  it('o alias que não compila é recusado, e a causa traz o import exato que compila', () => {
+    expect(() => assertGeneratedSource([app('@/components/Counter'), contador])).toThrow('importe-o exatamente como "./components/Counter"')
+  })
+
+  it('o alias que resolve para um arquivo desta resposta passa, como a relativa já passava', () => {
+    const meta = { path: 'src/lib/meta.ts', content: 'export const META = 8' }
+    const usa = (modulo: string) => ({ path: 'src/GeneratedApp.tsx', content: `import { META } from '${modulo}'\nexport default function App(){return <main><p>{META}</p></main>}` })
+    expect(() => assertGeneratedSource([usa('@/src/lib/meta'), meta])).not.toThrow()
+    expect(() => assertGeneratedSource([usa('./lib/meta'), meta])).not.toThrow()
+  })
+
+  it('o componente próprio como tag continua recusado, e a causa diz o que fazer no lugar', () => {
+    expect(() => assertGeneratedSource([app('./components/Counter'), contador])).toThrow('escreva o conteúdo dele com elementos HTML aqui mesmo')
+  })
+
+  it('o plano e a geração DIZEM a regra que a tag aplica', () => {
+    expect(planningRules().join('\n')).toContain('Não planeje componentes visuais em arquivos separados')
+    expect(generationRules().join('\n')).toContain('NÃO crie componente próprio para usar como tag JSX')
+    expect(generationRules('interativo').join('\n')).toContain('NÃO crie componente próprio para usar como tag JSX')
+  })
+
+  it('o arquivo que não veio na resposta: a causa pede o arquivo ou o componente no mesmo arquivo', () => {
+    expect(() => assertGeneratedSource([app('@/components/Counter')])).toThrow('Nenhum arquivo desta resposta tem esse caminho')
+    expect(() => assertGeneratedSource([app('./components/Counter')])).toThrow('Nenhum arquivo desta resposta tem esse caminho')
+  })
+
+  it('pacote de fora continua com a recusa curta, sem sugestão inventada', () => {
+    expect(() => assertGeneratedSource([app('left-pad')])).toThrow(/não permitido: left-pad$/u)
+  })
+})

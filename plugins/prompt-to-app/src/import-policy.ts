@@ -157,7 +157,7 @@ function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, gener
       if (!ts.isIdentifier(node.tagName)) throw recusar(`compound JSX tag ${tag}`)
       if (FORBIDDEN_JSX_TAGS.has(tag)) throw recusar(`<${tag}>`)
       if (tag === tag.toLowerCase() && !SAFE_INTRINSIC_JSX_TAGS.has(tag)) throw recusar(`unknown JSX tag ${tag}`)
-      if (tag !== tag.toLowerCase() && !importedJsxBindings.has(tag)) throw recusar(`dynamic JSX tag ${tag}`)
+      if (tag !== tag.toLowerCase() && !importedJsxBindings.has(tag)) throw recusar(`dynamic JSX tag ${tag} (${t('values.componenteProprio')})`)
     }
     ts.forEachChild(node, walk)
     // Modelo com etiqueta continua proibido nos dois: é uma chamada com
@@ -270,7 +270,39 @@ function assertAllowedModule(fromPath: string, moduleName: string | undefined, g
     const candidates = [target, `${target}/index`]
     if (candidates.some(candidate => generatedPaths.has(candidate))) return
   }
-  throw rejected(fromPath, moduleName)
+  // `@/X` resolve para `./X` no tsconfig do template (`"@/*": ["./*"]`). Quando
+  // o alvo é um arquivo que o próprio modelo escreveu, a importação compila e é
+  // tão confiável quanto a relativa, que já passava.
+  if (aliasTargetsGeneratedFile(moduleName, generatedPaths)) return
+  throw rejectedLocal(fromPath, moduleName, generatedPaths)
+}
+
+/**
+ * A recusa de uma importação LOCAL diz o caminho certo, quando ele existe.
+ *
+ * Medido em 19/09/2026 na jornada real (qwen2.5-coder:7b): o plano previa
+ * `src/components/Counter.tsx`, o modelo importou `@/components/Counter` — que
+ * pelo tsconfig aponta para `./components/Counter`, fora de `src/` — e as DUAS
+ * rodadas de reparo receberam só "módulo não permitido" e repetiram a mesma
+ * linha. Uma causa que não diz o que fazer não é reparável por um modelo
+ * pequeno. A política NÃO afrouxa: o import errado continua recusado, porque
+ * não compilaria; o que muda é a mensagem.
+ * @param fromPath - o arquivo que importa.
+ * @param moduleName - o que ele importou.
+ * @param generatedPaths - os arquivos desta resposta, sem extensão.
+ * @returns a recusa.
+ */
+export function rejectedLocal(fromPath: string, moduleName: string, generatedPaths: ReadonlySet<string>): GeneratedFileRejectedError {
+  const local = moduleName.startsWith('@/') || moduleName.startsWith('.') || moduleName.startsWith('src/') || moduleName.startsWith('components/')
+  if (!local) return rejected(fromPath, moduleName)
+  const resto = normalizePath(moduleName.replace(/^@\//u, '').replace(/^(?:\.\/)+/u, ''))
+  const alvo = [resto, `src/${resto}`, `${resto}/index`, `src/${resto}/index`].find(candidato => generatedPaths.has(candidato))
+  if (alvo !== undefined) {
+    const relativo = posix.relative(posix.dirname(normalizePath(fromPath)), alvo.replace(/\/index$/u, ''))
+    const sugestao = relativo.startsWith('.') ? relativo : `./${relativo}`
+    return new GeneratedFileRejectedError(t('errors.generatedImportHint', { path: fromPath, module: moduleName, target: alvo, suggestion: sugestao }))
+  }
+  return new GeneratedFileRejectedError(t('errors.generatedImportMissing', { path: fromPath, module: moduleName }))
 }
 
 function literalModule(node: ts.Expression): string | undefined {
@@ -394,6 +426,12 @@ export function planningRules(): readonly string[] {
   return [
     prompt('prompts.planNoNetwork', { apis: network.join(', ') }),
     prompt('prompts.planLocalOnly'),
+    // Dita a partir da MESMA regra que recusa a tag (`dynamic JSX tag`). Em
+    // 19/09/2026 o plano de um modelo real previu `Counter.tsx`, `Meta.tsx` e
+    // `ResetButton.tsx`, e a geração — que só aceita como tag os componentes
+    // protegidos do FRIGG — nunca poderia compô-los: o plano aprovado era
+    // impossível de construir, e a pessoa só descobria depois de três tentativas.
+    prompt('prompts.planSemComponenteProprio'),
   ]
 }
 
@@ -409,6 +447,7 @@ export function generationRules(perfil: PerfilDeGeracao = 'declarativo'): readon
     prompt('prompts.ruleAttributes', { attributes: attributes.join(', ') }),
     prompt('prompts.ruleGlobals', { globals: globals.join(', ') }),
     prompt('prompts.ruleUrls'),
+    prompt('prompts.ruleSemComponenteProprio'),
     /*
       A regra do PERFIL sai da mesma fonte que o aplica, como todas as outras
       deste bloco. Dizer "pode usar estado e evento" num perfil declarativo
