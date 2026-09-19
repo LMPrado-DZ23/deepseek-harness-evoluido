@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { link, mkdir, mkdtemp, open, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -48,6 +49,29 @@ linux('Docker Engine Unix transport', () => {
     await expect(new DockerEngine(quebrado.socket, 500).removeContainer('d'.repeat(64), AbortSignal.timeout(1_000))).rejects.toThrow('DOCKER_STATUS_500')
     await fixture.close(); await preso.close(); await quebrado.close()
   })
+
+  it('a espera do 409 mantém o processo vivo quando ela é a ÚNICA coisa pendente', async () => {
+    // Medido no gerente real: com o temporizador solto (`unref`), o Node saía
+    // com "unsettled top-level await" no meio da limpeza. Aqui um processo de
+    // verdade faz só isto e tem de chegar ao fim.
+    let inspecoes = 0
+    const fixture = await daemon(async (request, response) => {
+      if (request.method === 'DELETE') return reply(response, 409, '{}')
+      inspecoes += 1
+      return inspecoes < 4 ? reply(response, 200, JSON.stringify({ Id: 'e'.repeat(64) })) : reply(response, 404, '{}')
+    })
+    const root = await mkdtemp(join(tmpdir(), 'dz23-engine-vivo-')); roots.push(root)
+    const script = join(root, 'vivo.mts')
+    await writeFile(script, `import { DockerEngine } from ${JSON.stringify(join(process.cwd(), 'plugins/builder-supervisor/src/docker-engine.ts'))}\nawait new DockerEngine(${JSON.stringify(fixture.socket)}, 500).removeContainer('${'e'.repeat(64)}', AbortSignal.timeout(5000))\nconsole.log('FIM')\n`)
+    const saida = await new Promise<{ code: number | null; out: string }>((resolveRun) => {
+      const filho = spawn(process.execPath, ['--import', 'tsx', script], { cwd: process.cwd() })
+      let out = ''; filho.stdout.on('data', chunk => { out += String(chunk) }); filho.stderr.on('data', chunk => { out += String(chunk) })
+      filho.on('exit', code => resolveRun({ code, out }))
+    })
+    await fixture.close()
+    expect(saida.out).toContain('FIM')
+    expect(saida.code).toBe(0)
+  }, 30_000)
 
   it('streams archive to a caller-owned descriptor and hashes it under cap/deadline', async () => {
     const payload = Buffer.from('streamed-archive')

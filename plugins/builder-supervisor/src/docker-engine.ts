@@ -170,7 +170,10 @@ export class DockerEngine implements DockerEnginePort {
         signal.throwIfAborted()
         const inspected = await this.#json<unknown>('GET', `/containers/${encodeURIComponent(id)}/json`, undefined, signal, [200, 404])
         if (!isRecord(inspected) || typeof inspected.Id !== 'string') return
-        await new Promise(resolve => { setTimeout(resolve, 100).unref?.() })
+        // O intervalo NÃO é `unref`: quando esta espera é a única coisa viva no
+        // processo (a limpeza do gerente), um temporizador solto deixa o Node
+        // sair no meio com "unsettled top-level await" — medido no gerente real.
+        await new Promise(resolve => { setTimeout(resolve, 100) })
       }
     }
   }
