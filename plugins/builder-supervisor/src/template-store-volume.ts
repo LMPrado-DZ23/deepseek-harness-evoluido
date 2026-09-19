@@ -300,9 +300,22 @@ async function exactVolume(engine: DockerEnginePort, name: string, signal: Abort
   return exact[0] as Record<string, unknown> | undefined
 }
 
-function hasExactIdentity(row: unknown, expected: Readonly<Record<string, string>>): boolean {
+/**
+ * As etiquetas que a IMAGEM traz, e não quem criou o recurso.
+ *
+ * O Docker copia as etiquetas da imagem para todo contêiner criado dela. A
+ * imagem do construtor herda do Ubuntu `org.opencontainers.image.ref.name` e
+ * `org.opencontainers.image.version`, e o `org.` no começo casava com a guarda
+ * de "etiqueta que parece identidade de organização": medido em 19/09/2026 na
+ * primeira instalação real, o gerente recusava o PRÓPRIO contêiner de reserva
+ * com `TEMPLATE_STORE_TARGET_MISMATCH`, e nenhum escopo subia. O espaço de nomes
+ * OCI é padrão e não carrega inquilino nenhum; só ele fica de fora.
+ */
+const ETIQUETA_OCI_DA_IMAGEM = /^org\.opencontainers\.image\.[a-z0-9.-]+$/u
+
+export function hasExactIdentity(row: unknown, expected: Readonly<Record<string, string>>): boolean {
   const labels = record(record(row).Labels)
-  if (Object.keys(labels).some(key => /(?:^|[._-])(?:tenant|org|instance)(?:[._-]|$)/iu.test(key))) return false
+  if (Object.keys(labels).some(key => !ETIQUETA_OCI_DA_IMAGEM.test(key) && /(?:^|[._-])(?:tenant|org|instance)(?:[._-]|$)/iu.test(key))) return false
   return Object.entries(expected).every(([key, value]) => labels[key] === value)
 }
 

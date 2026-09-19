@@ -20,6 +20,7 @@ import {
   templateStoreUstarEntryPath,
   paxRecord,
   paxRecordPath,
+  hasExactIdentity,
   templateStoreVolumeLabels,
   templateStoreVolumeName,
   streamTemplateStoreFile,
@@ -733,6 +734,16 @@ describe('template store Docker volume materialization', () => {
     const real = `v11/files/59/${'f3'.repeat(63)}`
     expect(templateStoreUstarEntryPath(real)).toBe(real)
     expect(() => templateStoreUstarEntryPath('a'.repeat(513))).toThrow('TEMPLATE_STORE_INVALID')
+  })
+
+  it('as etiquetas OCI herdadas da imagem não se passam por identidade — e as de inquilino continuam recusadas', () => {
+    const esperado = { 'dz23.managed': 'builder-template-claim' }
+    // Exatamente o que o contêiner de reserva tinha na primeira instalação real.
+    const herdadas = { 'org.opencontainers.image.ref.name': 'ubuntu', 'org.opencontainers.image.version': '24.04' }
+    expect(hasExactIdentity({ Labels: { ...esperado, ...herdadas } }, esperado)).toBe(true)
+    expect(hasExactIdentity({ Labels: { ...esperado, 'com.acme.org': 'x' } }, esperado)).toBe(false)
+    expect(hasExactIdentity({ Labels: { ...esperado, 'dz23.tenant_id': 'x' } }, esperado)).toBe(false)
+    expect(hasExactIdentity({ Labels: { ...esperado, 'org.opencontainers.tenant': 'x' } }, esperado)).toBe(false)
   })
 
   it('o cabeçalho PAX só pode dizer o CAMINHO, e só da entrada seguinte', async () => {
