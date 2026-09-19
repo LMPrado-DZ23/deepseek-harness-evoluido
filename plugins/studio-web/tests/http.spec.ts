@@ -31,7 +31,11 @@ async function fixture(previewFrameSources: readonly string[] = [], options: {
   }
   const allowedHosts: string[] = []
   const allowedOrigins: string[] = []
-  const assistantSessions = { launch: vi.fn(async () => ({ session_id: 'assistant-1', reused: false, preset: 'dz23-assistant' as const })) }
+  const pastaDeTrabalho = await mkdtemp(join(tmpdir(), 'frigg-pasta-'))
+  const assistantSessions = {
+    launch: vi.fn(async () => ({ session_id: 'assistant-1', reused: false, preset: 'dz23-assistant' as const })),
+    pastaDeTrabalho: vi.fn(async (_sessao: unknown, _permissao: string) => pastaDeTrabalho as string | undefined),
+  }
   const server = createServer(createStudioWebHandler({
     distDirectory: root, identity: identity as unknown as StudioIdentityService, allowedHosts, allowedOrigins,
     previewFrameSources, assistantSessions,
@@ -44,7 +48,7 @@ async function fixture(previewFrameSources: readonly string[] = [], options: {
   const request = (path: string, init: RequestInit = {}) => fetch(`http://${host}/studio${path}`, {
     ...init, headers: { host, cookie: `${SESSION_COOKIE}=token`, ...(init.headers ?? {}) },
   })
-  return { request, identity, allowedHosts, allowedOrigins, assistantSessions, host, root }
+  return { request, identity, allowedHosts, allowedOrigins, assistantSessions, host, root, pastaDeTrabalho }
 }
 
 describe('authenticated Studio web surface', () => {
@@ -261,3 +265,38 @@ describe('authenticated Studio web surface', () => {
 function fakedRoot(): string {
   return resolve(join(tmpdir(), 'dz23-explicit-web-dist'))
 }
+
+describe('os arquivos da pasta de trabalho do agente', () => {
+  it('manda qualquer arquivo, lista e baixa como ANEXO', async () => {
+    const f = await fixture()
+    const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff])
+    const enviado = await f.request('/assistant/files?nome=contrato.pdf', {
+      method: 'POST', body: bytes, headers: { origin: `http://${f.host}`, 'x-dz23-csrf': 'c', 'content-type': 'application/octet-stream' },
+    })
+    expect(enviado.status).toBe(201)
+    expect(await enviado.json()).toEqual({ caminho: 'enviados/contrato.pdf' })
+    expect(f.assistantSessions.pastaDeTrabalho.mock.calls[0]![1]).toBe('project.write')
+    const lista = await (await f.request('/assistant/files')).json() as { arquivos: { caminho: string; bytes: number }[] }
+    expect(lista.arquivos).toEqual([expect.objectContaining({ caminho: 'enviados/contrato.pdf', bytes: 6 })])
+    const baixado = await f.request('/assistant/files/baixar?caminho=enviados%2Fcontrato.pdf')
+    expect(baixado.status).toBe(200)
+    expect(baixado.headers.get('content-type')).toBe('application/octet-stream')
+    expect(baixado.headers.get('content-disposition')).toContain('attachment')
+    expect(baixado.headers.get('content-security-policy')).toContain('sandbox')
+    expect(Buffer.from(await baixado.arrayBuffer())).toEqual(bytes)
+  })
+
+  it('não baixa fora da pasta, e sem pasta responde 404', async () => {
+    const f = await fixture()
+    await writeFile(join(f.root, 'segredo.txt'), 's')
+    expect((await f.request('/assistant/files/baixar?caminho=..%2Fsegredo.txt')).status).toBe(404)
+    f.assistantSessions.pastaDeTrabalho.mockResolvedValueOnce(undefined)
+    expect((await f.request('/assistant/files')).status).toBe(404)
+  })
+
+  it('só lê com GET e só escreve com POST', async () => {
+    const f = await fixture()
+    expect((await f.request('/assistant/files', { method: 'DELETE', headers: { origin: `http://${f.host}` } })).status).toBe(405)
+    expect((await f.request('/assistant/files/baixar?caminho=x', { method: 'POST', headers: { origin: `http://${f.host}` } })).status).toBe(405)
+  })
+})

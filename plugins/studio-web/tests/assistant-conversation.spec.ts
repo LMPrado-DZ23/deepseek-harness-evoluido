@@ -525,3 +525,14 @@ describe('anexos da conversa', () => {
       .rejects.toEqual(expect.objectContaining({ code: 'NOT_FOUND' }))
   })
 })
+
+describe('o turno que termina em ERRO aparece na conversa (19/09/2026)', () => {
+  it('turn/end com erro vira turn.failed, com o código e a primeira linha', () => {
+    const projetado = sanitizeAssistantEvent(event('turn/end', 9, { turn: 1, reason: { kind: 'error', error: { code: 'AUTH', message: 'no credential for provider route deepseek-official\n    at stack' } } }))
+    expect(projetado).toEqual({ type: 'turn.failed', seq: 9, at: expect.any(Number), reason: 'O FRIGG não conseguiu responder (AUTH): no credential for provider route deepseek-official' })
+  })
+
+  it('turn/end sem erro continua sendo só o fim do turno', () => {
+    expect(sanitizeAssistantEvent(event('turn/end', 9, { turn: 1, reason: { kind: 'completed' } }))).toMatchObject({ type: 'turn.state', state: 'idle' })
+  })
+})

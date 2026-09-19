@@ -55,3 +55,29 @@ describe('o preset do agente geral', () => {
     for (const nome of ['read', 'grep', 'glob', 'skill']) expect(nivel(nome), nome).toBe('T0')
   })
 })
+
+describe('o modelo padrão da conversa (19/09/2026: sem chave, a conversa parava em 116 ms sem dizer nada)', () => {
+  const trecho = perfil.slice(perfil.indexOf('- id: agent-default-model'), perfil.indexOf('# The official DeepSeek route'))
+  const expressao = (campo: string) => {
+    const achado = new RegExp(`${campo}: !!js >-\\n((?: {6}.*\\n)+)`, 'u').exec(trecho)
+    return achado![1]!.split('\n').map(linha => linha.trim()).join(' ')
+  }
+  const avaliar = (campo: string, env: Record<string, string>) => new Function('process', `return (${expressao(campo)})`)({ env }) as string
+
+  it('com o Ollama configurado, a conversa nasce nele, com o modelo configurado', () => {
+    const env = { DZ23_OLLAMA_BASE_URL: 'http://x/v1', DZ23_OLLAMA_MODEL: 'qwen2.5-coder:7b' }
+    expect(avaliar('provider', env)).toBe('ollama')
+    expect(avaliar('model', env)).toBe('qwen2.5-coder:7b')
+  })
+
+  it('sem Ollama, continua a rota oficial', () => {
+    expect(avaliar('provider', {})).toBe('deepseek-official')
+    expect(avaliar('model', {})).toBe('deepseek-v4-flash')
+  })
+
+  it('a escolha explícita vence', () => {
+    const env = { DZ23_OLLAMA_BASE_URL: 'http://x/v1', DZ23_AGENT_PROVIDER: 'omniroute', DZ23_AGENT_MODEL: 'auto' }
+    expect(avaliar('provider', env)).toBe('omniroute')
+    expect(avaliar('model', env)).toBe('auto')
+  })
+})

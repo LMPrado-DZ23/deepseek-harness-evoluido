@@ -474,3 +474,11 @@
 */
 :root { color-scheme: dark; color: var(--dz-text); background: var(--dz-canvas); }
 body { background: var(--dz-canvas); color: var(--dz-text); }
+.pasta-de-trabalho{display:flex;flex-direction:column;gap:8px;border:1px solid var(--dz-border,#2a3342);border-radius:12px;padding:12px}
+.pasta-de-trabalho h2{margin:0;font-size:14px;font-weight:700}
+.pasta-acoes{display:flex;gap:8px;flex-wrap:wrap}
+.pasta-acoes button{display:inline-flex;align-items:center;gap:6px}
+.pasta-acoes svg,.pasta-lista svg{width:16px;height:16px}
+.pasta-lista{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:240px;overflow:auto}
+.pasta-lista li{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.pasta-lista a{display:inline-flex;gap:6px;align-items:center;overflow-wrap:anywhere}

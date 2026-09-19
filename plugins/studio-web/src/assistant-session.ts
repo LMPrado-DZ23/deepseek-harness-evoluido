@@ -90,6 +90,25 @@ export class AssistantSessionLauncher {
     return this.launchTenantConversation(identitySession)
   }
 
+  /**
+   * A pasta em que a conversa desta pessoa trabalha: o repositório liberado,
+   * ou a pasta pessoal do espaço. `undefined` quando não há nenhuma.
+   * @param identitySession - a sessão.
+   * @param permissao - a permissão exigida (ler a lista, ou mandar arquivo).
+   * @returns o caminho.
+   */
+  async pastaDeTrabalho(identitySession: SessionRecord, permissao: 'project.read' | 'project.write'): Promise<string | undefined> {
+    const authorization = this.options.tenancy.authorizationFor(identitySession.user_id, identitySession.org_id, identitySession.tenant_id)
+    if (authorization === undefined || !roleAllows(authorization.role, permissao)) {
+      throw new AssistantSessionLaunchError('FORBIDDEN', t('assistant.forbidden'))
+    }
+    const repository = this.repositories.find(candidate => (
+      candidate.orgId === identitySession.org_id && candidate.tenantId === identitySession.tenant_id
+      && candidate.workspaceId === identitySession.tenant_id
+    ))
+    return repository?.repositoryPath ?? this.#pastaPessoal(identitySession)
+  }
+
   launchTenantConversation(identitySession: SessionRecord): Promise<AssistantSessionLaunch> {
     return this.#mutex.run(`assistant-session:${identitySession.session_id}`, () => (
       this.#launchLocked(identitySession)

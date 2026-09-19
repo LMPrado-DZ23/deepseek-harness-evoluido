@@ -15,6 +15,7 @@ import {
   type ConversationEvent,
   type ConversationPort,
 } from './conversationApi'
+import { PastaDeTrabalho } from './PastaDeTrabalho'
 import { PendingApprovals } from './PendingApprovals'
 import { StuckRuns } from './StuckRuns'
 import {
@@ -252,6 +253,9 @@ export function Conversation({ conversationId, port, getCsrf, pollMs = CONVERSAT
         agora; trabalho parado bloqueia arquivos, o que é sério mas não urgente. */}
     <StuckRuns {...(port === undefined ? {} : { port })} />
 
+    {/* O que o agente lê e o que ele produz: a pasta em que ele trabalha. */}
+    <PastaDeTrabalho />
+
     {compaction === null ? null : <CompactionBand view={compaction} />}
 
     <p className="conversation-status" role="status" aria-live="polite">
@@ -451,6 +455,7 @@ export function ConversationItem({ event }: { readonly event: ConversationEvent 
   if (event.type === 'approval.requested') {
     return <><strong>{copy.approvalPending}</strong><p>{event.tool_label}: {event.explanation}</p></>
   }
+  if (event.type === 'turn.failed') return <p className="conversation-failed" role="alert">{event.reason}</p>
   /* c8 ignore next -- turn.state never reaches here: isRenderable filters it. */
   if (event.type !== 'approval.resolved') return null
   const outcome = event.outcome === 'allowed-once' ? copy.approvalAllowed

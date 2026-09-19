@@ -116,5 +116,15 @@
   "attachmentTooManyLocal": "Uma mensagem aceita no máximo 5 anexos. Remova um antes de anexar outro.",
   "messageAttachments": "Enviado junto:",
   "messageAttachmentImage": "imagem",
-  "requestPrepared": "Trouxemos um pedido já escrito de outra tela. Ele vai aparecer no campo quando você abrir a conversa — leia, ajuste se quiser, e envie você mesmo."
+  "requestPrepared": "Trouxemos um pedido já escrito de outra tela. Ele vai aparecer no campo quando você abrir a conversa — leia, ajuste se quiser, e envie você mesmo.",
+  "pastaTitulo": "Pasta de trabalho",
+  "pastaExplica": "O que você manda para cá o FRIGG consegue ler, e o que ele produz aparece aqui para você baixar. Qualquer tipo de arquivo, até 50 MB.",
+  "pastaEnviar": "Enviar arquivo",
+  "pastaEnviando": "Enviando…",
+  "pastaAtualizar": "Atualizar lista",
+  "pastaVazia": "A pasta está vazia.",
+  "pastaEnviado": "Arquivo enviado: {caminho}. Peça ao FRIGG para lê-lo pelo nome.",
+  "pastaFalhou": "Não consegui enviar o arquivo.",
+  "pastaIndisponivel": "A pasta de trabalho não está disponível.",
+  "pastaBaixar": "Baixar {caminho}"
 }

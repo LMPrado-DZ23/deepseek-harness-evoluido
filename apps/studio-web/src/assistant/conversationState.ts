@@ -109,6 +109,8 @@ function latestTurn(events: readonly ConversationEvent[], fallback: 'idle' | 'wo
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!
     if (event.type === 'turn.state') return event.state
+    // Um turno que terminou em erro terminou: a tela volta a aceitar mensagem.
+    if (event.type === 'turn.failed') return 'idle'
   }
   return fallback
 }

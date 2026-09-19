@@ -38,6 +38,8 @@ export type AssistantPublicEvent =
   | { readonly type: 'message.user'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly truncated: boolean; readonly attachments?: readonly PublicAttachment[] }
   | { readonly type: 'message.assistant'; readonly seq: number; readonly at: number; readonly id: string; readonly text: string; readonly interrupted: boolean; readonly truncated: boolean }
   | { readonly type: 'turn.state'; readonly seq: number; readonly at: number; readonly state: 'working' | 'idle' }
+  /** O turno TERMINOU EM ERRO. Antes ele virava só `idle`, e a pessoa ficava sem resposta e sem motivo. */
+  | { readonly type: 'turn.failed'; readonly seq: number; readonly at: number; readonly reason: string }
   | { readonly type: 'tool.state'; readonly seq: number; readonly at: number; readonly call_id: string; readonly label: string; readonly state: 'running' | 'succeeded' | 'failed' }
   | { readonly type: 'approval.requested'; readonly seq: number; readonly at: number; readonly request_id: string; readonly tool_label: string; readonly explanation: string }
   | { readonly type: 'approval.resolved'; readonly seq: number; readonly at: number; readonly request_id: string; readonly outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable' }
@@ -319,7 +321,23 @@ export function sanitizeAssistantEvent(value: unknown): AssistantPublicEvent | u
   if (event === undefined) return undefined
   const { type, seq, time: at, data } = event
   if (type === 'turn/start') return { type: 'turn.state', seq, at, state: 'working' }
-  if (type === 'turn/end') return { type: 'turn.state', seq, at, state: 'idle' }
+  if (type === 'turn/end') {
+    /*
+      Medido em 19/09/2026: sem modelo configurado, o turno passava de
+      "trabalhando" a "parado" em 116 ms, e a conversa não mostrava NADA — nem
+      resposta, nem erro. O motivo estava no `turn/end` (`reason.kind:
+      'error'`) e era descartado aqui. Ele atravessa agora como texto curto:
+      o código do erro e a primeira linha da mensagem, sem pilha.
+    */
+    const reason = objectValue(data.reason)
+    if (reason?.kind === 'error') {
+      const erro = objectValue(reason.error)
+      const codigo = typeof erro?.code === 'string' ? erro.code : 'UNKNOWN'
+      const mensagem = typeof erro?.message === 'string' ? erro.message.split('\n')[0]!.slice(0, 240) : ''
+      return { type: 'turn.failed', seq, at, reason: t('assistant.turnFailed').replace('{code}', codigo).replace('{message}', mensagem) }
+    }
+    return { type: 'turn.state', seq, at, state: 'idle' }
+  }
 
   if (type === 'user/message') {
     const source = objectValue(data.source)

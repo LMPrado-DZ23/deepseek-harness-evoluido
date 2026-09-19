@@ -19,6 +19,7 @@ import {
   type StudioIdentityService,
 } from '@dz23-studio/identity'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createReadStream } from 'node:fs'
 import { lstat, readFile, realpath } from 'node:fs/promises'
 import { extname, relative, resolve, sep } from 'node:path'
 import { t } from './i18n.js'
@@ -29,6 +30,7 @@ import {
   type AssistantRepositoryLaunchConfig,
 } from './assistant-session.js'
 import { AssistantAttachmentStore } from './assistant-attachments.js'
+import { ARQUIVO_MAXIMO_BYTES, ASSISTANT_FILES_DOWNLOAD_PATH, ASSISTANT_FILES_PATH, ArquivoRecusado, arquivoParaBaixar, gravarEnviado, listarArquivos } from './assistant-files.js'
 import { AssistantConversationError, AssistantConversationService } from './assistant-conversation.js'
 import {
   StuckRunsError,
@@ -83,7 +85,7 @@ export function createStudioWebHandler(config: {
   readonly allowedHosts: readonly string[]
   readonly allowedOrigins: readonly string[]
   readonly previewFrameSources?: readonly string[]
-  readonly assistantSessions?: Pick<AssistantSessionLauncher, 'launch'>
+  readonly assistantSessions?: Pick<AssistantSessionLauncher, 'launch'> & Partial<Pick<AssistantSessionLauncher, 'pastaDeTrabalho'>>
   readonly assistantConversations?: AssistantConversationHttpConfig['conversations']
   /**
    * Autoridade de confirmação (M90-A), resolvida A CADA PEDIDO. Capturar o
@@ -177,6 +179,9 @@ export function createStudioWebHandler(config: {
           assertCsrf: () => {},
         })
         return sendJson(response, outcome.status, outcome.body, frameSources)
+      }
+      if (pathname === ASSISTANT_FILES_PATH || pathname === ASSISTANT_FILES_DOWNLOAD_PATH) {
+        return await atenderArquivos(request, response, pathname, config, frameSources)
       }
       if (pathname === ASSISTANT_SESSION_PATH) {
         if (request.method !== 'POST') return send(response, 405, t('http.methodNotAllowed'), frameSources)
@@ -381,6 +386,52 @@ function normalizePreviewFrameSources(values: readonly string[]): readonly strin
     if (hosted !== null && hosted[1]!.includes('.') && !hosted[1]!.includes('..')) return value
     throw new Error(t('config.invalidPreviewFrameSource'))
   }))]
+}
+
+/**
+ * Os arquivos da pasta de trabalho do agente (ver `assistant-files.ts`).
+ * Quem é a pessoa e qual é a pasta saem da SESSÃO; o cliente só escolhe o
+ * nome do arquivo que manda e o caminho relativo que baixa.
+ */
+async function atenderArquivos(
+  request: IncomingMessage, response: ServerResponse, pathname: string,
+  config: { readonly identity: StudioIdentityService; readonly assistantSessions?: Partial<Pick<AssistantSessionLauncher, 'pastaDeTrabalho'>> },
+  frameSources: readonly string[],
+): Promise<void> {
+  const escrever = request.method === 'POST' && pathname === ASSISTANT_FILES_PATH
+  if (!escrever && request.method !== 'GET') return send(response, 405, t('http.methodNotAllowed'), frameSources)
+  const sessao = await authenticatedMutation(request, config.identity, response)
+  const pasta = await config.assistantSessions?.pastaDeTrabalho?.(sessao, escrever ? 'project.write' : 'project.read')
+  if (pasta === undefined) return sendJson(response, 404, { error: t('assistant.filesUnavailable') }, frameSources)
+  const url = new URL(request.url ?? '/', 'http://local')
+  try {
+    if (escrever) {
+      const declarado = Number(singleHeaderValue(request.headers['content-length']) ?? '0')
+      if (declarado > ARQUIVO_MAXIMO_BYTES) return sendJson(response, 413, { error: t('assistant.fileTooLarge') }, frameSources)
+      const caminho = await gravarEnviado(pasta, url.searchParams.get('nome') ?? '', request)
+      return sendJson(response, 201, { caminho }, frameSources)
+    }
+    if (pathname === ASSISTANT_FILES_PATH) return sendJson(response, 200, await listarArquivos(pasta), frameSources)
+    const real = await arquivoParaBaixar(pasta, url.searchParams.get('caminho') ?? '')
+    const nome = real.slice(real.lastIndexOf('/') + 1)
+    response.writeHead(200, {
+      ...securityHeaders('application/octet-stream', frameSources),
+      'content-disposition': `attachment; filename="${nome.replace(/[^\x20-\x7e]|"/gu, '_')}"; filename*=UTF-8''${encodeURIComponent(nome)}`,
+      'content-security-policy': "sandbox; default-src 'none'",
+    })
+    createReadStream(real).pipe(response)
+  } catch (erro) {
+    if (erro instanceof ArquivoRecusado) {
+      const status = erro.code === 'GRANDE' ? 413 : erro.code === 'NOME' ? 400 : 404
+      const chave = erro.code === 'GRANDE' ? 'assistant.fileTooLarge' : erro.code === 'NOME' ? 'assistant.fileNameInvalid' : 'assistant.fileMissing'
+      return sendJson(response, status, { error: t(chave) }, frameSources)
+    }
+    throw erro
+  }
+}
+
+function singleHeaderValue(value: string | readonly string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : undefined
 }
 
 function send(response: ServerResponse, status: number, message: string, frameSources: readonly string[] = []): void {

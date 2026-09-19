@@ -39,6 +39,24 @@
         ? [{ path: process.env.DZ23_COORDINATOR_PRESET_ROOT, trust: 'system' }]
         : []
 
+# O MODELO PADRÃO de toda conversa nova do agente.
+#
+# O Harness nasce apontando para a rota oficial da DeepSeek, que exige chave.
+# Medido em 19/09/2026 na instalação do titular (sem chave, com Ollama): a
+# conversa do FRIGG passava de "trabalhando" a "parada" em 116 ms, sem uma
+# palavra — o pedido nunca chegou a modelo nenhum. Com o Ollama configurado
+# (`DZ23_OLLAMA_BASE_URL`), o padrão é ele; `DZ23_AGENT_PROVIDER` e
+# `DZ23_AGENT_MODEL` escolhem outro, e a escolha salva na página de modelos do
+# Harness continua valendo por cima de tudo.
+- id: agent-default-model
+  config:
+    provider: !!js >-
+      process.env.DZ23_AGENT_PROVIDER
+        ?? (process.env.DZ23_OLLAMA_BASE_URL === undefined ? 'deepseek-official' : 'ollama')
+    model: !!js >-
+      process.env.DZ23_AGENT_MODEL
+        ?? (process.env.DZ23_OLLAMA_BASE_URL === undefined ? 'deepseek-v4-flash' : (process.env.DZ23_OLLAMA_MODEL ?? 'qwen3-coder'))
+
 # The official DeepSeek route is already supplied by dsh-base under its
 # physical id `deepseek-official`. These two declared OpenAI-compatible routes
 # add no second gateway and resolve every credential by reference.
