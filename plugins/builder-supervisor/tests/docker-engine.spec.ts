@@ -30,6 +30,25 @@ linux('Docker Engine Unix transport', () => {
     await fixture.close()
   })
 
+  it('remover um contêiner com AutoRemove já em remoção (409) espera o Docker terminar, e não é falha', async () => {
+    let inspecoes = 0
+    const fixture = await daemon(async (request, response) => {
+      if (request.method === 'DELETE') return reply(response, 409, JSON.stringify({ message: 'removal of container is already in progress' }))
+      if (request.url?.endsWith('/json')) { inspecoes += 1; return inspecoes < 3 ? reply(response, 200, JSON.stringify({ Id: 'b'.repeat(64) })) : reply(response, 404, JSON.stringify({ message: 'No such container' })) }
+      return reply(response, 500, '')
+    })
+    const engine = new DockerEngine(fixture.socket, 500)
+    await expect(engine.removeContainer('b'.repeat(64), AbortSignal.timeout(5_000))).resolves.toBeUndefined()
+    expect(inspecoes).toBe(3)
+    // E a espera tem prazo: se o Docker nunca termina, o sinal encerra.
+    const preso = await daemon(async (request, response) => request.method === 'DELETE' ? reply(response, 409, '{}') : reply(response, 200, JSON.stringify({ Id: 'c'.repeat(64) })))
+    await expect(new DockerEngine(preso.socket, 500).removeContainer('c'.repeat(64), AbortSignal.timeout(400))).rejects.toThrow()
+    // Outro erro continua sendo erro.
+    const quebrado = await daemon(async (_request, response) => reply(response, 500, '{}'))
+    await expect(new DockerEngine(quebrado.socket, 500).removeContainer('d'.repeat(64), AbortSignal.timeout(1_000))).rejects.toThrow('DOCKER_STATUS_500')
+    await fixture.close(); await preso.close(); await quebrado.close()
+  })
+
   it('streams archive to a caller-owned descriptor and hashes it under cap/deadline', async () => {
     const payload = Buffer.from('streamed-archive')
     const fixture = await daemon(async (request, response) => {

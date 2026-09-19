@@ -154,7 +154,26 @@ export class DockerEngine implements DockerEnginePort {
     return result
   }
   async stopContainer(id: string, signal: AbortSignal): Promise<void> { await this.#request('POST', `/containers/${encodeURIComponent(id)}/stop?t=3`, undefined, signal, [204, 304, 404]) }
-  async removeContainer(id: string, signal: AbortSignal): Promise<void> { await this.#request('DELETE', `/containers/${encodeURIComponent(id)}?force=1&v=0`, undefined, signal, [204, 404]) }
+  async removeContainer(id: string, signal: AbortSignal): Promise<void> {
+    try { await this.#request('DELETE', `/containers/${encodeURIComponent(id)}?force=1&v=0`, undefined, signal, [204, 404]) }
+    catch (error) {
+      /*
+        409 com `force=1` é "a remoção já está em andamento": o contêiner tinha
+        `AutoRemove`, e parar já disparou a remoção do próprio Docker. Medido em
+        19/09/2026 no Docker 29 real, com o transportador do store — o dublê
+        removia na hora e nunca devolvia 409, e o gerente tratava a limpeza
+        como INCOMPLETA e não subia escopo nenhum. O certo é esperar o Docker
+        terminar, dentro do mesmo prazo, e confirmar que o contêiner sumiu.
+      */
+      if (!(error instanceof Error) || error.message !== 'DOCKER_STATUS_409') throw error
+      for (;;) {
+        signal.throwIfAborted()
+        const inspected = await this.#json<unknown>('GET', `/containers/${encodeURIComponent(id)}/json`, undefined, signal, [200, 404])
+        if (!isRecord(inspected) || typeof inspected.Id !== 'string') return
+        await new Promise(resolve => { setTimeout(resolve, 100).unref?.() })
+      }
+    }
+  }
   async listContainers(filters: Readonly<Record<string, readonly string[]>>, signal: AbortSignal): Promise<readonly Record<string, unknown>[]> {
     const result = await this.#json<unknown>('GET', `/containers/json?all=1&filters=${encodeURIComponent(JSON.stringify(filters))}`, undefined, signal, [200])
     return Array.isArray(result) ? result.filter(isRecord) : []
