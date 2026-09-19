@@ -62,3 +62,51 @@ Apagar o arquivo `C:\Users\zodyp\.wslconfig` (ele não existia) e rodar
 `setup-templates` (baixar a base e as dependências fixadas), a instalação do
 construtor, alcançar o Ollama, e a jornada inteira no WSL2. Todo o resto
 continua andando sem isto.
+
+## Atualização (19/09, mais tarde) — o pedido foi RETIRADO, e nada no sistema mudou
+
+O titular respondeu "faça o que for preciso". Antes de aplicar, duas coisas
+apareceram que o pedido não dizia:
+
+1. **O Docker Desktop também para** com `wsl --shutdown`. Ele sustenta `buzz-prod`,
+   `odoo`, `evolution-api`, `omniroute` (este sem política de reinício) e outros.
+2. **Havia outro trabalho em andamento**: contêineres temporários de CI de outra
+   sessão (`beautiful_bose`, depois `focused_kilby`, `quizzical_driscoll`) nascendo
+   a cada poucos minutos. Reiniciar o WSL mataria esses trabalhos no meio.
+
+E uma medição mudou a solução: **o motor do Docker Desktop tem saída** (um
+contêiner dele fez `fetch('https://registry.npmjs.org/')` → `200`), e **o WSL
+alcança uma porta publicada pelo Docker Desktop em `172.23.240.1`** (o IP do
+Windows no adaptador do WSL). Daí a saída usada, sem tocar em `.wslconfig`,
+firewall, rota, DNS, daemon ou reinício:
+
+| peça | o que é | limites |
+| --- | --- | --- |
+| `frigg-egress` | contêiner `node:22.23.1-bookworm-slim` no Docker Desktop, `--read-only`, `--cap-drop ALL`, `no-new-privileges`, 128 MB, `--restart no`, script em `C:\Users\zodyp\frigg-egress\egress.mjs` | publicado **só** em `172.23.240.1:3128` e `:11434` — pelo IP da LAN do Windows não responde (medido: `LAN:000`) |
+| túnel `:3128` | só `CONNECT`, só porta 443, só a lista (`registry.npmjs.org`, `nodejs.org`, `mcr.microsoft.com`, `*.data.mcr.microsoft.com`, `registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com`) | TLS de ponta a ponta: não vê, não altera, não instala CA. `example.com` → `403` (medido) |
+| repasse `:11434` | TCP até o Ollama do Windows (`host.docker.internal`) | o Ollama continua ouvindo só em `127.0.0.1`; o WSL o alcança por `172.23.240.1:11434` (medido: lista `qwen2.5-coder:7b`) |
+
+O proxy vale só nos processos do FRIGG que o recebem por variável, e no
+`docker build` por um `DOCKER_CONFIG` próprio (`~/.frigg-docker-config`) com um
+construtor buildx próprio (`frigg`, conteiner `buildx_buildkit_frigg0`). O
+`~/.docker` do titular e o daemon não mudam.
+
+**Rollback:** `docker rm -f frigg-egress` no Windows; `docker buildx rm frigg`
+com `DOCKER_CONFIG=~/.frigg-docker-config` no WSL.
+
+## Um defeito do Docker nativo do WSL, encontrado e reparado
+
+Com o WSL parando e subindo nas medições, o `dockerd` nativo passou a não
+subir: `networks have same bridge name` (`docker0`). Causa lida no banco de
+redes (`/var/lib/docker/network/files/local-kv.db`): o registro da ponte
+padrão `4a81…` tinha sumido e sobraram **duas chaves órfãs** do driver dela. É
+plausível que o desligamento repetido do WSL durante as medições tenha deixado
+o banco assim. Com o `dockerd` parado, a pilha Coolify estava FORA do ar.
+
+Reparo cirúrgico, com a ferramenta `bbolt` numa cópia: apagadas **só** as duas
+chaves órfãs; a rede `coolify` ficou intacta. Original salvo em
+`/root/frigg-reparo-docker/local-kv.db.original-20260918-234333`
+(sha256 `ee846ae6…`). Resultado: `dockerd` 29.6.1 ativo, e `coolify`,
+`coolify-db`, `coolify-redis`, `coolify-realtime` e `coolify-proxy` de volta,
+todos `healthy`. **Rollback:** parar o docker, copiar o original de volta,
+subir o docker.
