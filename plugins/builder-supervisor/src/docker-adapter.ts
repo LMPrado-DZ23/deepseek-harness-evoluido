@@ -31,7 +31,28 @@ export interface DockerBuilderAdapterOptions {
   readonly cleanupExportResources?: typeof cleanupManagedExportResources
   /** @internal Deterministic descriptor-close fault seam. */
   readonly closeArchive?: (handle: FileHandle) => Promise<void>
+  /** @internal O relógio da reconferência do store (ver `STORE_REVERIFY_MS`). */
+  readonly now?: () => number
 }
+
+/**
+ * De quanto em quanto tempo o `preflight` refaz a conferência COMPLETA do store.
+ *
+ * A conferência completa baixa o volume inteiro e confere cada arquivo por
+ * hash. Com o dublê de teste (um arquivo) ela era instantânea; com o store REAL
+ * (23.346 entradas, 560 MB) ela leva minutos — medido em 19/09/2026. E o
+ * `preflight` é o que a tela de saúde pergunta a cada consulta: a resposta
+ * nunca chegava a tempo, e a tela dizia "ambiente isolado indisponível" com o
+ * construtor de pé.
+ *
+ * Entre uma conferência completa e a próxima, o que se confere é o MESMO
+ * volume: mesmo nome e mesma data de criação. Um volume trocado (apagado e
+ * recriado) tem outra data e força a conferência completa na hora. O que fica
+ * de fora nessa janela é alteração do conteúdo sem recriar o volume — o que
+ * exige root no daemon, e contra quem tem root no daemon nenhuma conferência
+ * daqui protege. Os builds montam o volume SÓ LEITURA.
+ */
+export const STORE_REVERIFY_MS = 15 * 60_000
 export interface PreparedArtifact {
   readonly archivePath: string
   readonly archiveHandle?: FileHandle
@@ -102,6 +123,8 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
   readonly #exports = new Semaphore(1)
   readonly #templateStoreVolume: string
   readonly #policySha256: string
+  #storeVerified: { readonly createdAt: string; readonly at: number } | undefined
+  #storeVerification: Promise<boolean> | undefined
   constructor(private readonly options: DockerBuilderAdapterOptions) {
     if (!/^sha256:[a-f0-9]{64}$/u.test(options.imageDigest)) throw new Error('INVALID_BUILDER_IMAGE')
     if (!isInstallationId(options.installationId) || !isBuilderRuntimeScopeId(options.scopeId)) throw new Error('INVALID_RUNTIME_SCOPE')
@@ -123,10 +146,31 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
     let state: 'OK' | 'BLOCKED_EXTERNAL' = 'BLOCKED_EXTERNAL'; let imageId = this.options.imageDigest
     try {
       await this.options.engine.ping(signal); imageId = (await this.options.engine.inspectImage(this.options.imageDigest, signal)).Id as `sha256:${string}`
-      const storeContentValid = await verifyTemplateStoreVolume({ engine: this.options.engine, imageDigest: this.options.imageDigest, installationId: this.options.installationId, scopeId: this.options.scopeId, version: this.options.templateStoreVersion, treeSha256: this.options.templateStoreSha256, volumeName: this.#templateStoreVolume }, signal)
+      const storeContentValid = await this.#storeIsValid(signal)
       state = imageId === this.options.imageDigest && storeContentValid ? 'OK' : 'BLOCKED_EXTERNAL'
     } catch { state = 'BLOCKED_EXTERNAL' }
     return { state, protocol_version: 1, scope_id: this.options.scopeId, image_id: /^sha256:[a-f0-9]{64}$/u.test(imageId) ? imageId : this.options.imageDigest, policy_sha256: this.#policySha256 }
+  }
+
+  /**
+   * O store está íntegro? Conferência completa na primeira vez, quando o volume
+   * mudou ou quando a última passou de `STORE_REVERIFY_MS`; e uma conferência
+   * completa por vez — duas consultas simultâneas esperam a mesma.
+   */
+  async #storeIsValid(signal: AbortSignal): Promise<boolean> {
+    const now = this.options.now ?? Date.now
+    const rows = await this.options.engine.listVolumes({ name: [this.#templateStoreVolume] }, signal)
+    const exact = rows.filter(row => record(row).Name === this.#templateStoreVolume)
+    const createdAt = exact.length === 1 && typeof record(exact[0]).CreatedAt === 'string' ? String(record(exact[0]).CreatedAt) : undefined
+    // Sem a data de criação não há como saber se é o MESMO volume: não se
+    // guarda nada, e a conferência completa roda toda vez.
+    const cached = this.#storeVerified
+    if (createdAt !== undefined && cached !== undefined && cached.createdAt === createdAt && now() - cached.at < STORE_REVERIFY_MS) return true
+    this.#storeVerification ??= verifyTemplateStoreVolume({ engine: this.options.engine, imageDigest: this.options.imageDigest, installationId: this.options.installationId, scopeId: this.options.scopeId, version: this.options.templateStoreVersion, treeSha256: this.options.templateStoreSha256, volumeName: this.#templateStoreVolume }, signal)
+      .finally(() => { this.#storeVerification = undefined })
+    const valid = await this.#storeVerification
+    this.#storeVerified = valid && createdAt !== undefined ? { createdAt, at: now() } : undefined
+    return valid
   }
 
   async reconcile(expected: readonly RecoveredBuild[], signal: AbortSignal): Promise<readonly RecoveredBuild[]> {

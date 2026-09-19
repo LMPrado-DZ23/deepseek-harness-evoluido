@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_BUILDER_LIMITS, DockerBuilderAdapter, builderPolicySha256 } from '../src/docker-adapter.js'
+import { DEFAULT_BUILDER_LIMITS, DockerBuilderAdapter, STORE_REVERIFY_MS, builderPolicySha256 } from '../src/docker-adapter.js'
 import type { DockerEnginePort } from '../src/docker-engine.js'
 import { openManagedExportArchive } from '../src/export-artifact.js'
 import { deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
@@ -101,6 +101,34 @@ describe('server-authoritative Docker builder adapter', () => {
     await adapter.execute(buildRef, stepName, signal)
     expect(engine.created.at(-1)?.body).toMatchObject({ Cmd: command })
     expect(host(engine.created.at(-1)?.body).Mounts).toEqual([{ Type: 'volume', Source: expect.any(String), Target: '/workspace', ReadOnly: false }])
+  })
+
+  it('o preflight NÃO baixa o store inteiro a cada consulta: reconfere por tempo, por volume trocado, e uma vez só em paralelo', async () => {
+    const engine = new FakeEngine()
+    ;(engine.volumes[0] as Record<string, unknown>).CreatedAt = '2026-09-19T05:00:00Z'
+    const downloads = vi.spyOn(engine, 'downloadArchive')
+    let agora = 1_000_000
+    const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: join(tmpdir(), 'dz23-builder-exports'), templateStoreVersion: templateVersion, templateStoreSha256, now: () => agora })
+    const signal = new AbortController().signal
+    const paralelas = await Promise.all([adapter.preflight(signal), adapter.preflight(signal)])
+    expect(paralelas.map(r => r.state)).toEqual(['OK', 'OK'])
+    const primeira = downloads.mock.calls.length
+    expect(primeira).toBeGreaterThan(0)
+    await expect(adapter.preflight(signal)).resolves.toMatchObject({ state: 'OK' })
+    expect(downloads.mock.calls.length).toBe(primeira)
+    // Passou a janela: conferência completa de novo.
+    agora += STORE_REVERIFY_MS
+    await adapter.preflight(signal)
+    expect(downloads.mock.calls.length).toBe(primeira * 2)
+    // Volume recriado (outra data): conferência na hora, mesmo dentro da janela.
+    ;(engine.volumes[0] as Record<string, unknown>).CreatedAt = '2026-09-19T06:00:00Z'
+    await adapter.preflight(signal)
+    expect(downloads.mock.calls.length).toBe(primeira * 3)
+    // Adulterado e recriado: recusa, e a recusa NÃO fica guardada como aprovação.
+    engine.templateDigest = 'e'.repeat(64); ;(engine.volumes[0] as Record<string, unknown>).CreatedAt = '2026-09-19T07:00:00Z'
+    await expect(adapter.preflight(signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
+    await expect(adapter.preflight(signal)).resolves.toMatchObject({ state: 'BLOCKED_EXTERNAL' })
+    expect(downloads.mock.calls.length).toBe(primeira * 5)
   })
 
   it('returns BLOCKED_EXTERNAL for missing/mismatched images without accepting another image', async () => {
