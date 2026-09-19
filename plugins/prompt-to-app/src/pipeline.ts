@@ -28,6 +28,7 @@ import {
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
 import { generateFormLayer, writeFormLayer } from './form-generator.js'
 import { generateSchedulingLayer, writeSchedulingLayer } from './scheduling-generator.js'
+import { assertConteudoDoApp, completarTituloDoConteudo } from './conteudo-do-app.js'
 import { assertGeneratedSource, completarDiretivaCliente, generationRules } from './import-policy.js'
 import { recoveryNoteFor, type ObservedRun } from './learning.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
@@ -131,7 +132,9 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
     // A diretiva de cliente é completada AQUI, na saída do modelo (ver
     // `completarDiretivaCliente`): a varredura, o reparo e o disco veem o mesmo
     // arquivo, e a linha acrescentada diz que foi o FRIGG.
-    return { files: [...completarDiretivaCliente(output.files, this.perfil)], route: result.route, model: result.model, ...(result.usage === undefined ? {} : { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens }) }
+    // O `title` do conteúdo segue a mesma regra (ver `completarTituloDoConteudo`).
+    const arquivos = completarTituloDoConteudo(completarDiretivaCliente(output.files, this.perfil), spec.pages[0]?.name ?? t('values.tituloPadrao'))
+    return { files: [...arquivos], route: result.route, model: result.model, ...(result.usage === undefined ? {} : { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens }) }
   }
 }
 
@@ -456,6 +459,7 @@ export class PromptToAppPipeline {
           não tem por onde pedir um mais permissivo: esta linha só lê o projeto.
         */
         assertGeneratedSource(generated.files, perfilDeGeracao)
+        assertConteudoDoApp(generated.files)
         await writeGeneratedFiles(runDirectory, generated.files, {
           plannedPaths: plan.slices.flatMap(slice => slice.planned_files),
           protectedTemplatePaths,

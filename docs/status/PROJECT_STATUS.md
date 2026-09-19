@@ -27,7 +27,11 @@ A prioridade passou a ser o AGENTE GERAL, sem abandonar a jornada do aplicativo.
 - **Jornada do aplicativo (EB-04):** o `qwen2.5-coder:7b` escreveu um contador
   CORRETO, que passou na instalação do construtor isolado. O `next build`
   recusou por falta de `'use client'`, e hoje o FRIGG completa essa linha
-  (ABRIR-08h). Falta rodar de novo até a verificação e ABRIR a prévia.
+  (ABRIR-08h). A tarefa seguinte do contador compilou e parou duas vezes na
+  checagem de tipos: o layout do template lê `appContent.title` e o modelo
+  escreveu `{"meta_copos": 8}`. O FRIGG agora completa o `title` e recusa
+  conteúdo que não é objeto (ABRIR-08k). Falta rodar de novo ('Tentar de
+  novo') até a verificação e ABRIR a prévia.
 - **Prévia pessoal (ABRIR-08g/08i):** borda local + supervisor como a própria
   pessoa, de pé no WSL2. Abrir o FRIGG em `http://studio.dz23.localhost:8088`
   (o `pnpm studio` imprime o endereço com o convite).

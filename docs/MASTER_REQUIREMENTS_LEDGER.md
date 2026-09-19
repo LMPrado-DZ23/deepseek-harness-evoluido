@@ -443,6 +443,7 @@ declarada.
 | AGENTE-GERAL-04 | A conversa mostra o que o agente faz: rotulo com detalhe por ferramenta, a lista de tarefas e o plano; e o agente tem modelo proprio | Pedido do titular em 19/09 ('Manus') e teste real (o qwen2.5-coder escreveu a chamada como texto) | v1.0 | BETA | plugins/studio-web/src/assistant-tool-labels.ts (novo), src/assistant-conversation.ts (todo.state, plan.proposed, rotulos), i18n (tools.*), apps/studio-web/src/assistant (Conversation.tsx, conversationApi.ts, styles.css, i18n), dsh-home/profiles/studio/cordis.patch.yml (modelos do Ollama: o das criacoes e o do agente), plugins/studio-web/tests/assistant-tool-labels.spec.ts (novo), apps/studio-web/src/assistant/listaEPlano.spec.tsx (novo), plugins/policy/tests/regras-do-agente-geral.spec.ts | Antes toda ferramenta do agente geral aparecia como 'Executar uma acao do FRIGG'. Agora: 'Pesquisando na internet: ...', 'Lendo a pagina: host', 'Escrevendo o arquivo: nome', o comando por descricao; todo_write vira lista marcada e exit_plan_mode vira o plano em markdown. Com a escolha do titular ('os dois'), o qwen3:8b foi baixado no Ollama dele e o alias frigg-qwen3 (janela de 16k, sem mudar configuracao global) e o modelo do agente; o qwen2.5-coder continua nas criacoes. Portoes 32/32; raiz 4.487; studio-web 1.042; e2e 162; PostgreSQL 65. Sabotagens: 3, todas pegas | execucao: desfazer o modelo = ollama rm frigg-qwen3; a chave da DeepSeek, se o titular quiser, entra pela pagina de modelos do Harness | NAO medido ainda com o frigg-qwen3 | medir a conversa |
 | AGENTE-GERAL-05 | Lembretes agendados pelo agente (overlay oficial do Harness) e a tela 'Agendado' dizendo o que existe | Pedido do titular em 19/09 ('Manus') | v1.0 | BETA | dsh-home/profiles/studio/cordis.patch.yml (time-context, schedule; regras schedule_create/list/delete), apps/studio-web/src/i18n/destinos.pt-BR.json, plugins/policy/tests/regras-do-agente-geral.spec.ts | O agente agenda uma vez, numa hora certa ou a cada N minutos (minimo 5), e o lembrete chega como mensagem na mesma conversa, sobrevivendo a reinicio. A tela Agendado deixou de dizer 'nao foi construido' e passou a ensinar como pedir; o que falta (tarefa que comeca numa conversa NOVA e aparece listada) esta escrito nela. Portoes 32/32; raiz 4.488; studio-web 1.042; e2e 162; PostgreSQL 65. Sabotagens: 1, pega | execucao: e o overlay documentado do Harness, sem codigo novo | Medido no PC do titular: frigg-qwen3 com 16k roda a 0,66 token/s (70% CPU) — o agente local e lento demais para uso real nessa maquina | chave da DeepSeek, ou modelo menor/contexto menor |
 | ABRIR-08j | 'Tentar de novo' depois de uma criacao que nao passou, com o mesmo plano | Jornada real de 19/09 (BUILD_FAILED sem botao) | v1.0 | BETA | apps/studio-web/src/tentarDeNovo.ts (novo), App.tsx, plugins/prompt-to-app/src/state.ts (GENERATION_START_STATES exportado), apps/studio-web/src/tentarDeNovo.spec.ts, plugins/prompt-to-app/tests/tentar-de-novo.spec.ts | O servidor aceitava recomecar a criacao em BUILD_FAILED, TESTS_FAILED e CANCELLED, e a tela so oferecia o botao depois de interrupcao: a saida era escrever um pedido de alteracao e montar plano novo, minutos de modelo por nada. A lista da tela agora e casada com a do servidor por teste. Portoes 32/32; raiz 4.489; studio-web 1.051; e2e 162; PostgreSQL 65. Sabotagens: 1 sobrevivente DECLARADA (a fiacao na montagem; o e2e nao produz falha de montagem) | execucao: nenhuma rota nova | - | refazer a jornada do contador |
+| ABRIR-08k | O content/app.json que o modelo escreve sempre tem o title que o template le; o que nao e objeto JSON volta ao modelo com a forma esperada | Jornada real de 19/09 (contador de copos: tentativas 2 e 3 compilaram e pararam em TS2339 no layout) | v1.0 | BETA | plugins/prompt-to-app/src/conteudo-do-app.ts (novo), src/pipeline.ts (gerador e varredura), i18n/pt-BR.json (generatePaths, generatedContentShape, tituloPadrao), plugins/prompt-to-app/tests/conteudo-do-app.spec.ts (novo), tests/pipeline.spec.ts | Medido no WSL2 do titular com qwen2.5-coder:7b: a diretiva completada funcionou e o next build passou da compilacao, parando duas vezes em `Property 'title' does not exist on type '{ meta_copos: number; }'` — o layout do template le appContent.title e o modelo nao sabia. Agora o prompt pede o campo, o FRIGG completa o title com o nome da primeira pagina da especificacao quando falta (as outras chaves ficam) e um conteudo que nao e objeto e recusado antes do disco com a causa exata. Portoes 32/32; raiz 4.497; studio-web 1.047 mais os 4 de api.spec reconferidos sozinhos (o processo de teste morreu duas vezes na rodada paralela, sem falha de teste); e2e 162; PostgreSQL 65. Sabotagens: 6, todas pegas | execucao: o title so e posto quando falta ou nao e texto; nunca troca um title do modelo | JSON nao tem comentario: quem le so o app.json nao sabe que o title veio do FRIGG | refazer a jornada do contador |
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -451,16 +452,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 219 |
+| `BETA` | 220 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 329.**
+**Total de requisitos rastreados: 330.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 293 |
+| v1.0 | 294 |
 | v1.x | 33 |
 | v2 | 3 |

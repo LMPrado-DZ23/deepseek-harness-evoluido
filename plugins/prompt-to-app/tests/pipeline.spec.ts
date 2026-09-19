@@ -823,6 +823,15 @@ describe('Prompt-to-App pipeline', () => {
     expect(chamadas[1]?.[3]).toEqual(recusado)
   })
 
+  it('um content/app.json que não é objeto volta ao modelo com a forma esperada, antes de ir ao disco', async () => {
+    const f = await fixture()
+    const lista = [{ path: 'content/app.json', content: '[1,2]' }, cleanGeneration.files[1]]
+    const generate: CodeGeneratorPort['generate'] = vi.fn(async () => ({ files: lista, route: 'ollama', model: 'm' }))
+    await f.pipeline.run(actor, 'project', { generate })
+    expect(vi.mocked(generate).mock.calls[1]?.[2]).toMatch(/content\/app\.json precisa ser um objeto entre chaves/u)
+    expect(f.execute).not.toHaveBeenCalled()
+  })
+
   it('retries rejected model output with the prior diagnostic and closes as build failed', async () => {
     const f = await fixture()
     const generator: CodeGeneratorPort = { generate: vi.fn(async (_spec, _plan, diagnostic) => { throw new Error(diagnostic === undefined ? 'JSON inválido' : diagnostic) }) }
