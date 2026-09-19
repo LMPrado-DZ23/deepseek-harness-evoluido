@@ -7,6 +7,7 @@ import type { DockerEnginePort } from './docker-engine.js'
 import { isBuilderRuntimeScopeId, isInstallationId, type BuilderRuntimeScopeId } from './runtime-scope.js'
 import {
   TEMPLATE_ENTRY_MAX_BYTES,
+  TEMPLATE_STORE_MAX_BYTES,
   assertSafeStoreStat,
   assertUnchangedStoreStat,
   checkedTemplateStoreByteTotal,
@@ -21,7 +22,19 @@ import {
 } from './store-security.js'
 
 const BLOCK = 512
-const ARCHIVE_LIMIT = 640 * 1024 * 1024
+/*
+  O arquivo baixado carrega o store inteiro mais os cabeçalhos: 512 bytes por
+  entrada, mais um cabeçalho PAX e o registro dele para cada caminho longo, e o
+  enchimento de cada arquivo até o bloco. 256 MiB por cima do teto do store
+  cobrem as 60.000 entradas com folga.
+*/
+const ARCHIVE_LIMIT = TEMPLATE_STORE_MAX_BYTES + 256 * 1024 * 1024
+/** O maior caminho aceito dentro do arquivo, com o `tree/` na frente. */
+const MAX_TAR_PATH_BYTES = 1024
+/** O maior registro PAX aceito: um caminho e, no máximo, os tempos. */
+const PAX_LIMIT = 8 * 1024
+/** As chaves PAX que o Docker pode escrever e que não mudam o conteúdo. */
+const PAX_TEMPO = new Set(['mtime', 'atime', 'ctime'])
 const CLEANUP_TIMEOUT_MS = 10_000
 const MATERIALIZATION_TIMEOUT_MS = 10 * 60_000
 export const TEMPLATE_STORE_VERIFICATION_TIMEOUT_MS = 8 * 60_000
@@ -241,10 +254,20 @@ export function templateStoreVolumeLabels(inputValue: TemplateStoreVolumeIdentit
 }
 
 export function templateStoreUstarEntryPath(value: unknown): string {
+  /*
+    O nome é histórico: o arquivo nasceu só com USTAR, que guarda no máximo 100
+    bytes de nome (mais 155 de prefixo, cortados numa barra). O store REAL do
+    pnpm nomeia cada arquivo pelo hash — 126 caracteres num só segmento —, e
+    nenhum deles cabe. Medido em 19/09/2026 no primeiro store real: TODOS os
+    arquivos do store eram recusados aqui. O caminho longo agora vai num
+    cabeçalho PAX (`path=`), que é o que o próprio Docker escreve ao exportar o
+    volume.
+  */
   try {
-    const path = templateEntryPath(value)
-    splitTarPath(`tree/${path}`)
-    return path
+    // `templateEntryPath` já limita o caminho a 512 bytes, e `tree/` mais 512
+    // cabe em `MAX_TAR_PATH_BYTES`: todo caminho válido é representável. A
+    // função fica como o ponto único onde "cabe no arquivo" é decidido.
+    return templateEntryPath(value)
   } catch { return invalid() }
 }
 
@@ -553,6 +576,7 @@ async function parseDownloadedArchive(handle: Pick<FileHandle, 'read'>, size: nu
   if (!Number.isSafeInteger(size) || size < BLOCK * 2 || size > ARCHIVE_LIMIT || size % BLOCK !== 0) invalid()
   let offset = 0; let terminated = false; let marker: Buffer | undefined; let total = 0; let count = 0
   const entries: TemplateManifestEntry[] = []; const seen = new Set<string>(); let prefix: '' | 'template-store/' | undefined; let rootSeen = false; let treeSeen = false
+  let paxPath: string | undefined
   while (offset + BLOCK <= size) {
     assertNotAborted(signal); const header = await readExact(handle, offset, BLOCK); offset += BLOCK
     if (header.every(byte => byte === 0)) {
@@ -564,7 +588,18 @@ async function parseDownloadedArchive(handle: Pick<FileHandle, 'read'>, size: nu
     verifyChecksum(header)
     if (!header.subarray(257, 263).equals(Buffer.from([0x75, 0x73, 0x74, 0x61, 0x72, 0x00])) || !header.subarray(263, 265).equals(Buffer.from('00', 'ascii'))) invalid()
     if (cstring(header.subarray(157, 257)) !== '') invalid()
-    const rawPrefix = cstring(header.subarray(345, 500)); const rawName = `${rawPrefix}${rawPrefix === '' ? '' : '/'}${cstring(header.subarray(0, 100))}`
+    if (header[156] === 0x78) {
+      // Cabeçalho PAX: vale SÓ para a entrada seguinte, e só pode dizer o caminho.
+      const paxSize = parseOctal(header.subarray(124, 136))
+      if (paxPath !== undefined || paxSize < 1 || paxSize > PAX_LIMIT) invalid()
+      paxPath = paxRecordPath(await readExact(handle, offset, paxSize))
+      offset += paxSize + (BLOCK - paxSize % BLOCK) % BLOCK
+      if (offset > size) invalid()
+      continue
+    }
+    const rawPrefix = cstring(header.subarray(345, 500))
+    const rawName = paxPath ?? `${rawPrefix}${rawPrefix === '' ? '' : '/'}${cstring(header.subarray(0, 100))}`
+    paxPath = undefined
     const normalized = normalizeTarPath(rawName); const entryPrefix = normalized === 'template-store' || normalized.startsWith('template-store/') ? 'template-store/' : ''
     prefix ??= entryPrefix
     if (prefix !== entryPrefix) invalid()
@@ -593,21 +628,76 @@ async function parseDownloadedArchive(handle: Pick<FileHandle, 'read'>, size: nu
     offset += entrySize + (BLOCK - entrySize % BLOCK) % BLOCK
     if (offset > size) invalid()
   }
-  if (!terminated || !rootSeen || (!emptyArchive(entries, marker) && !treeSeen)) invalid()
+  if (!terminated || !rootSeen || paxPath !== undefined || (!emptyArchive(entries, marker) && !treeSeen)) invalid()
   return { entries: entries.sort(compareEntries), ...(marker === undefined ? {} : { marker }), treePresent: treeSeen }
 }
 
 function tarHeader(name: string, size: number, type: '0' | '5', mode: number): Buffer {
-  const split = splitTarPath(name); const header = Buffer.alloc(BLOCK)
+  const split = trySplitTarPath(name)
+  if (split !== undefined) return ustarHeader(split, size, type, mode)
+  // O caminho não cabe no USTAR: vai num cabeçalho PAX logo antes, e o
+  // cabeçalho comum leva um nome curto que o leitor ignora.
+  if (Buffer.byteLength(name) > MAX_TAR_PATH_BYTES) invalid()
+  const record = Buffer.from(paxRecord('path', name), 'utf8')
+  const padding = Buffer.alloc((BLOCK - record.byteLength % BLOCK) % BLOCK)
+  return Buffer.concat([ustarHeader({ name: 'PaxHeader', prefix: '' }, record.byteLength, 'x', 0o444), record, padding, ustarHeader({ name: 'pax-path', prefix: '' }, size, type, mode)])
+}
+
+function ustarHeader(split: { readonly name: string; readonly prefix: string }, size: number, type: '0' | '5' | 'x', mode: number): Buffer {
+  const header = Buffer.alloc(BLOCK)
   writeText(header, 0, 100, split.name); writeOctal(header, 100, 8, mode); writeOctal(header, 108, 8, 10_001); writeOctal(header, 116, 8, 10_001)
   writeOctal(header, 124, 12, size); writeOctal(header, 136, 12, 0); header.fill(0x20, 148, 156); header[156] = type.charCodeAt(0)
   writeText(header, 257, 6, 'ustar'); writeText(header, 263, 2, '00'); writeText(header, 345, 155, split.prefix); writeOctal(header, 148, 8, header.reduce((sum, byte) => sum + byte, 0)); return header
 }
 
-function splitTarPath(value: string): { readonly name: string; readonly prefix: string } {
+/**
+ * Um registro PAX: `<tamanho> <chave>=<valor>\n`, onde o tamanho conta os
+ * próprios dígitos — por isso o laço até o número parar de mudar.
+ * @param key - a chave.
+ * @param value - o valor.
+ * @returns o registro.
+ */
+export function paxRecord(key: string, value: string): string {
+  const body = ` ${key}=${value}\n`
+  let length = Buffer.byteLength(body)
+  for (;;) { const total = Buffer.byteLength(body) + String(length).length; if (total === length) break; length = total }
+  return `${String(length)}${body}`
+}
+
+/**
+ * O caminho de um cabeçalho PAX — e NADA além dele.
+ *
+ * Só `path` muda a entrada seguinte; os tempos são aceitos e ignorados, porque
+ * o conteúdo é conferido por hash e não por data. Qualquer outra chave (dono,
+ * tamanho, link) recusa: ela mudaria o que a entrada É sem passar pelas
+ * conferências do cabeçalho comum.
+ * @param content - o corpo do cabeçalho PAX.
+ * @returns o caminho.
+ */
+export function paxRecordPath(content: Buffer): string {
+  let text: string
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(content) } catch { return invalid() }
+  let path: string | undefined; let at = 0
+  while (at < text.length) {
+    const space = text.indexOf(' ', at); if (space <= at) invalid()
+    const lengthText = text.slice(at, space); if (!/^[1-9][0-9]*$/u.test(lengthText)) invalid()
+    const recordBytes = Number(lengthText)
+    const record = Buffer.from(text.slice(at)).subarray(0, recordBytes).toString('utf8')
+    if (Buffer.byteLength(record) !== recordBytes || !record.endsWith('\n')) invalid()
+    const pair = record.slice(space - at + 1, -1); const equals = pair.indexOf('='); if (equals <= 0) invalid()
+    const key = pair.slice(0, equals); const value = pair.slice(equals + 1)
+    if (key === 'path') { if (path !== undefined || value === '' || Buffer.byteLength(value) > MAX_TAR_PATH_BYTES) invalid(); path = value }
+    else if (!PAX_TEMPO.has(key)) invalid()
+    at += record.length
+  }
+  if (path === undefined) invalid()
+  return path
+}
+
+function trySplitTarPath(value: string): { readonly name: string; readonly prefix: string } | undefined {
   if (Buffer.byteLength(value) <= 100) return { name: value, prefix: '' }
   for (let at = value.lastIndexOf('/'); at > 0; at = value.lastIndexOf('/', at - 1)) { const prefix = value.slice(0, at); const name = value.slice(at + 1); if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(name) <= 100) return { name, prefix } }
-  invalid()
+  return undefined
 }
 
 function writeText(target: Buffer, offset: number, _length: number, value: string): void { Buffer.from(value, 'utf8').copy(target, offset) }

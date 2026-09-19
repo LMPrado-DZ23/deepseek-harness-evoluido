@@ -18,6 +18,8 @@ import {
   ensureTemplateStoreVolume,
   templateStoreTransporterBody,
   templateStoreUstarEntryPath,
+  paxRecord,
+  paxRecordPath,
   templateStoreVolumeLabels,
   templateStoreVolumeName,
   streamTemplateStoreFile,
@@ -725,11 +727,36 @@ describe('template store Docker volume materialization', () => {
     await expectArchiveInvalid(rootAndMarkerOnly)
   })
 
-  it('rejects common-manifest paths that cannot be represented by the strict USTAR writer', async () => {
-    const path = 'a'.repeat(252); const entry: TemplateManifestEntry = { path, type: 'file', bytes: 0, sha256: sha(Buffer.alloc(0)) }
-    const treeSha = computeTemplateTreeSha256('v1.0.0', [entry]); const manifest: TemplateStoreManifest = { version: 1, template_store_version: 'v1.0.0', tree_sha256: treeSha, entries: [entry] }
-    expect(() => templateStoreUstarEntryPath(path)).toThrow('TEMPLATE_STORE_INVALID')
-    await expect(ensureTemplateStoreVolume({ ...options(new FakeEngine(), '/safe/store/v1', manifest), treeSha256: treeSha }, AbortSignal.timeout(1_000))).rejects.toMatchObject({ code: 'TEMPLATE_STORE_INVALID' })
+  it('aceita o nome REAL de um arquivo do store do pnpm (126 caracteres num segmento só) e recusa o que passa do teto', () => {
+    // Medido em 19/09/2026: é assim que o pnpm 11 nomeia cada arquivo, e o
+    // USTAR estrito recusava todos. O caminho longo vai num cabeçalho PAX.
+    const real = `v11/files/59/${'f3'.repeat(63)}`
+    expect(templateStoreUstarEntryPath(real)).toBe(real)
+    expect(() => templateStoreUstarEntryPath('a'.repeat(513))).toThrow('TEMPLATE_STORE_INVALID')
+  })
+
+  it('o cabeçalho PAX só pode dizer o CAMINHO, e só da entrada seguinte', async () => {
+    const longo = `template-store/tree/${'b'.repeat(130)}`
+    const valido = paxRecordPath(Buffer.from(paxRecord('path', longo) + paxRecord('mtime', '1726700000')))
+    expect(valido).toBe(longo)
+    expect(() => paxRecordPath(Buffer.from(paxRecord('uid', '0') + paxRecord('path', longo)))).toThrow('TEMPLATE_STORE_INVALID')
+    expect(() => paxRecordPath(Buffer.from(paxRecord('size', '9')))).toThrow('TEMPLATE_STORE_INVALID')
+    expect(() => paxRecordPath(Buffer.from(paxRecord('path', longo) + paxRecord('path', longo)))).toThrow('TEMPLATE_STORE_INVALID')
+    expect(() => paxRecordPath(Buffer.from('99 path=x\n'))).toThrow('TEMPLATE_STORE_INVALID')
+    // Um PAX sem entrada depois dele, e dois PAX seguidos, são recusados.
+    await expectArchiveInvalid(dockerTar([dir('template-store/'), paxEntry(longo)]))
+    await expectArchiveInvalid(dockerTar([dir('template-store/'), dir('template-store/tree/'), paxEntry(longo), paxEntry(longo), file('pax-path', '')]))
+  })
+
+  it('materializa e confere um store com nomes longos, ida e volta pelo Docker simulado', async () => {
+    const nome = `f3${'0a'.repeat(62)}`
+    const store = await sealedRootFilesFixture([{ path: nome, content: Buffer.from('conteudo-real') }])
+    const engine = new FakeEngine()
+    const result = await ensureTemplateStoreVolume(options(engine, store.root, store.manifest), AbortSignal.timeout(5_000))
+    expect(result.state).toBe('CREATED')
+    // O que subiu tem o cabeçalho PAX; o que voltou do "Docker" foi conferido por hash.
+    expect(entriesInTar(engine.puts[0]!.bytes).map(entry => entry.name)).toContain(`tree/${nome}`)
+    expect(engine.puts[0]!.bytes.includes(Buffer.from(` path=tree/${nome}\n`))).toBe(true)
   })
 })
 
@@ -832,9 +859,16 @@ function dir(name: string): TarEntry { return { name, type: '5', value: Buffer.a
 function file(name: string, value: string): TarEntry { return { name, type: '0', value: Buffer.from(value) } }
 function special(name: string, type: string): TarEntry { return { name, type, value: Buffer.alloc(0) } }
 function dockerTar(entries: readonly TarEntry[]): Buffer { return Buffer.concat([...entries.map(tarEntry), Buffer.alloc(1024)]) }
+/** Um cabeçalho PAX com o caminho, do jeito que o `archive/tar` do Go escreve. */
+function paxEntry(path: string): TarEntry { return { name: 'PaxHeader', type: 'x', value: Buffer.from(paxRecord('path', path)) } }
 function tarEntry(entry: TarEntry): Buffer {
   const header = Buffer.alloc(512); const path = entry.name.replace(/\/$/u, ''); let name = path; let prefix = ''
-  if (Buffer.byteLength(path) > 100) { const at = path.lastIndexOf('/'); prefix = path.slice(0, at); name = path.slice(at + 1) }
+  if (Buffer.byteLength(path) > 100) {
+    const at = path.lastIndexOf('/')
+    // Como o Docker: o que não cabe no USTAR sai com um cabeçalho PAX antes.
+    if (at < 0 || Buffer.byteLength(path.slice(at + 1)) > 100 || at > 155) return Buffer.concat([tarEntry(paxEntry(entry.name)), tarEntry({ ...entry, name: 'pax-path' })])
+    prefix = path.slice(0, at); name = path.slice(at + 1)
+  }
   header.write(name, 0, 100, 'utf8'); header.write(prefix, 345, 155, 'utf8')
   writeTarOctal(header, 100, 8, entry.type === '5' ? 0o555 : 0o444); writeTarOctal(header, 108, 8, 10_001); writeTarOctal(header, 116, 8, 10_001); writeTarOctal(header, 124, 12, entry.value.byteLength); writeTarOctal(header, 136, 12, 0); header.fill(0x20, 148, 156); header[156] = entry.type.charCodeAt(0); header.write('ustar', 257, 6, 'ascii'); header.write('00', 263, 2, 'ascii'); writeTarOctal(header, 148, 8, header.reduce((sum, byte) => sum + byte, 0))
   return Buffer.concat([header, entry.value, Buffer.alloc((512 - entry.value.byteLength % 512) % 512)])
@@ -850,11 +884,12 @@ function dockerArchiveFromUploads(uploads: readonly Buffer[]): Buffer {
   return dockerTar([dir('template-store/'), ...entries])
 }
 function entriesInTar(value: Buffer): TarEntry[] {
-  const entries: TarEntry[] = []; let offset = 0
+  const entries: TarEntry[] = []; let offset = 0; let pax: string | undefined
   while (offset + 512 <= value.length) {
     const header = value.subarray(offset, offset + 512); if (header.every(byte => byte === 0)) break
     const zero = header.indexOf(0); const name = header.subarray(0, zero).toString('utf8').replace(/\/$/u, ''); const type = String.fromCharCode(header[156] || 48); const size = Number.parseInt(header.subarray(124, 136).toString('ascii').replace(/\0.*$/su, '').trim(), 8); const start = offset + 512
-    entries.push({ name, type, value: Buffer.from(value.subarray(start, start + size)) }); offset = start + size + (512 - size % 512) % 512
+    if (type === 'x') { pax = paxRecordPath(Buffer.from(value.subarray(start, start + size))).replace(/\/$/u, ''); offset = start + size + (512 - size % 512) % 512; continue }
+    entries.push({ name: pax ?? name, type, value: Buffer.from(value.subarray(start, start + size)) }); pax = undefined; offset = start + size + (512 - size % 512) % 512
   }
   return entries
 }

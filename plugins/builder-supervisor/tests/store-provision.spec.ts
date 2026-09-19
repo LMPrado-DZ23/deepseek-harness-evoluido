@@ -307,9 +307,11 @@ linux('immutable builder template-store provisioning', () => {
     expect(await pathExists(posix.join(scopePath(fixture, fixture.policy.configRoot), 'supervisor.json'))).toBe(false)
   })
 
-  it('rejects a manifest path that cannot be encoded as strict USTAR before creating scope state', async () => {
+  it('rejects a manifest path longer than the entry-path ceiling before creating scope state', async () => {
+    // Era "não cabe no USTAR estrito". Com o PAX, todo caminho válido cabe; o
+    // que continua recusado é passar do teto de 512 bytes do caminho.
     const fixture = await createFixture()
-    const first = 'a'.repeat(90); const second = 'b'.repeat(70); const file = 'c'.repeat(101)
+    const first = 'a'.repeat(200); const second = 'b'.repeat(200); const file = 'c'.repeat(120)
     await mkdir(posix.join(fixture.sourceRoot, first, second), { recursive: true, mode: 0o700 })
     await writeFile(posix.join(fixture.sourceRoot, first, second, file), 'x', { mode: 0o600 })
     const entries: TemplateManifestEntry[] = [...fixture.manifest.entries,
@@ -320,7 +322,7 @@ linux('immutable builder template-store provisioning', () => {
     const tree = computeTemplateTreeSha256('v1.0.0', entries)
     const raw = `${JSON.stringify({ version: 1, template_store_version: 'v1.0.0', tree_sha256: tree, entries })}\n`
     await writeFile(fixture.manifestPath, raw, { mode: 0o600 })
-    await expect(provisionBuilderSupervisor({ ...fixture.request, manifestSha256: sha(raw) })).rejects.toMatchObject({ code: 'INVALID_PROVISION_REQUEST' })
+    await expect(provisionBuilderSupervisor({ ...fixture.request, manifestSha256: sha(raw) })).rejects.toMatchObject({ code: 'SOURCE_UNSAFE' })
     expect(await pathExists(scopePath(fixture, fixture.policy.stateRoot))).toBe(false)
   })
 
