@@ -107,6 +107,28 @@
   color: var(--dz-text-secondary);
 }
 
+/*
+  Uma AÇÃO pequena dentro de um lance — corrigir uma resposta. É texto com
+  sublinhado, e não botão cheio: ela é secundária à conversa, e um botão
+  grande em cada resposta disputaria atenção com o compositor. A área de toque
+  continua de 44px de altura pelo preenchimento.
+*/
+.dz-lance-acao {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: var(--dz-1);
+  padding: 0 var(--dz-2);
+  border: 0;
+  background: transparent;
+  color: var(--dz-accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.dz-lance-acao:focus-visible { outline: 3px solid var(--dz-focus); outline-offset: 2px; }
+
 /* Os blocos: plano, trabalho e resultado. Discretos, com borda fina. */
 .dz-bloco {
   margin-top: var(--dz-3);

@@ -4,6 +4,7 @@ import { appSpecV1Schema, detectSensitiveData, parseAppSpecWithSingleRepair, sen
 import type { StudioProject } from './model.js'
 import type { ModelResult, PromptModelPort } from './ports.js'
 import { prompt, t } from './i18n.js'
+import type { PerguntaDaLeitura } from './leitura.js'
 
 export const intakeAnswerSchema = z.object({ answer: z.string().max(2_000), recommend: z.boolean().default(false) }).strict()
 
@@ -41,6 +42,30 @@ export class IntakeEngine {
       { orgId: conversation.project.org_id, tenantId: conversation.project.tenant_id },
       'intake', conversation.project.privacy,
       prompt('prompts.recommend', { question: question.text, brief: conversation.project.original_brief }),
+    )
+  }
+
+  /**
+   * LÊ o pedido e as respostas já dadas, procurando o que ainda falta.
+   *
+   * Só as perguntas de `faltando` entram no prompt: pedir ao modelo o que já
+   * foi respondido seria pagar para ouvir de novo o que a pessoa disse.
+   * @param conversation - o pedido e as respostas até aqui.
+   * @param faltando - as perguntas ainda sem resposta.
+   * @param ultimaResposta - o texto que a pessoa acabou de escrever, quando ainda não está gravado.
+   * @returns o que o modelo devolveu, sem interpretar.
+   */
+  async ler(conversation: IntakeConversation, faltando: readonly PerguntaDaLeitura[], ultimaResposta?: string): Promise<ModelResult> {
+    const perguntas = Object.fromEntries(faltando.map(id => [id, t(`questions.${id}`)]))
+    const respostas = ultimaResposta === undefined ? conversation.answers : { ...conversation.answers, ultima: ultimaResposta }
+    return this.model.complete(
+      { orgId: conversation.project.org_id, tenantId: conversation.project.tenant_id },
+      'leitura', conversation.project.privacy,
+      prompt('prompts.leitura', {
+        brief: conversation.project.original_brief,
+        answers: JSON.stringify(respostas),
+        questions: JSON.stringify(perguntas),
+      }),
     )
   }
 

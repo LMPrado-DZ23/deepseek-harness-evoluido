@@ -46,6 +46,11 @@ export interface TaskScreenProps {
   ajustar(texto: string): Promise<void>
   /** PERGUNTA sobre a tarefa. Não escreve critério de aceite nem gasta tentativa. */
   perguntar(texto: string): Promise<void>
+  /**
+   * CORRIGE uma resposta do questionário, sem recomeçar. Ausente, a conversa
+   * não oferece correção nenhuma — um botão sem destino seria mudo.
+   */
+  corrigir?(perguntaId: string, texto: string): Promise<void>
   /** O painel contextual aberto, ou `null` quando a conversa está sozinha. */
   readonly painel: PainelAberto | null
   abrirPainel(painel: PainelAberto): void
@@ -100,8 +105,23 @@ export function TaskScreen(props: TaskScreenProps) {
   const destino = destinoDoEnvio(situacao, intencao)
   const acaoDoEstado = destinoDoEnvio(situacao, 'agir')
   const [enviando, setEnviando] = useState(false)
+  /*
+    A CORREÇÃO é um modo do compositor, e não outro formulário: a pessoa
+    escreve a resposta nova no mesmo lugar onde escreve tudo, com a resposta
+    antiga já no campo para ela editar em vez de redigitar.
+  */
+  const [corrigindo, setCorrigindo] = useState<{ readonly perguntaId: string; readonly pergunta: string } | null>(null)
+  const campo = useRef<HTMLTextAreaElement | null>(null)
+  useEffect(() => { setCorrigindo(null) }, [props.detalhes.project.project_id, props.detalhes.project.state])
   const fim = useRef<HTMLLIElement | null>(null)
-  const podeEnviar = envioDisponivel(destino, props.rascunho) && !enviando
+  const podeEnviar = !enviando && (corrigindo !== null
+    ? props.rascunho.trim() !== '' && props.corrigir !== undefined
+    : envioDisponivel(destino, props.rascunho))
+  function comecarCorrecao(lance: { readonly perguntaId: string; readonly pergunta: string; readonly texto: string }) {
+    setCorrigindo({ perguntaId: lance.perguntaId, pergunta: lance.pergunta })
+    props.setRascunho(lance.texto)
+    campo.current?.focus()
+  }
 
   /*
     A conversa desce sozinha quando um lance novo chega — e SÓ então. Descer a
@@ -116,7 +136,10 @@ export function TaskScreen(props: TaskScreenProps) {
     const texto = props.rascunho
     setEnviando(true)
     try {
-      await despachar(destino, texto, props)
+      if (corrigindo !== null && props.corrigir !== undefined) {
+        await props.corrigir(corrigindo.perguntaId, texto)
+        setCorrigindo(null)
+      } else await despachar(destino, texto, props)
       // O rascunho só é limpo DEPOIS que o envio deu certo: limpar antes
       // apagaria o texto de quem perdeu a rede, e reescrever é o que ninguém
       // faz — a pessoa desiste.
@@ -209,7 +232,8 @@ export function TaskScreen(props: TaskScreenProps) {
             {lance.autor === 'pessoa' ? (props.iniciais ?? tarefa.voce.slice(0, 1)) : tarefa.marca}
           </span>
           <div className="dz-lance-corpo">
-            <LanceView lance={lance} abrir={props.abrirPainel} />
+            <LanceView lance={lance} abrir={props.abrirPainel}
+              corrigir={props.corrigir === undefined ? undefined : comecarCorrecao} />
           </div>
         </li>)}
         {/*
@@ -230,7 +254,12 @@ export function TaskScreen(props: TaskScreenProps) {
       */}
       <form className="dz-compositor dz-compositor-inferior" onSubmit={event => void enviar(event)}>
         {avisoDaTarefa === null ? null : <p className="dz-compositor-aviso" role="status">{avisoDaTarefa}</p>}
-        {avisoDoEnvio === null ? null : <p className="dz-compositor-aviso dz-compositor-aviso-neutro" role="status">{avisoDoEnvio}</p>}
+        {corrigindo !== null
+          ? <p className="dz-compositor-aviso dz-compositor-aviso-neutro" role="status">
+            {tarefa.corrigindo} <strong>{corrigindo.pergunta}</strong>{' '}
+            <button type="button" className="dz-lance-acao" onClick={() => { setCorrigindo(null); props.setRascunho('') }}>{tarefa.corrigirCancelar}</button>
+          </p>
+          : avisoDoEnvio === null ? null : <p className="dz-compositor-aviso dz-compositor-aviso-neutro" role="status">{avisoDoEnvio}</p>}
         {/*
           A ESCOLHA, e não a adivinhação.
 
@@ -240,7 +269,7 @@ export function TaskScreen(props: TaskScreenProps) {
           de tela anuncia "2 de 2 selecionado" e o teclado navega com as setas,
           que é o que um grupo de escolha exclusiva precisa fazer.
         */}
-        <fieldset className="dz-compositor-intencao">
+        {corrigindo !== null ? null : <fieldset className="dz-compositor-intencao">
           <legend className="sr-only">{tarefa.intencaoRotulo}</legend>
           <label className={classes('dz-intencao-opcao', intencao === 'perguntar' ? 'dz-intencao-marcada' : null)}>
             <input type="radio" name="dz-intencao" value="perguntar" checked={intencao === 'perguntar'}
@@ -252,9 +281,9 @@ export function TaskScreen(props: TaskScreenProps) {
               onChange={() => setIntencao('agir')} />
             <span>{rotuloDaAcao(acaoDoEstado)}</span>
           </label>
-        </fieldset>
+        </fieldset>}
         <label className="sr-only" htmlFor="dz-continuar">{tarefa.compositorRotulo}</label>
-        <textarea id="dz-continuar" rows={2} value={props.rascunho} maxLength={2000}
+        <textarea id="dz-continuar" ref={campo} rows={2} value={props.rascunho} maxLength={2000}
           placeholder={tarefa.compositorPlaceholder}
           onChange={evento => props.setRascunho(evento.target.value)}
           /*
@@ -414,12 +443,19 @@ export function rotuloDoEstado(estado: string): string {
   return ESTADO_LABEL[estado] ?? estado
 }
 
-function LanceView({ lance, abrir }: { lance: Lance; abrir(painel: PainelAberto): void }) {
+function LanceView({ lance, abrir, corrigir }: {
+  lance: Lance; abrir(painel: PainelAberto): void
+  corrigir?: ((lance: { readonly perguntaId: string; readonly pergunta: string; readonly texto: string }) => void) | undefined
+}) {
   if (lance.tipo === 'pedido' || lance.tipo === 'resposta') {
     return <>
       <p className="dz-lance-autor">{tarefa.voce}</p>
       <p className="dz-lance-texto">{lance.texto}</p>
       {lance.tipo === 'resposta' && lance.recomendada ? <p className="dz-lance-nota">{tarefa.recomendada}</p> : null}
+      {lance.tipo === 'resposta' && lance.corrigivel && corrigir !== undefined
+        ? <button type="button" className="dz-lance-acao" onClick={() => corrigir(lance)}
+          aria-label={tarefa.corrigirRotulo.replace('{pergunta}', lance.pergunta)}>{tarefa.corrigir}</button>
+        : null}
     </>
   }
   if (lance.tipo === 'pergunta') {

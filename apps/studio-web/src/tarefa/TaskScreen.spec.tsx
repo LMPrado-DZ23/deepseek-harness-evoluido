@@ -245,3 +245,20 @@ describe('as regiões que rolam são alcançáveis por teclado', () => {
     expect(html).toContain('<div class="dz-painel-corpo" tabindex="0"')
   })
 })
+
+describe('PLAN-01: corrigir pela conversa', () => {
+  const pronta: DetalhesDaTarefa = { ...DETALHES, project: { ...DETALHES.project, state: 'SPEC_READY' }, plan: null, runs: [], evidence: [] }
+
+  it('com a ação de corrigir ligada, a resposta vigente ganha o botão, com a pergunta no nome acessível', () => {
+    const html = montar({ detalhes: pronta, corrigir: async () => {} })
+    expect(html).toContain(`aria-label="${tarefa.corrigirRotulo.replace('{pergunta}', 'Quem vai usar?')}"`)
+  })
+
+  it('sem a ação, nenhum botão mudo', () => {
+    expect(montar({ detalhes: pronta })).not.toContain(tarefa.corrigir)
+  })
+
+  it('depois de um resultado, não há correção pelo questionário', () => {
+    expect(montar({ corrigir: async () => {} })).not.toContain(tarefa.corrigir)
+  })
+})

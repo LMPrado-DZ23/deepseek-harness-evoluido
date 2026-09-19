@@ -16,6 +16,8 @@ import { t } from './i18n.js'
 import { pedidosDeRevisao } from './revision.js'
 import { intakeAnswerSchema, nextIntakeQuestion, type IntakeConversation, type IntakeEngine } from './intake.js'
 import { respostasDoQuestionario } from './pergunta.js'
+import { PERGUNTAS_DA_LEITURA, respostasLidas, type PerguntaDaLeitura } from './leitura.js'
+import { ModelRouteUnavailableError } from './ports.js'
 import type { CodeGeneratorPort } from './pipeline.js'
 import type { EmergencyStopGuard, PromptToAppJobService } from './jobs.js'
 import { RUN_REPORT_FILE } from './run-report.js'
@@ -23,7 +25,7 @@ import { FonteNaoServida, conteudoQueCabe, fonteAServir } from './fonte-do-artef
 import { FormCategoryCapabilityError, type PlannerCodeContext, type PlannerEngine } from './planner.js'
 import { consultedView } from './plan-consulted.js'
 import { routePrivacySchema } from '@dz23-studio/route-health'
-import { studioProjectCategorySchema } from './model.js'
+import { studioProjectCategorySchema, type StudioIntakeTurn } from './model.js'
 import type { LogoProcessorPort } from './logo.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
 import { planEditSchema } from './plan-edit.js'
@@ -48,6 +50,11 @@ const createProjectSchema = z.object({
 }).strict()
 const answerSchema = intakeAnswerSchema.extend({
   confirm_sensitive: z.boolean().optional(),
+  request_key: z.string().min(1).max(200).optional(),
+}).strict()
+const correctionSchema = z.object({
+  question_id: z.enum(PERGUNTAS_DA_LEITURA),
+  answer: z.string().trim().min(1).max(2_000),
   request_key: z.string().min(1).max(200).optional(),
 }).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
@@ -200,6 +207,7 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   */
   { method: 'GET', path: '/projects/:projectId/source', access: 'authorized', permission: 'project.read', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/intake/answer', access: 'authorized', permission: 'project.write', scope: 'project' },
+  { method: 'POST', path: '/projects/:projectId/intake/correct', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/design', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/design/logo', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/plan', access: 'authorized', permission: 'project.write', scope: 'project' },
@@ -524,6 +532,21 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       if (request.method === 'POST' && matched.suffix === '/intake/answer') {
         return await answerIntake(request, response, config, actor, projectId)
       }
+      if (request.method === 'POST' && matched.suffix === '/intake/correct') {
+        const input = correctionSchema.parse(await readJson(request))
+        const turn = await config.service.correctIntakeAnswer(actor, projectId, input.question_id, input.answer, input.request_key)
+        /*
+          Com a especificação já sintetizada, a correção só vale quando chega
+          nela: a síntese é refeita com as respostas atuais, e a especificação
+          ganha uma VERSÃO nova — a anterior continua gravada. Sem
+          especificação, a próxima pergunta (ou a síntese) segue o caminho de
+          sempre.
+        */
+        const conversation = await conversationFor(config.service, actor, projectId)
+        const next = nextIntakeQuestion(conversation)
+        if (next === undefined) return await sintetizarEspecificacao(response, config, actor, projectId, conversation, { turn })
+        return json(response, 200, { turn, next })
+      }
       if (request.method === 'POST' && matched.suffix === '/design') {
         const input = designSelectionSchema.parse(await readJson(request))
         return json(response, 200, { design: await config.service.saveDesign(actor, projectId, input) })
@@ -673,11 +696,19 @@ async function answerIntake(
       A saída honesta é REFAZER a síntese, e não recusar para sempre. Nenhuma
       resposta é pedida de novo: o que faltou não foi a pessoa, foi o modelo.
     */
-    if (await temEspecificacao(config.service, actor, projectId)) {
+    /*
+      Especificação existente só é "já respondido" quando ela é MAIS NOVA que a
+      última resposta. Uma correção cuja nova síntese falhou deixa a
+      especificação para trás — e recusar aqui repetiria o beco de 18/09 com
+      outra porta: a resposta corrigida gravada e nunca aplicada.
+    */
+    if (await temEspecificacao(config.service, actor, projectId) && !(await especificacaoDesatualizada(config.service, actor, projectId))) {
       throw new PromptToAppError('REPLAY', t('errors.questionsAnswered'))
     }
     return await sintetizarEspecificacao(response, config, actor, projectId, conversation)
   }
+  let lidas: Partial<Record<PerguntaDaLeitura, string>> = {}
+  let leitura: { route: string; model: string } | undefined
   if (question.id === 'sensitive-confirmation') {
     if (input.confirm_sensitive === undefined) throw new PromptToAppError('INVALID', t('errors.sensitiveConfirmation'))
     const resposta = input.confirm_sensitive ? t('values.confirmed') : t('values.notConfirmed')
@@ -699,11 +730,23 @@ async function answerIntake(
       modelo de novo — e o custo dessa chamada é real, mesmo quando o turno
       acabasse descartado.
     */
+    /*
+      A LEITURA roda dentro de `produzir`, e por isso só quando o envio é novo:
+      o reenvio da mesma resposta não paga a leitura de novo. O que ela
+      encontra é gravado DEPOIS do turno da pessoa, como resposta recomendada.
+    */
     await config.service.answerIntakeTurn(
       actor, projectId,
       { questionId: question.id, question: question.text, recommended: input.recommend, digitada },
       async () => {
-        if (!input.recommend) return { answer: digitada, route: null, model: null }
+        if (!input.recommend) {
+          const faltando = PERGUNTAS_DA_LEITURA.filter(id => id !== question.id && conversation.answers[id] === undefined)
+          if (faltando.length > 0) {
+            const lido = await lerSemTravar(config.intake, conversation, faltando, digitada)
+            if (lido !== undefined) { lidas = lido.respostas; leitura = { route: lido.route, model: lido.model } }
+          }
+          return { answer: digitada, route: null, model: null }
+        }
         const result = await config.intake.recommend(conversation, question)
         const answer = z.string().trim().min(1).max(2_000).parse(result.value)
         if (answer === '') throw new PromptToAppError('INVALID', t('errors.answerRequired'))
@@ -713,10 +756,63 @@ async function answerIntake(
     )
   }
 
+  const inferidas: StudioIntakeTurn[] = []
+  if (leitura !== undefined) {
+    for (const id of PERGUNTAS_DA_LEITURA) {
+      const texto = lidas[id]
+      if (texto === undefined) continue
+      inferidas.push(await config.service.recordTurn(actor, projectId, {
+        question_id: id, question: t(`questions.${id}`), answer: texto, recommended: true, route: leitura.route, model: leitura.model,
+      }))
+    }
+  }
   const updated = await conversationFor(config.service, actor, projectId)
   const next = nextIntakeQuestion(updated)
-  if (next !== undefined) return json(response, 200, { next })
-  return await sintetizarEspecificacao(response, config, actor, projectId, updated)
+  const lidasNaResposta = inferidas.length === 0 ? {} : { inferred: inferidas }
+  if (next !== undefined) return json(response, 200, { next, ...lidasNaResposta })
+  return await sintetizarEspecificacao(response, config, actor, projectId, updated, lidasNaResposta)
+}
+
+/**
+ * A leitura, sem poder travar o questionário.
+ *
+ * Só a falha de ROTA vira "não li": sem modelo, a conversa segue perguntando,
+ * como fazia antes de a leitura existir. Qualquer outro erro sobe — engolir
+ * tudo esconderia um defeito do próprio produto atrás de uma pergunta a mais.
+ * @param intake - o motor.
+ * @param conversation - a conversa até aqui.
+ * @param faltando - o que ainda falta.
+ * @param ultima - a resposta que a pessoa acabou de escrever.
+ * @returns o que foi lido, ou `undefined` quando não houve leitura.
+ */
+async function lerSemTravar(
+  intake: IntakeEngine, conversation: IntakeConversation, faltando: readonly PerguntaDaLeitura[], ultima: string,
+): Promise<{ respostas: Partial<Record<PerguntaDaLeitura, string>>; route: string; model: string } | undefined> {
+  try {
+    const resultado = await intake.ler(conversation, faltando, ultima)
+    return { respostas: respostasLidas(resultado.value, faltando), route: resultado.route, model: resultado.model }
+  } catch (erro) {
+    if (erro instanceof ModelRouteUnavailableError) return undefined
+    throw erro
+  }
+}
+
+/**
+ * A especificação ficou para trás de uma resposta?
+ *
+ * Só as respostas do QUESTIONÁRIO contam — a pergunta que a pessoa faz sobre a
+ * tarefa não muda a especificação. E só antes do plano: depois dele, o
+ * questionário não é mais a fonte da especificação (ver `correctIntakeAnswer`).
+ * @param service - o serviço.
+ * @param actor - quem pergunta.
+ * @param projectId - a tarefa.
+ * @returns se há resposta mais nova que a especificação.
+ */
+async function especificacaoDesatualizada(service: PromptToAppService, actor: PromptToAppActor, projectId: string): Promise<boolean> {
+  const spec = await service.latestSpec(actor, projectId)
+  if (spec.origin !== 'intake') return false
+  const turnos = (await service.intakeTurns(actor, projectId)).filter(turno => (PERGUNTAS_DA_LEITURA as readonly string[]).includes(turno.question_id))
+  return turnos.some(turno => turno.created_at > spec.created_at)
 }
 
 /**
@@ -759,10 +855,11 @@ async function sintetizarEspecificacao(
   actor: PromptToAppActor,
   projectId: string,
   conversation: IntakeConversation,
+  extra: Record<string, unknown> = {},
 ): Promise<void> {
   const built = await config.intake.buildSpec(conversation)
   const spec = await config.service.saveSpec(actor, projectId, built.spec, 'intake')
-  return json(response, 201, { spec, next: null })
+  return json(response, 201, { spec, next: null, ...extra })
 }
 
 async function conversationFor(service: PromptToAppService, actor: PromptToAppActor, projectId: string): Promise<IntakeConversation> {

@@ -177,7 +177,15 @@ const repository = new MemoryRepository()
 let id = 0
 const service = new PromptToAppService({ repository, createId: () => `e2e-${++id}` })
 const model: PromptModelPort = {
-  async complete(_scope, purpose) {
+  async complete(_scope, purpose, _privacy, prompt) {
+    /*
+      A LEITURA do pedido (PLAN-01). Ela só encontra algo no pedido que o
+      teste de correção escreve — em todos os outros, devolve nada e o
+      questionário segue perguntando as três, como sempre.
+    */
+    if (purpose === 'leitura') return { route: 'ollama-local', model: 'fixture', value: prompt.includes('professores lançarem notas')
+      ? { audience: null, goal: 'Lançar e consultar as notas da turma', content: null }
+      : { audience: null, goal: null, content: null } }
     if (purpose === 'intake') return { route: 'ollama-local', model: 'fixture', value: {
       schema_version: 1, problem: 'Apresentar serviços para clientes locais.', audience: 'Clientes locais', journeys: ['Conhecer os serviços'],
       pages: [{ name: 'Início', sections: ['Serviços', 'Contato'] }], entities: [],

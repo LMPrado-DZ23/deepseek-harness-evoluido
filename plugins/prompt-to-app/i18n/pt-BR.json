@@ -105,7 +105,9 @@
     "remedioStyle": " No lugar de `style`, use `className` com classes utilitárias.",
     "remedioSvg": " No lugar de desenho vetorial, use elementos HTML comuns com `className`.",
     "remedioRede": " Este aplicativo não acessa a rede: mantenha os dados no estado da própria tela.",
-    "remedioArmazenamento": " Este aplicativo não guarda dados no navegador: use `useState`, que basta para uma sessão."
+    "remedioArmazenamento": " Este aplicativo não guarda dados no navegador: use `useState`, que basta para uma sessão.",
+    "correcaoForaDeHora": "Esta resposta não pode mais ser corrigida: o plano já existe. Peça a mudança no plano.",
+    "correcaoSemResposta": "Esta pergunta ainda não foi respondida; responda-a na conversa."
   },
   "pipeline": {
     "verified": "Protótipo verificado — não está publicado nem disponível para outras pessoas",
@@ -190,7 +192,8 @@
     "ruleDeclarativo": "A tela gerada deve usar somente JSX declarativo com elementos HTML e componentes das fachadas protegidas indicadas no plano. Não use chamadas de função, construtores, componentes locais dinâmicos, atributos espalhados, atributos de evento (`onClick` e afins) nem acesso a propriedade por índice calculado.",
     "ruleInterativo": "Este aplicativo PODE ter comportamento: estado com `useState`/`useReducer`, funções próprias, cálculos, atributos de evento como `onClick` e acesso a vetor por índice calculado. Continua proibido: `ref`, modelo com etiqueta, e tudo o que sai do aplicativo — rede, armazenamento do navegador, `eval`, `Function`, `document`, `window` e as demais listas acima. O estado vive na memória da tela e não precisa sobreviver ao recarregamento, salvo se o pedido disser o contrário.",
     "ruleSemEsboco": "Escreva o corpo de toda função que você criar. Função com corpo vazio, ou só com comentário dizendo o que ela faria, é recusada antes de o código chegar ao disco. Implemente cada critério de aceitação da especificação como comportamento de verdade, e não como lugar reservado.",
-    "generateRepairFiles": "Estes são os arquivos que você produziu na tentativa anterior. Devolva-os INTEIROS, com a causa acima corrigida e o resto preservado. Não recomece do zero, não remova comportamento que já estava escrito e não troque a abordagem: {files}"
+    "generateRepairFiles": "Estes são os arquivos que você produziu na tentativa anterior. Devolva-os INTEIROS, com a causa acima corrigida e o resto preservado. Não recomece do zero, não remova comportamento que já estava escrito e não troque a abordagem: {files}",
+    "leitura": "Leia o pedido e as respostas de uma pessoa que quer criar um aplicativo. Para cada pergunta abaixo, devolva o que o TEXTO DELA já responde, com as palavras dela, em uma frase curta. Se o texto não responde uma pergunta, devolva null para ela: não deduza, não complete e não invente. Produza SOMENTE JSON com as chaves audience, goal e content. Perguntas: {questions}. Pedido: {brief}. Respostas até aqui: {answers}"
   },
   "stages": {
     "install": "Preparando as ferramentas do seu aplicativo",

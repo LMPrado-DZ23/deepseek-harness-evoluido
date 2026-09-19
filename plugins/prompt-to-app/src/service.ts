@@ -527,6 +527,51 @@ export class PromptToAppService {
     )
   }
 
+  /**
+   * CORRIGE uma resposta do questionário, sem recomeçar o questionário.
+   *
+   * A correção é um turno novo para a MESMA pergunta: as respostas valem pela
+   * mais recente (`respostasDoQuestionario`), então só a decisão afetada muda
+   * e as outras ficam como estavam. Nada é apagado — a resposta anterior
+   * continua na conversa, que é o histórico.
+   *
+   * ## Até quando dá para corrigir
+   *
+   * Enquanto NÃO existir plano. Depois do plano, a especificação pode ter
+   * recebido pedidos de mudança (`origin: 'edit'`), e refazê-la a partir do
+   * questionário apagaria esses pedidos em silêncio. Ali o caminho é o pedido
+   * de mudança, que já existe e é revisável.
+   * @param actor - quem corrige.
+   * @param projectId - a tarefa.
+   * @param questionId - a pergunta corrigida.
+   * @param answer - a resposta nova, como a pessoa escreveu.
+   * @param requestKey - a identidade de intenção do envio.
+   * @returns o turno gravado.
+   */
+  async correctIntakeAnswer(
+    actor: PromptToAppActor, projectId: string, questionId: 'audience' | 'goal' | 'content', answer: string, requestKey?: string,
+  ): Promise<StudioIntakeTurn> {
+    this.#authorize(actor, 'project.write')
+    const project = this.project(actor, projectId)
+    const texto = answer.trim()
+    if (texto === '') throw new PromptToAppError('INVALID', t('errors.answerRequired'))
+    if (project.state !== 'DRAFT' && project.state !== 'SPEC_READY') throw new PromptToAppError('INVALID', t('errors.correcaoForaDeHora'))
+    try {
+      await this.plan(actor, projectId)
+      throw new PromptToAppError('INVALID', t('errors.correcaoForaDeHora'))
+    } catch (erro) {
+      if (!(erro instanceof PromptToAppError) || erro.code !== 'NOT_FOUND') throw erro
+    }
+    const anterior = [...await this.intakeTurns(actor, projectId)].reverse().find(turno => turno.question_id === questionId)
+    if (anterior === undefined) throw new PromptToAppError('INVALID', t('errors.correcaoSemResposta'))
+    return this.answerIntakeTurn(
+      actor, projectId,
+      { questionId, question: anterior.question, recommended: false, digitada: ['correcao', questionId, texto].join('|') },
+      async () => ({ answer: texto, route: null, model: null }),
+      requestKey,
+    )
+  }
+
   async askAboutProject(actor: PromptToAppActor, projectId: string, pergunta: string, requestKey?: string): Promise<StudioIntakeTurn> {
     this.#authorize(actor, 'project.write')
     const project = this.project(actor, projectId)

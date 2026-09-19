@@ -159,7 +159,8 @@ describe('prompt-to-app HTTP boundary', () => {
     // `/usage`, ela é `project.read` e de escopo `workspace`: devolve o que
     // quem já pode ler as tarefas veria abrindo uma por uma, e o que ela poupa
     // é o trabalho, não a autorização.
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(23)
+    // 24 desde `POST /intake/correct` (PLAN-01): `project.write`, escopo `project`.
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(24)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 

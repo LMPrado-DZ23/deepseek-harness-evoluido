@@ -10,8 +10,15 @@ export interface ModelResult {
   readonly usage?: TokenUsage
 }
 
+/**
+ * O TIPO de pedido ao modelo. Ele decide a rota e, no servidor local, se o
+ * pedido vai com gramática. `leitura` é JSON fechado; `intake` não (ver
+ * `leitura.ts`).
+ */
+export type PropositoDoModelo = 'intake' | 'leitura' | 'plan' | 'generate'
+
 export interface PromptModelPort {
-  complete(scope: RouteScope, purpose: 'intake' | 'plan' | 'generate', privacy: RoutePrivacy, prompt: string): Promise<ModelResult>
+  complete(scope: RouteScope, purpose: PropositoDoModelo, privacy: RoutePrivacy, prompt: string): Promise<ModelResult>
 }
 
 export interface HarnessModelPortOptions {
@@ -39,7 +46,7 @@ export interface HarnessModelPortOptions {
    * Ausente, nada é marcado e tudo segue pelo adaptador normal — que é o que
    * acontece em teste e em qualquer perfil que não tenha ligado o desvio.
    */
-  readonly markEstruturada?: (options: GenerateOptions, purpose: 'intake' | 'plan' | 'generate', route: string) => GenerateOptions
+  readonly markEstruturada?: (options: GenerateOptions, purpose: PropositoDoModelo, route: string) => GenerateOptions
 }
 
 export class ModelRouteUnavailableError extends Error {
@@ -49,7 +56,7 @@ export class ModelRouteUnavailableError extends Error {
 export class HarnessPromptModel implements PromptModelPort {
   constructor(private readonly options: HarnessModelPortOptions) {}
 
-  async complete(scope: RouteScope, purpose: 'intake' | 'plan' | 'generate', privacy: RoutePrivacy, prompt: string): Promise<ModelResult> {
+  async complete(scope: RouteScope, purpose: PropositoDoModelo, privacy: RoutePrivacy, prompt: string): Promise<ModelResult> {
     const selected = await this.options.routes.chooseRoute(scope, purpose, { privacy })
     if (selected.route === undefined) throw new ModelRouteUnavailableError(selected.reason)
     const model = this.options.modelByRoute[selected.route]

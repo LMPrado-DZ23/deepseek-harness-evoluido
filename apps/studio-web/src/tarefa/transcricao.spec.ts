@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PERGUNTA_DA_PESSOA, execucaoTerminou, transcricaoDaTarefa, type DetalhesDaTarefa } from './transcricao'
+import { PERGUNTA_DA_PESSOA, execucaoTerminou, respostasCorrigiveis, transcricaoDaTarefa, type DetalhesDaTarefa } from './transcricao'
 
 const PROJETO = {
   project_id: 'proj-1', name: 'Clínica', state: 'VERIFIED_PROTOTYPE',
@@ -214,5 +214,37 @@ describe('a pergunta DA PESSOA na conversa', () => {
     }))
     const perguntas = lances.filter(lance => lance.id.startsWith('pergunta:')) as { texto: string }[]
     expect(perguntas.map(lance => lance.texto)).toEqual(['primeira', 'segunda', 'primeira'])
+  })
+})
+
+describe('PLAN-01: que resposta ainda se corrige', () => {
+  const base = {
+    project: { project_id: 'p', name: 'Notas', state: 'SPEC_READY', original_brief: 'notas' },
+    turns: [
+      { turn_id: 't1', question_id: 'audience', question: 'Para quem?', answer: 'Alunos', recommended: false, created_at: '2026-09-19T10:00:00.000Z' },
+      { turn_id: 't2', question_id: 'goal', question: 'Fazer o quê?', answer: 'Lançar notas', recommended: true, created_at: '2026-09-19T10:00:01.000Z' },
+      { turn_id: 't3', question_id: 'audience', question: 'Para quem?', answer: 'Professores', recommended: false, created_at: '2026-09-19T10:00:02.000Z' },
+      { turn_id: 't4', question_id: 'pergunta-da-pessoa', question: 'Quanto falta?', answer: 'Pouco', recommended: false, created_at: '2026-09-19T10:00:03.000Z' },
+      { turn_id: 't5', question_id: 'sensitive-confirmation', question: 'Confirma?', answer: 'Sim', recommended: false, created_at: '2026-09-19T10:00:04.000Z' },
+    ],
+    plan: null,
+  } as const
+
+  it('só a resposta que VALE de cada pergunta do questionário', () => {
+    expect([...respostasCorrigiveis(base)].sort()).toEqual(['t2', 't3'])
+  })
+
+  it('com plano, ou fora de DRAFT/SPEC_READY, nenhuma', () => {
+    expect(respostasCorrigiveis({ ...base, plan: { plan_id: 'x', status: 'PROPOSED', slices: [] } }).size).toBe(0)
+    expect(respostasCorrigiveis({ ...base, project: { ...base.project, state: 'VERIFIED_PROTOTYPE' } }).size).toBe(0)
+    expect(respostasCorrigiveis({ ...base, project: { ...base.project, state: 'DRAFT' } }).size).toBe(2)
+  })
+
+  it('o lance da resposta carrega a pergunta e se é corrigível', () => {
+    const respostas = transcricaoDaTarefa(base).filter(lance => lance.tipo === 'resposta')
+    const alunos = respostas.find(lance => lance.tipo === 'resposta' && lance.texto === 'Alunos')
+    const professores = respostas.find(lance => lance.tipo === 'resposta' && lance.texto === 'Professores')
+    expect(alunos).toMatchObject({ perguntaId: 'audience', pergunta: 'Para quem?', corrigivel: false })
+    expect(professores).toMatchObject({ corrigivel: true })
   })
 })

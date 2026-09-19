@@ -52,12 +52,14 @@ import type { EvidenceRecordStore } from './evidence-store.js'
 import { autorizacaoDoAmbiente, perfilEfetivo } from './perfil-de-geracao.js'
 import { ModelCodeGenerator, PromptToAppPipeline } from './pipeline.js'
 import { PlannerEngine, esquemaJsonDoPlano } from './planner.js'
-import { HarnessPromptModel } from './ports.js'
+import { HarnessPromptModel, type PropositoDoModelo } from './ports.js'
+import { esquemaJsonDaLeitura } from './leitura.js'
 import { ManagedBuilderLifecycleResolver } from './builder-resolver.js'
 import { PromptToAppService, type PromptToAppActor, type PromptToAppRepository } from './service.js'
 import { SharpLogoProcessor } from './logo.js'
 import { productionTemplateDirectory } from './template-policy.js'
 
+export * from './leitura.js'
 export * from './appspec.js'
 export * from './auth-generator.js'
 export * from './builder-lifecycle.js'
@@ -122,7 +124,8 @@ export function modeloLocal(ambiente: Readonly<Record<string, string | undefined
  * fechada, e o servidor local sabe obrigá-la. `intake` NÃO entra: aquele mesmo
  * propósito serve tanto para a síntese da especificação, que é JSON, quanto
  * para a resposta recomendada, que é uma frase em português — obrigar uma
- * gramática ali transformaria a recomendação em objeto vazio.
+ * gramática ali transformaria a recomendação em objeto vazio. A `leitura` do
+ * pedido é JSON fechado e tem propósito próprio justamente para ganhar a sua.
  *
  * O plano entrou depois da geração, e por uma medição: sem gramática, o
  * `qwen2.5-coder:3b` passou de 9.700 tokens escrevendo plano e não parou. O
@@ -130,9 +133,10 @@ export function modeloLocal(ambiente: Readonly<Record<string, string | undefined
  * @param purpose - o tipo do pedido.
  * @returns o JSON Schema, ou `undefined` quando este pedido não tem forma fechada.
  */
-export function esquemaDoPedido(purpose: 'intake' | 'plan' | 'generate'): Record<string, unknown> | undefined {
+export function esquemaDoPedido(purpose: PropositoDoModelo): Record<string, unknown> | undefined {
   if (purpose === 'generate') return esquemaJsonDaSaida()
   if (purpose === 'plan') return esquemaJsonDoPlano()
+  if (purpose === 'leitura') return esquemaJsonDaLeitura()
   return undefined
 }
 
@@ -145,7 +149,7 @@ export function esquemaDoPedido(purpose: 'intake' | 'plan' | 'generate'): Record
  * @returns a requisição, marcada ou não.
  */
 export function marcaDoPedido(
-  ligado: boolean, purpose: 'intake' | 'plan' | 'generate', route: string, options: GenerateOptions,
+  ligado: boolean, purpose: PropositoDoModelo, route: string, options: GenerateOptions,
 ): GenerateOptions {
   if (!ligado || route !== ROTA_LOCAL) return options
   const esquema = esquemaDoPedido(purpose)

@@ -461,6 +461,28 @@ export function App() {
       await refreshDetalhes()
     })
   }
+  /**
+   * CORRIGE uma resposta do questionário (PLAN-01).
+   *
+   * Com a especificação já pronta, o servidor a refaz a partir das respostas
+   * atuais e devolve a versão nova; sem ela, devolve a próxima pergunta. Nos
+   * dois casos a conversa é relida do servidor, como depois de qualquer ação.
+   * @param perguntaId - a pergunta corrigida.
+   * @param texto - a resposta nova.
+   */
+  async function corrigirResposta(perguntaId: string, texto: string) {
+    if (projectId === null) return
+    const material = ['correcao', perguntaId, texto.trim()].join('|')
+    const envio = intencaoPorImpressao(intencaoDaResposta.current, impressaoDoEnvioLocal('resposta', projectId, material))
+    intencaoDaResposta.current = envio
+    await safely(async () => {
+      await api(`/projects/${projectId}/intake/correct`, {
+        method: 'POST', body: JSON.stringify({ question_id: perguntaId, answer: texto.trim(), request_key: envio.chave }),
+      })
+      intencaoDaResposta.current = null
+      await refreshDetalhes()
+    })
+  }
   /** Pede mudança no plano proposto, com o texto do compositor. */
   async function mudarPlanoPelaConversa(texto: string) {
     if (projectId === null) return
@@ -868,6 +890,7 @@ export function App() {
         mudarPlano={mudarPlanoPelaConversa}
         ajustar={ajustar}
         perguntar={perguntar}
+        corrigir={corrigirResposta}
         integracoes={integracoes}
         iniciais={iniciaisDaConta(sessionName)}
         painel={painel} abrirPainel={setPainel}

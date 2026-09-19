@@ -131,7 +131,13 @@ export interface LanceBase {
 export type Lance =
   | (LanceBase & { readonly tipo: 'pedido'; readonly texto: string })
   | (LanceBase & { readonly tipo: 'pergunta'; readonly texto: string; readonly perguntaId: string; readonly respondida: boolean })
-  | (LanceBase & { readonly tipo: 'resposta'; readonly texto: string; readonly recomendada: boolean })
+  | (LanceBase & {
+    readonly tipo: 'resposta'; readonly texto: string; readonly recomendada: boolean
+    /** A pergunta respondida, para a correção saber o que está corrigindo. */
+    readonly perguntaId: string; readonly pergunta: string
+    /** Se esta resposta ainda pode ser corrigida pela conversa (ver `respostasCorrigiveis`). */
+    readonly corrigivel: boolean
+  })
   | (LanceBase & {
     readonly tipo: 'plano'
     readonly planoId: string
@@ -188,6 +194,7 @@ export function transcricaoDaTarefa(detalhes: DetalhesDaTarefa): readonly Lance[
     quando: nascimento, texto: detalhes.project.original_brief,
   } })
 
+  const corrigiveis = respostasCorrigiveis(detalhes)
   for (const turno of detalhes.turns ?? []) {
     /*
       QUEM FALOU DEPENDE DE QUEM PERGUNTOU, e inverter isso seria mentir sobre
@@ -209,6 +216,7 @@ export function transcricaoDaTarefa(detalhes: DetalhesDaTarefa): readonly Lance[
       lances.push({ ancora: 'instante', lance: {
         tipo: 'resposta', id: `resposta:${turno.turn_id}`, autor: daPessoa ? 'estudio' : 'pessoa',
         quando: turno.created_at, texto: turno.answer, recomendada: turno.recommended,
+        perguntaId: turno.question_id, pergunta: turno.question, corrigivel: corrigiveis.has(turno.turn_id),
       } })
     }
   }
@@ -320,4 +328,28 @@ function ordenados(lances: readonly Ancorado[]): readonly Lance[] {
       return porInstante !== 0 ? porInstante : esquerda.posicao - direita.posicao
     })
     .map(entrada => entrada.item.lance)
+}
+
+/** As perguntas do questionário cuja resposta pode ser corrigida. */
+export const PERGUNTAS_CORRIGIVEIS: readonly string[] = ['audience', 'goal', 'content']
+
+/**
+ * As respostas que a pessoa ainda pode corrigir, pelo identificador do turno.
+ *
+ * É a MESMA regra do servidor (`correctIntakeAnswer`), repetida aqui só para
+ * não oferecer um botão que o servidor recusaria: antes do plano, só as
+ * perguntas do questionário, e só a resposta que VALE — a mais recente de cada
+ * pergunta. Corrigir uma resposta antiga, já substituída, não mudaria nada.
+ * Quem decide continua sendo o servidor; esta função só evita o botão mudo.
+ * @param detalhes - o corpo da tarefa.
+ * @returns os turnos corrigíveis.
+ */
+export function respostasCorrigiveis(detalhes: DetalhesDaTarefa): ReadonlySet<string> {
+  const estado = detalhes.project.state
+  if ((estado !== 'DRAFT' && estado !== 'SPEC_READY') || (detalhes.plan !== null && detalhes.plan !== undefined)) return new Set()
+  const vigente = new Map<string, string>()
+  for (const turno of detalhes.turns ?? []) {
+    if (PERGUNTAS_CORRIGIVEIS.includes(turno.question_id) && turno.answer.trim() !== '') vigente.set(turno.question_id, turno.turn_id)
+  }
+  return new Set(vigente.values())
 }
