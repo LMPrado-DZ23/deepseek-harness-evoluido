@@ -142,6 +142,9 @@ importers:
       '@dz23-studio/integration-hub':
         specifier: workspace:*
         version: link:../../../plugins/integration-hub
+      '@dz23-studio/llm-cli':
+        specifier: workspace:*
+        version: link:../../../plugins/llm-cli
       '@dz23-studio/mcp-client':
         specifier: workspace:*
         version: link:../../../plugins/mcp-client
@@ -431,6 +434,15 @@ importers:
         specifier: 8.0.1
         version: 8.0.1
 
+  plugins/llm-cli:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/packages/llm/llm
+
   plugins/mcp-client:
     dependencies:
       '@deepseek-ai/cordis':
@@ -445,7 +457,7 @@ importers:
     devDependencies:
       '@modelcontextprotocol/server-everything':
         specifier: 2026.8.31
-        version: 2026.8.31
+        version: 2026.8.31(supports-color@9.4.0)
 
   plugins/mission:
     dependencies:
@@ -7298,7 +7310,7 @@ importers:
         version: link:../../../vendor/schemastery
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
-        version: 1.30.0(supports-color@9.4.0)(zod@4.4.3)
+        version: 1.30.0(zod@4.4.3)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -7332,7 +7344,7 @@ importers:
         version: link:../../core/tools
       '@modelcontextprotocol/server-everything':
         specifier: ^2026.7.4
-        version: 2026.8.31
+        version: 2026.8.31(supports-color@9.4.0)
       '@modelcontextprotocol/server-filesystem':
         specifier: ^2026.7.4
         version: 2026.8.31(zod@4.4.3)
@@ -16667,7 +16679,7 @@ snapshots:
       protobufjs: 7.6.6
       ws: 8.21.0
     optionalDependencies:
-      '@modelcontextprotocol/sdk': 1.30.0(supports-color@9.4.0)(zod@4.4.3)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -16981,7 +16993,7 @@ snapshots:
 
   '@mixmark-io/domino@2.2.0': {}
 
-  '@modelcontextprotocol/sdk@1.30.0(supports-color@9.4.0)(zod@4.4.3)':
+  '@modelcontextprotocol/sdk@1.30.0(zod@4.4.3)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.5)
       ajv: 8.20.0
@@ -16992,7 +17004,7 @@ snapshots:
       eventsource: 3.0.7
       eventsource-parser: 3.1.1
       express: 5.2.1(supports-color@9.4.0)
-      express-rate-limit: 8.7.0(express@5.2.1)(supports-color@9.4.0)
+      express-rate-limit: 8.7.0(express@5.2.1(supports-color@9.4.0))
       hono: 4.13.5
       jose: 6.2.10
       json-schema-typed: 8.0.2
@@ -17003,9 +17015,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@modelcontextprotocol/server-everything@2026.8.31':
+  '@modelcontextprotocol/server-everything@2026.8.31(supports-color@9.4.0)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.30.0(supports-color@9.4.0)(zod@4.4.3)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
       cors: 2.8.6
       express: 5.2.1(supports-color@9.4.0)
       jszip: 3.10.1
@@ -17016,7 +17028,7 @@ snapshots:
 
   '@modelcontextprotocol/server-filesystem@2026.8.31(zod@4.4.3)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.30.0(supports-color@9.4.0)(zod@4.4.3)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
       diff: 8.0.4
       glob: 13.0.6
       minimatch: 10.2.6
@@ -18837,9 +18849,11 @@ snapshots:
       '@dz23-studio/agent-team': link:plugins/agent-team
       '@dz23-studio/agents': link:plugins/agents
       '@dz23-studio/assistant-bridge': link:plugins/assistant-bridge
+      '@dz23-studio/business': link:plugins/business
       '@dz23-studio/emergency-stop': link:plugins/emergency-stop
       '@dz23-studio/identity': link:plugins/identity
       '@dz23-studio/integration-hub': link:plugins/integration-hub
+      '@dz23-studio/llm-cli': link:plugins/llm-cli
       '@dz23-studio/mcp-client': link:plugins/mcp-client
       '@dz23-studio/mission': link:plugins/mission
       '@dz23-studio/policy': link:plugins/policy
@@ -19031,7 +19045,7 @@ snapshots:
 
   expect-type@1.4.0: {}
 
-  express-rate-limit@8.7.0(express@5.2.1)(supports-color@9.4.0):
+  express-rate-limit@8.7.0(express@5.2.1(supports-color@9.4.0)):
     dependencies:
       debug: 4.4.3(supports-color@9.4.0)
       express: 5.2.1(supports-color@9.4.0)

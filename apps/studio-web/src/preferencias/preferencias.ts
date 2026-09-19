@@ -111,6 +111,13 @@ export function secoesDePreferencias(contexto: ContextoDasPreferencias): readonl
       outra roupa: quem a lê constrói de novo o que já existe.
     */
     { id: 'uso', grupo: 'configuracoes', disponivel: true },
+    /*
+      CONEXÕES DE IA (pedido do titular, 19/09/2026): escolher pela tela qual IA
+      as criações usam, incluindo as ferramentas de linha de comando em que a
+      pessoa já entrou com a conta dela. Disponível porque o serviço de rotas
+      está em todo perfil que tem criações.
+    */
+    { id: 'conexoes', grupo: 'configuracoes', disponivel: true },
     { id: 'habilidades', grupo: 'capacidades', disponivel: true, href: HABILIDADES_PATH },
     { id: 'plugins', grupo: 'capacidades', disponivel: true, href: PLUGINS_PATH },
     { id: 'computador', grupo: 'capacidades', disponivel: false, pendencia: 'semComputador' },

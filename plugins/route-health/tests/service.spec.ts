@@ -593,13 +593,15 @@ describe('M-05: liga e desliga por rota', () => {
     const h = service()
     await h.service.initialize(scope, new Set(['omniroute', 'deepseek-official']))
     await h.service.setRouteEnabled(scope, 'deepseek-official', false)
+    // O desligamento em si fica no registro de trocas, dizendo quem decidiu.
+    expect(h.service.switches(scope)).toMatchObject([{ from_route: 'deepseek-official', to_route: 'blocked', reason: 'Desligada pela pessoa nas Preferências.', explicit_route: true }])
     let cascades = 0
     await collect(h.service.streamWithFallback(scope, options, () => chunks(error()), () => {
       cascades += 1
       return chunks()
     }))
     expect(cascades).toBe(0)
-    expect(h.service.switches(scope)).toEqual([])
+    expect(h.service.switches(scope)).toHaveLength(1)
   })
 
   it('meia-abertura nao ressuscita uma rota desligada', async () => {

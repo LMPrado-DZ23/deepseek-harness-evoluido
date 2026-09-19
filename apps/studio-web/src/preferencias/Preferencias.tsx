@@ -8,6 +8,7 @@ import { podeOperar, secaoInicial, secoesDePreferencias, type ContextoDasPrefere
 import { chaveDoVeredito, contagemEmTexto, custoEmTexto, linhasDeUso, totalDeUso, type LinhaDeUso, type UsoDoEspaco } from './uso'
 import { atalhosDoStudio } from './atalhos'
 import { api } from '../api'
+import { comMudanca, lerConexoes, linhasDeConexao, mudarConexao, type LinhaDeConexao, type RespostaDasRotas } from './conexoes'
 
 /**
  * As Preferências, como a referência as mostra: um modal com a navegação à
@@ -101,7 +102,12 @@ export function Preferencias({ contexto, aoFechar, conta, notificacao }: {
  * informado pelo provedor não existem neste produto. Sem essa frase, alguém lê
  * "Uso e custos" e supõe que está vendo a fatura.
  */
-export function UsoDoEspacoDeTrabalho({ ler = () => api<UsoDoEspaco>('/usage') }: {
+// Fora do componente pelo mesmo motivo de `LER_CONEXOES`: o padrão recriado a
+// cada desenho refazia a leitura a cada resposta, sem fim, enquanto a seção
+// estivesse aberta.
+const LER_USO = (): Promise<UsoDoEspaco> => api<UsoDoEspaco>('/usage')
+
+export function UsoDoEspacoDeTrabalho({ ler = LER_USO }: {
   readonly ler?: () => Promise<UsoDoEspaco>
 } = {}) {
   const { preferencias } = useCatalogos()
@@ -115,14 +121,83 @@ export function UsoDoEspacoDeTrabalho({ ler = () => api<UsoDoEspaco>('/usage') }
       () => { if (vivo) setErro(true) },
     )
     return () => { vivo = false }
-    // `ler` entra na lista porque é ele que define a leitura; o valor padrão é
-    // recriado a cada render, e por isso quem monta em produção não o passa.
   }, [ler])
 
   if (erro) return <p className="dz-preferencias-pendencia" role="status">{preferencias.usoErro}</p>
   if (uso === null) return <p className="dz-preferencias-controle" role="status">{preferencias.usoLendo}</p>
   if (!uso.measured) return <p className="dz-preferencias-pendencia">{preferencias.usoSemMedicao}</p>
   return <TabelaDeUso linhas={linhasDeUso(uso.routes ?? [])} veredito={uso.budget?.verdict} />
+}
+
+/**
+ * As CONEXÕES DE IA: qual IA as criações usam, e o interruptor de cada uma.
+ *
+ * Mesmos três estados do uso — lendo, leu, não deu —, e um quarto só para a
+ * mudança que falhou: a lista continua na tela, com o estado que o servidor
+ * confirmou por último, e a frase diz que a mudança não valeu.
+ */
+// Os padrões moram FORA do componente: recriados a cada desenho, eles
+// mudariam a dependência do efeito e a leitura se repetiria sem fim.
+const LER_CONEXOES = (): Promise<RespostaDasRotas> => lerConexoes()
+const MUDAR_CONEXAO = (rota: string, ligada: boolean): Promise<RespostaDasRotas> => mudarConexao(rota, ligada)
+
+export function ConexoesDeIa({ ler = LER_CONEXOES, mudar = MUDAR_CONEXAO }: {
+  readonly ler?: () => Promise<RespostaDasRotas>
+  readonly mudar?: (rota: string, ligada: boolean) => Promise<RespostaDasRotas>
+} = {}) {
+  const { preferencias } = useCatalogos()
+  const texto = preferencias.conexoes
+  const [resposta, setResposta] = useState<RespostaDasRotas | null>(null)
+  const [erro, setErro] = useState(false)
+  const [erroAoMudar, setErroAoMudar] = useState(false)
+  const [mudando, setMudando] = useState<string | null>(null)
+
+  useEffect(() => {
+    let vivo = true
+    void ler().then(valor => { if (vivo) setResposta(valor) }, () => { if (vivo) setErro(true) })
+    return () => { vivo = false }
+  }, [ler])
+
+  if (erro) return <p className="dz-preferencias-pendencia" role="status">{texto.erro}</p>
+  if (resposta === null) return <p className="dz-preferencias-controle" role="status">{texto.lendo}</p>
+  const alternar = (rota: string, ligada: boolean) => {
+    const anterior = resposta
+    setMudando(rota)
+    setErroAoMudar(false)
+    setResposta(comMudanca(anterior, rota, ligada))
+    void mudar(rota, ligada).then(valor => { setResposta(valor) }, () => { setResposta(anterior); setErroAoMudar(true) }).finally(() => { setMudando(null) })
+  }
+  return <ListaDeConexoes linhas={linhasDeConexao(resposta)} mudando={mudando !== null} erroAoMudar={erroAoMudar} aoAlternar={alternar} />
+}
+
+/** As conexões já lidas, desenhadas. Separado para ter teste sem rede. */
+export function ListaDeConexoes({ linhas, mudando, erroAoMudar, aoAlternar }: {
+  readonly linhas: readonly LinhaDeConexao[]
+  readonly mudando: boolean
+  readonly erroAoMudar: boolean
+  readonly aoAlternar: (rota: string, ligada: boolean) => void
+}) {
+  const texto = useCatalogos().preferencias.conexoes
+  return <div className="dz-preferencias-uso">
+    <p>{texto.explicacao}</p>
+    <ul className="dz-preferencias-conexoes">
+      {linhas.map(linha => <li key={linha.rota}>
+        <label>
+          <input type="checkbox" checked={linha.ligada} disabled={mudando}
+            aria-label={comValores(texto.ligar, { nome: linha.nome })}
+            onChange={evento => aoAlternar(linha.rota, evento.target.checked)} />
+          <span>
+            <strong>{linha.nome}</strong>
+            <span className="dz-preferencias-uso-limite">{texto.tipos[linha.tipo]} · {texto.estados[linha.estado]}</span>
+            {linha.emUso && <span className="dz-preferencias-conexao-em-uso">{texto.emUso}</span>}
+          </span>
+        </label>
+      </li>)}
+    </ul>
+    {erroAoMudar && <p className="dz-preferencias-pendencia" role="alert">{texto.erroMudar}</p>}
+    <p className="dz-preferencias-uso-limite">{texto.linhaComoInstalar}</p>
+    <p className="dz-preferencias-uso-limite">{texto.limitacao}</p>
+  </div>
 }
 
 /**
@@ -303,6 +378,7 @@ function Conteudo({ secao, conta, notificacao }: {
   }
   if (secao.id === 'notificacoes') return <div className="dz-preferencias-controle">{notificacao}</div>
   if (secao.id === 'uso') return <UsoDoEspacoDeTrabalho />
+  if (secao.id === 'conexoes') return <ConexoesDeIa />
   if (secao.id === 'atalhos') return <ListaDeAtalhos />
   if (secao.id === 'privacidade') return <ControlesDeDados />
   if (secao.id === 'idioma') return <SeletorDeIdioma />

@@ -187,3 +187,8 @@
   texto pequeno, ela não é lida por ninguém.
 */
 .dz-preferencias-idioma .dz-preferencias-uso-limite { margin: var(--dz-3) 0 0; }
+
+.dz-preferencias-conexoes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.dz-preferencias-conexoes label { display: flex; gap: 0.75rem; align-items: flex-start; cursor: pointer; }
+.dz-preferencias-conexoes label > span { display: grid; gap: 0.125rem; }
+.dz-preferencias-conexao-em-uso { font-size: 0.8125rem; font-weight: 600; color: var(--dz-success); }

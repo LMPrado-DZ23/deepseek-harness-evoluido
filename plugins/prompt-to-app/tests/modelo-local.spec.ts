@@ -32,3 +32,12 @@ describe('o modelo da rota local', () => {
     expect(modeloLocal({ DZ23_OLLAMA_MODEL: '  qwen3-coder  ' })).toBe('qwen3-coder')
   })
 })
+
+describe('modelosPorRota', () => {
+  it('as rotas da linha de comando usam o modelo da própria ferramenta', async () => {
+    const { modelosPorRota } = await import('../src/index.ts')
+    expect(modelosPorRota({ DZ23_OLLAMA_MODEL: 'm' }, ['ollama', 'cli-claude', 'deepseek-official'])).toEqual({
+      ollama: 'm', omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat', 'cli-claude': 'padrao',
+    })
+  })
+})

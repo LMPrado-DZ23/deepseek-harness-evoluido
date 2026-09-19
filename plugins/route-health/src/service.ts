@@ -150,6 +150,25 @@ export interface RouteBudgetConfig {
  */
 export const ROTA_LOCAL = 'ollama'
 
+/** O prefixo das rotas da conexão pela linha de comando (`@dz23-studio/llm-cli`). */
+export const PREFIXO_DE_LINHA = 'cli-'
+
+/**
+ * As rotas que o serviço considera, na ordem em que a primeira saudável ganha.
+ *
+ * A IA local vem primeiro (não cobra e não manda dado para fora). As
+ * ferramentas de linha de comando vêm em seguida, antes das rotas por chave:
+ * quem instalou uma delas já paga a assinatura, e a chave é o gasto novo. Só
+ * entram as que o adaptador REGISTROU — uma ferramenta que não está instalada
+ * não é rota que caiu.
+ * @param registradas - as rotas que o runtime de modelos conhece.
+ * @returns a lista ordenada.
+ */
+export function rotasDoServico(registradas: ReadonlySet<string>): readonly string[] {
+  const deLinha = [...registradas].filter(rota => rota.startsWith(PREFIXO_DE_LINHA)).sort()
+  return [ROTA_LOCAL, ...deLinha, 'omniroute', 'deepseek-official']
+}
+
 export interface RouteHealthConfig {
   readonly routes: readonly string[]
   readonly fallbackRoute: string
@@ -465,9 +484,12 @@ export class StudioRouteHealthService {
    * @param enabled - `true` liga, `false` desliga.
    * @returns quando a decisão estiver gravada.
    */
-  setRouteEnabled(scope: RouteScope, route: string, enabled: boolean): Promise<void> {
+  async setRouteEnabled(scope: RouteScope, route: string, enabled: boolean): Promise<void> {
     const previous = this.get(scope, route) ?? this.baseRecord(scope, route, this.#configured.has(route) ? 'OK' : 'NOT_CONFIGURED')
-    return this.repository.putRoute({ ...previous, enabled, updated_at: this.clock().toISOString() })
+    await this.repository.putRoute({ ...previous, enabled, updated_at: this.clock().toISOString() })
+    // A decisão fica no registro de trocas: quem lê a história das rotas vê
+    // quando a pessoa ligou ou desligou, e não só o estado de agora.
+    await this.auditSwitch(scope, route, enabled ? route : 'blocked', t(enabled ? 'reasons.ligadaPelaPessoa' : 'reasons.desligadaPelaPessoa'), true)
   }
 
   /** O estado do circuito de uma rota neste escopo, agora. */

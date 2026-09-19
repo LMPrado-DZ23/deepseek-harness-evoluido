@@ -137,6 +137,9 @@ importers:
       '@dz23-studio/integration-hub':
         specifier: workspace:*
         version: link:../../../plugins/integration-hub
+      '@dz23-studio/llm-cli':
+        specifier: workspace:*
+        version: link:../../../plugins/llm-cli
       '@dz23-studio/mcp-client':
         specifier: workspace:*
         version: link:../../../plugins/mcp-client
@@ -422,6 +425,15 @@ importers:
       '@types/nodemailer':
         specifier: 8.0.1
         version: 8.0.1
+
+  plugins/llm-cli:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:*
+        version: link:../../third_party/deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:*
+        version: file:third_party/deepseek-harness/packages/llm/llm(@deepseek-ai/cordis@file:third_party/deepseek-harness/vendor/cordis)
 
   plugins/mcp-client:
     dependencies:

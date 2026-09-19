@@ -477,6 +477,12 @@
     # RECUSADA — o padrão seguro é recusar, e não correr sem teto.
     - id: dz23-studio-mission
       name: '@dz23-studio/mission'
+    # CONEXÃO PELA LINHA DE COMANDO (pedido do titular, 19/09/2026): as
+    # ferramentas de IA que a pessoa já instalou e em que já entrou com a conta
+    # dela (Claude Code, Gemini CLI, Qwen Code, Codex CLI) viram rotas de
+    # modelo. Monta ANTES de `route-health`, que lê as rotas registradas ao subir.
+    - id: dz23-studio-llm-cli
+      name: '@dz23-studio/llm-cli'
     - id: dz23-studio-route-health
       name: '@dz23-studio/route-health'
     - id: dz23-studio-prompt-to-app

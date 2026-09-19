@@ -124,6 +124,20 @@ export interface RouteBudgetConfig {
  * que diverge no primeiro conserto de uma das cópias.
  */
 export declare const ROTA_LOCAL = "ollama";
+/** O prefixo das rotas da conexão pela linha de comando (`@dz23-studio/llm-cli`). */
+export declare const PREFIXO_DE_LINHA = "cli-";
+/**
+ * As rotas que o serviço considera, na ordem em que a primeira saudável ganha.
+ *
+ * A IA local vem primeiro (não cobra e não manda dado para fora). As
+ * ferramentas de linha de comando vêm em seguida, antes das rotas por chave:
+ * quem instalou uma delas já paga a assinatura, e a chave é o gasto novo. Só
+ * entram as que o adaptador REGISTROU — uma ferramenta que não está instalada
+ * não é rota que caiu.
+ * @param registradas - as rotas que o runtime de modelos conhece.
+ * @returns a lista ordenada.
+ */
+export declare function rotasDoServico(registradas: ReadonlySet<string>): readonly string[];
 export interface RouteHealthConfig {
     readonly routes: readonly string[];
     readonly fallbackRoute: string;

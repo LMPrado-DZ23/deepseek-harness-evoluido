@@ -26,6 +26,9 @@ import { createBusinessHttpExtension } from '../../../plugins/business/src/http.
 import { BusinessService, type BusinessRepository } from '../../../plugins/business/src/service.js'
 import type { Empresa, RegistroDeOferta, RegistroDePlano, VinculoDeTarefa } from '../../../plugins/business/src/model.js'
 import { createPreviewGatewayHttpHandler, type PreviewForwardPort } from '../../../plugins/preview/src/gateway.js'
+import { createRouteHealthHandler, createRouteSwitchHandler } from '../../../plugins/route-health/src/index.js'
+import { StudioRouteHealthService, rotasDoServico, type RouteHealthRepository } from '../../../plugins/route-health/src/service.js'
+import type { RouteHealthRecord, RouteSwitchEvent } from '../../../plugins/route-health/src/model.js'
 import { createPreviewProjectHttpExtension } from '../../../plugins/preview/src/http.js'
 import type { PreviewAdmission, PreviewRecord } from '../../../plugins/preview/src/model.js'
 import {
@@ -669,11 +672,47 @@ const server = createServer((request, response) => {
     }
     return json(response, 404, { error: 'rota não encontrada' })
   }
+  /*
+    As CONEXÕES DE IA, com o serviço de rotas DE PRODUÇÃO sobre armazenamento
+    em memória: a IA local e o Claude Code pela linha de comando estão
+    "instalados". Só o armazenamento é dublê — a ordem, o liga/desliga e a
+    escolha de qual está em uso são o código real.
+  */
+  // Um serviço POR TAMANHO de tela (cookie `e2e_rotas`): os quatro tamanhos
+  // rodam em paralelo, e um único serviço compartilhado deixava um tamanho
+  // desfazer o que o outro acabou de desligar.
+  if (request.url?.startsWith('/e2e/reset-routes?chave=') === true) {
+    const chave = new URL(request.url, 'http://127.0.0.1:4179').searchParams.get('chave') ?? ''
+    void servicoDeRotasE2e().then(novo => { rotasE2e.set(chave, novo); plain(response, 200, 'ok') })
+    return
+  }
+  if (request.url === '/api/studio/routes/health' || request.url === '/api/studio/routes/enabled') {
+    const chave = /(?:^|;\s*)e2e_rotas=([^;]+)/u.exec(request.headers.cookie ?? '')?.[1] ?? ''
+    const servico = rotasE2e.get(chave)
+    if (servico === undefined) return json(response, 503, { error: 'rotas do e2e não preparadas' })
+    const manipulador = request.url.endsWith('/health') ? createRouteHealthHandler : createRouteSwitchHandler
+    return void manipulador(servico, identity, () => NOMES_E2E)(request, response)
+  }
   if (request.url?.startsWith('/api/studio/identity') === true) return void identityHandler(request, response)
   if (request.url?.startsWith('/api/studio/missions') === true) return void missionHandler(request, response)
   if (request.url?.startsWith('/api/studio/apps') === true) return void apiHandler(request, response)
   return void webHandler(request, response)
 })
+const NOMES_E2E = { ollama: 'Ollama local', 'cli-claude': 'Claude Code (sua assinatura, pela linha de comando)' }
+async function servicoDeRotasE2e(): Promise<StudioRouteHealthService> {
+  const registros = new Map<string, RouteHealthRecord>()
+  const eventos: RouteSwitchEvent[] = []
+  const repositorio: RouteHealthRepository = {
+    routes: () => [...registros.values()], events: () => eventos,
+    putRoute: async registro => { registros.set(registro.record_id, registro) },
+    putEvent: async evento => { eventos.push(evento) },
+  }
+  const instaladas = new Set(['ollama', 'cli-claude'])
+  const servico = new StudioRouteHealthService(repositorio, { routes: rotasDoServico(instaladas), fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash', localRoute: 'ollama' })
+  await servico.initialize({ orgId: session.org_id, tenantId: session.tenant_id }, instaladas)
+  return servico
+}
+const rotasE2e = new Map<string, StudioRouteHealthService>()
 await assertBuiltInterfaceIsFresh(resolve(root, 'apps', 'studio-web'))
 server.listen(4179, '127.0.0.1')
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { server.close(() => { void rm(scratch, { recursive: true, force: true }).finally(() => process.exit(0)) }) })

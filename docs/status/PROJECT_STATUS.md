@@ -44,7 +44,13 @@ A prioridade passou a ser o AGENTE GERAL, sem abandonar a jornada do aplicativo.
   confiáveis agora vem só da identidade; pedidos que esperam o modelo usam a
   espera longa (o navegador desiste aos ~300 s).
 
-**Próximo:** medir a conversa com o modelo local no WSL2; mostrar plano, lista
+- **Conexão pela linha de comando (LLM-CLI-01, UX-CONEXOES-01):** a DeepSeek
+  ficou sem crédito e o titular pediu para usar o que ele tem. O Claude Code,
+  o Gemini CLI, o Qwen Code e o Codex CLI instalados viram conexões, com a
+  conta que a pessoa já usa nelas; Preferências → Conexões de IA mostra qual
+  IA cria e liga/desliga cada uma.
+
+**Próximo:** medir uma criação pelo Claude Code do titular; medir a conversa com o modelo local no WSL2; mostrar plano, lista
 de tarefas e ferramentas na conversa; tarefas agendadas; conectores MCP como
 ferramentas; rodar a jornada do aplicativo até a prévia aberta.
 

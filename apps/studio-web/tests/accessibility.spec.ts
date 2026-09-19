@@ -148,6 +148,44 @@ test.describe('acessibilidade do fluxo principal', () => {
     expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
   })
 
+  test('as Conexões de IA dizem qual IA cria, e desligar a local passa para a linha de comando', async ({ page }, info) => {
+    /*
+      Pedido do titular em 19/09/2026: usar a IA que ele já tem, incluindo as
+      ferramentas de linha de comando com a conta dele, escolhendo PELA TELA.
+      O serviço de rotas por trás é o de produção.
+    */
+    const chave = `${info.project.name}-${info.repeatEachIndex}-${info.retry}`
+    await page.request.get(`http://127.0.0.1:4179/e2e/reset-routes?chave=${chave}`)
+    await page.context().addCookies([{ name: 'e2e_rotas', value: chave, url: 'http://studio.dz23.localhost:4179' }])
+    const leituras: string[] = []
+    page.on('request', pedido => { if (/\/api\/studio\/(routes\/health|apps\/usage)$/u.test(pedido.url())) leituras.push(pedido.url()) })
+    await page.goto('/studio/')
+    const menu = page.getByRole('button', { name: 'Abrir o menu', exact: true })
+    if (await menu.isVisible()) await menu.click()
+    await page.getByRole('button', { name: 'Preferências', exact: true }).click()
+    const modal = page.getByRole('dialog', { name: 'Preferências' })
+    // Uso E conexões: as duas seções leem UMA vez ao abrir, e não a cada
+    // resposta (o padrão recriado a cada desenho refazia a leitura sem fim).
+    await modal.getByRole('button', { name: 'Uso e custos', exact: true }).click()
+    await modal.getByRole('button', { name: 'Conexões de IA', exact: true }).click()
+    await page.waitForTimeout(1_500)
+    expect(leituras.filter(url => url.endsWith('/usage')).length).toBeLessThanOrEqual(1)
+    expect(leituras.filter(url => url.endsWith('/routes/health')).length).toBe(1)
+    const local = modal.getByRole('listitem').filter({ hasText: 'Ollama local' })
+    const claude = modal.getByRole('listitem').filter({ hasText: 'Claude Code' })
+    await expect(local).toContainText('usada agora nas criações')
+    await expect(claude).not.toContainText('usada agora nas criações')
+    await expect(modal.getByRole('listitem').filter({ hasText: 'omniroute' })).toContainText('não configurada')
+
+    await modal.getByRole('checkbox', { name: 'Usar Ollama local' }).uncheck()
+    await expect(claude).toContainText('usada agora nas criações')
+    await expect(local).not.toContainText('usada agora nas criações')
+    await expect(modal.getByRole('checkbox', { name: 'Usar Ollama local' })).not.toBeChecked()
+
+    const semViolacao = await new AxeBuilder({ page }).analyze()
+    expect(semViolacao.violations.map(violation => violation.id)).toEqual([])
+  })
+
   test('os menus do compositor abrem com o que ESTE FRIGG tem ligado', async ({ page }) => {
     /*
       F08/F09 mostram os menus ancorados no compositor. O da referência lista as

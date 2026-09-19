@@ -5,7 +5,7 @@ import type { JobId, JobStart } from '@deepseek-ai/dsh-jobs'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@dz23-studio/identity'
-import { ROTA_LOCAL } from '@dz23-studio/route-health'
+import { PREFIXO_DE_LINHA, ROTA_LOCAL } from '@dz23-studio/route-health'
 import type {} from '@dz23-studio/tenancy'
 import { PRODUCTION_BUILDER_ROOT_POLICY, builderRuntimeRegistryPath, type BuilderSupervisorRootPolicy } from '@dz23-studio/builder-supervisor'
 import { mkdir, readFile, statfs } from 'node:fs/promises'
@@ -115,6 +115,18 @@ export const MODELO_LOCAL_PADRAO = 'qwen2.5-coder:7b'
 export function modeloLocal(ambiente: Readonly<Record<string, string | undefined>>): string {
   const declarado = ambiente.DZ23_OLLAMA_MODEL?.trim()
   return declarado === undefined || declarado === '' ? MODELO_LOCAL_PADRAO : declarado
+}
+
+/**
+ * O modelo de cada rota. As rotas da linha de comando usam o modelo que a
+ * própria ferramenta já usa (`padrao`): o FRIGG não escolhe por ela.
+ * @param ambiente - o ambiente do processo.
+ * @param rotas - as rotas que o runtime de modelos conhece.
+ * @returns rota → modelo.
+ */
+export function modelosPorRota(ambiente: Readonly<Record<string, string | undefined>>, rotas: readonly string[]): Readonly<Record<string, string>> {
+  const deLinha = rotas.filter(rota => rota.startsWith(PREFIXO_DE_LINHA)).map(rota => [rota, 'padrao'] as const)
+  return { ollama: modeloLocal(ambiente), omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat', ...Object.fromEntries(deLinha) }
 }
 
 /**
@@ -390,9 +402,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
     */
     markEstruturada: (options, purpose, route) =>
       marcaDoPedido(desvioLigado, purpose, route, options),
-    modelByRoute: config.modelByRoute ?? {
-      ollama: modeloLocal(process.env), omniroute: 'deepseek-v3.2', 'deepseek-official': 'deepseek-chat',
-    },
+    modelByRoute: config.modelByRoute ?? modelosPorRota(process.env, ctx.llm.listProviders().map(provider => provider.id)),
   })
   const runsRoot = resolve(config.runsRoot ?? resolve(homedir(), '.dz23-studio', 'generated-runs'))
   const logoStoreRoot = resolve(config.logoStoreRoot ?? resolve(homedir(), '.dz23-studio', 'assets'))

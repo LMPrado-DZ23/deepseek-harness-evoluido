@@ -15,6 +15,7 @@
     "idioma": "Idioma",
     "atalhos": "Atajos de teclado",
     "uso": "Uso y costes",
+    "conexoes": "Conexiones de IA",
     "habilidades": "Habilidades",
     "plugins": "Plugins",
     "computador": "Mi ordenador",
@@ -74,5 +75,25 @@
   "idiomaAjuda": "Cambiar el idioma solo cambia lo que está escrito en la pantalla. No cambia moneda, precio, permisos, tareas, historial ni la hora de las ejecuciones programadas.",
   "idiomaAtual": "Idioma en uso",
   "idiomaCobertura": "Por ahora, la navegación y esta pantalla de Preferencias están en los tres idiomas. Las demás pantallas siguen en portugués de Brasil y se van traduciendo pantalla a pantalla — decir que todo está traducido antes de eso sería falso.",
-  "idiomaNaoGuardado": "No se pudo guardar tu elección en este navegador, así que solo vale hasta que cierres la página."
+  "idiomaNaoGuardado": "No se pudo guardar tu elección en este navegador, así que solo vale hasta que cierres la página.",
+  "conexoes": {
+    "explicacao": "Las creaciones usan la primera conexión de esta lista que esté activada y lista. Para usar otra, desactiva las que están antes.",
+    "lendo": "Leyendo las conexiones…",
+    "erro": "No se pudieron leer las conexiones ahora.",
+    "erroMudar": "No se pudo cambiar esta conexión ahora.",
+    "tipos": {
+      "local": "IA local, en tu computadora",
+      "linha": "Por la línea de comandos, con tu cuenta",
+      "chave": "Por clave de API"
+    },
+    "estados": {
+      "pronta": "lista",
+      "naoConfigurada": "no configurada",
+      "comFalha": "con fallos recientes"
+    },
+    "emUso": "usada ahora en las creaciones",
+    "ligar": "Usar {nome}",
+    "linhaComoInstalar": "Para aparecer aquí, instala la herramienta (Claude Code, Gemini CLI, Qwen Code o Codex CLI), inicia sesión con tu cuenta en la terminal y reinicia FRIGG. FRIGG no guarda tu contraseña ni tu clave: la herramienta habla con el proveedor.",
+    "limitacao": "Por la línea de comandos el agente conversa, pero no usa herramientas (buscar, escribir archivos, programar). Un proyecto con el perfil privado solo usa la IA local."
+  }
 }

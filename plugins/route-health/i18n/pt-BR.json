@@ -2,7 +2,9 @@
   "errors": {
     "methodNotAllowed": "Método não permitido.",
     "invalidSession": "Sessão inválida.",
-    "routeFailure": "A conexão com a inteligência artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota."
+    "routeFailure": "A conexão com a inteligência artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota.",
+    "pedidoInvalido": "Pedido inválido: diga qual conexão ligar ou desligar.",
+    "rotaDesconhecida": "Esta conexão não existe nesta instalação."
   },
   "reasons": {
     "privateLocalOnly": "Perfil privado restrito à IA local.",
@@ -18,6 +20,8 @@
     "allOpen": "Circuito aberto em todas as rotas; nenhuma chamada nova enquanto durar a espera.",
     "disabled": "Rota desligada neste espaço de trabalho; ela não é escolhida enquanto continuar assim.",
     "balancedLocal": "Perfil equilibrado: a IA local está em uso e nada sai deste computador.",
-    "balancedExternal": "Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada."
+    "balancedExternal": "Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada.",
+    "ligadaPelaPessoa": "Ligada pela pessoa nas Preferências.",
+    "desligadaPelaPessoa": "Desligada pela pessoa nas Preferências."
   }
 }

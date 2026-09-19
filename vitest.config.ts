@@ -15,6 +15,7 @@ export default defineConfig({
       '@dz23-studio/emergency-stop': fileURLToPath(new URL('./plugins/emergency-stop/src/index.ts', import.meta.url)),
       '@dz23-studio/identity': fileURLToPath(new URL('./plugins/identity/src/index.ts', import.meta.url)),
       '@dz23-studio/integration-hub': fileURLToPath(new URL('./plugins/integration-hub/src/index.ts', import.meta.url)),
+      '@dz23-studio/llm-cli': fileURLToPath(new URL('./plugins/llm-cli/src/index.ts', import.meta.url)),
       '@dz23-studio/mission': fileURLToPath(new URL('./plugins/mission/src/index.ts', import.meta.url)),
       '@dz23-studio/mcp-client': fileURLToPath(new URL('./plugins/mcp-client/src/index.ts', import.meta.url)),
       '@dz23-studio/policy': fileURLToPath(new URL('./plugins/policy/src/index.ts', import.meta.url)),
