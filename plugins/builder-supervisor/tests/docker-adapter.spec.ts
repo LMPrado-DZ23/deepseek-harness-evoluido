@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
-import { DockerBuilderAdapter } from '../src/docker-adapter.js'
+import { DEFAULT_BUILDER_LIMITS, DockerBuilderAdapter, builderPolicySha256 } from '../src/docker-adapter.js'
 import type { DockerEnginePort } from '../src/docker-engine.js'
 import { openManagedExportArchive } from '../src/export-artifact.js'
 import { deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
@@ -123,6 +123,27 @@ describe('server-authoritative Docker builder adapter', () => {
     const normal = await create(engine).preflight(signal)
     const changed = await new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: join(tmpdir(), 'changed'), templateStoreVersion: templateVersion, templateStoreSha256, limits: limits({ memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000, pids: 64, timeoutMs: 1_000, workspaceBytes: 64 * 1024 * 1024, concurrentContainers: 2 }) }).preflight(signal)
     expect(changed.policy_sha256).not.toBe(normal.policy_sha256)
+  })
+
+  it('o instalador e o adaptador chegam ao MESMO hash de politica', async () => {
+    /*
+      A atestação compara o hash que o adaptador calcula com o que foi gravado
+      na configuração provisionada, e reprova com BUILDER_ATTESTATION_FAILED
+      quando divergem. O instalador grava o número de `builderPolicySha256`; o
+      adaptador atesta o dele. Este caso prende os dois à MESMA conta — com os
+      limites padrão, que são os que o instalador usa.
+    */
+    const semLimites = await new DockerBuilderAdapter({
+      engine: new FakeEngine(), imageDigest: image, installationId, scopeId, exportRoot: join(tmpdir(), 'policy'),
+      templateStoreVersion: templateVersion, templateStoreSha256,
+    }).preflight(new AbortController().signal)
+    expect(semLimites.policy_sha256).toBe(builderPolicySha256({
+      imageDigest: image, scopeId, templateStoreVersion: templateVersion, templateStoreSha256,
+    }))
+    // E limites diferentes dão hash diferente pela função também: ela não
+    // pode ignorar o que o adaptador amarra.
+    expect(builderPolicySha256({ imageDigest: image, scopeId, templateStoreVersion: templateVersion, templateStoreSha256, limits: { ...DEFAULT_BUILDER_LIMITS, pids: 64 } }))
+      .not.toBe(semLimites.policy_sha256)
   })
 
   it('rolls back volume and stager after staging failure', async () => {

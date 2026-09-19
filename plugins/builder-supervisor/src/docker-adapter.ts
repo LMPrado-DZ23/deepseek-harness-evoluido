@@ -53,6 +53,46 @@ export interface BuilderExecutionPort {
   listManaged(signal: AbortSignal): Promise<readonly string[]>
 }
 
+/** Os limites que o adaptador aplica quando ninguém declarou outros. */
+export const DEFAULT_BUILDER_LIMITS: BuilderLimits = Object.freeze({
+  memoryBytes: 2 * 1024 ** 3, nanoCpus: 2_000_000_000, pids: 256, timeoutMs: 180_000,
+  workspaceBytes: 4 * 1024 ** 3, maxWorkspaceBytes: 8 * 1024 ** 3, concurrentContainers: 2,
+  maxExportBytes: 2 * 1024 ** 3, maxRetainedExports: 5,
+})
+
+/**
+ * O hash da POLÍTICA de construção — imagem, escopo, store, comandos, limites e
+ * as restrições do contêiner.
+ *
+ * Ele é FUNÇÃO EXPORTADA, e não conta feita dentro do construtor, porque tem
+ * DOIS consumidores que precisam chegar ao mesmo número: o adaptador, que o
+ * atesta a cada execução, e o instalador, que o grava na configuração
+ * provisionada. A atestação compara os dois (`supervisor-main.ts`) e reprova
+ * com `BUILDER_ATTESTATION_FAILED` quando divergem. Uma segunda cópia desta
+ * conta no instalador seria a segunda verdade mais cara possível: ela
+ * concordaria com esta até o dia em que alguém mudasse um comando ou um limite
+ * aqui — e aí toda construção seria recusada, com o instalador jurando que
+ * provisionou certo.
+ * @param input - o que a política amarra.
+ * @returns o SHA-256 em hexadecimal.
+ */
+export function builderPolicySha256(input: {
+  readonly imageDigest: string
+  readonly scopeId: string
+  readonly templateStoreVersion: string
+  readonly templateStoreSha256: string
+  readonly limits?: BuilderLimits
+}): string {
+  return createHash('sha256').update(JSON.stringify({
+    protocol: 1, image: input.imageDigest, scope: input.scopeId,
+    templateStoreVersion: input.templateStoreVersion, templateStoreSha256: input.templateStoreSha256,
+    templateStoreValidator: 'host-canonical-v1', templateStoreMountSteps: ['install'], commands: COMMANDS,
+    exportAllowlist: ['.next/standalone/**', '.next/static/**', 'public/**', 'evidence/appspec-report.json'],
+    limits: input.limits ?? DEFAULT_BUILDER_LIMITS, user: '10001:10001', network: 'none', readOnlyRoot: true,
+    capDrop: ['ALL'], noNewPrivileges: true,
+  })).digest('hex')
+}
+
 export class DockerBuilderAdapter implements BuilderExecutionPort {
   readonly #limits: BuilderLimits
   readonly #active = new Map<string, string>()
@@ -67,12 +107,16 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
     if (!isInstallationId(options.installationId) || !isBuilderRuntimeScopeId(options.scopeId)) throw new Error('INVALID_RUNTIME_SCOPE')
     if (!/^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$/u.test(options.templateStoreVersion) || !/^[a-f0-9]{64}$/u.test(options.templateStoreSha256)) throw new Error('INVALID_TEMPLATE_STORE')
     if (!isAbsolute(options.exportRoot) || options.exportRoot.includes('\0')) throw new Error('INVALID_EXPORT_ROOT')
-    this.#limits = options.limits ?? { memoryBytes: 2 * 1024 ** 3, nanoCpus: 2_000_000_000, pids: 256, timeoutMs: 180_000, workspaceBytes: 4 * 1024 ** 3, maxWorkspaceBytes: 8 * 1024 ** 3, concurrentContainers: 2, maxExportBytes: 2 * 1024 ** 3, maxRetainedExports: 5 }
+    this.#limits = options.limits ?? DEFAULT_BUILDER_LIMITS
     for (const value of Object.values(this.#limits)) if (!Number.isSafeInteger(value) || value <= 0) throw new Error('INVALID_BUILDER_LIMIT')
     if (this.#limits.workspaceBytes > this.#limits.maxWorkspaceBytes || this.#limits.maxRetainedExports > 1_000) throw new Error('INVALID_BUILDER_LIMIT')
     this.#containers = new Semaphore(this.#limits.concurrentContainers)
     this.#templateStoreVolume = templateStoreVolumeName(options.installationId, options.scopeId, options.templateStoreVersion, options.templateStoreSha256)
-    this.#policySha256 = createHash('sha256').update(JSON.stringify({ protocol: 1, image: options.imageDigest, scope: options.scopeId, templateStoreVersion: options.templateStoreVersion, templateStoreSha256: options.templateStoreSha256, templateStoreValidator: 'host-canonical-v1', templateStoreMountSteps: ['install'], commands: COMMANDS, exportAllowlist: ['.next/standalone/**', '.next/static/**', 'public/**', 'evidence/appspec-report.json'], limits: this.#limits, user: '10001:10001', network: 'none', readOnlyRoot: true, capDrop: ['ALL'], noNewPrivileges: true })).digest('hex')
+    this.#policySha256 = builderPolicySha256({
+      imageDigest: options.imageDigest, scopeId: options.scopeId,
+      templateStoreVersion: options.templateStoreVersion, templateStoreSha256: options.templateStoreSha256,
+      limits: this.#limits,
+    })
   }
 
   async preflight(signal: AbortSignal): Promise<BuilderAttestation> {

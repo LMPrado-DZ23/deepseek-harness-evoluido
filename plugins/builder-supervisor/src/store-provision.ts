@@ -366,6 +366,23 @@ async function readPinnedBytes(handle: FileHandle, expectedBytes: number): Promi
   return buffer.subarray(0, position)
 }
 
+/**
+ * As entradas de um store, do jeito que o PROVISIONAMENTO as confere.
+ *
+ * Exportada para o instalador gerar o manifesto com ESTE percurso, e não com um
+ * segundo. `assertTreeMatchesManifest` compara o manifesto com o que este
+ * percurso devolve; um instalador que andasse a árvore do jeito dele
+ * produziria um manifesto certo até o primeiro caso de borda em que os dois
+ * discordassem — nome com caixa diferente, arquivo com dois links, limite de
+ * entradas — e aí o provisionamento recusaria o que o instalador acabou de
+ * gerar.
+ * @param root - a raiz do store.
+ * @returns as entradas, na ordem do percurso.
+ */
+export async function inspectTemplateStoreSourceTree(root: string): Promise<TemplateManifestEntry[]> {
+  return inspectSourceTree(root)
+}
+
 async function inspectSourceTree(root: string): Promise<TemplateManifestEntry[]> {
   try { return await inspectSourceTreeUnchecked(root) }
   catch (error) {

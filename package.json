@@ -96,7 +96,8 @@
     "gate:licenses": "node scripts/check-release-licenses.mjs --self-test && node scripts/check-release-licenses.mjs",
     "gate:licenses:release": "node scripts/check-release-licenses.mjs --release",
     "gates": "node scripts/run-gates.mjs",
-    "sbom:cyclonedx": "pnpm sbom --sbom-format cyclonedx --lockfile-only > sbom.cdx.json"
+    "sbom:cyclonedx": "pnpm sbom --sbom-format cyclonedx --lockfile-only > sbom.cdx.json",
+    "builder:install": "node scripts/provision-builder.mjs --self-test && node scripts/provision-builder.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-storage": "workspace:*",

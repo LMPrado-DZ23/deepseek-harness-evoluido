@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path'
 const RAIZ_DO_REPOSITORIO = resolve(dirname(new URL(import.meta.url).pathname), '..')
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { PERFIL, SONDA_PADRAO, argumentosDaPartida, docker, observar } from './studio-start.mjs'
+import { PERFIL, SONDA_PADRAO, argumentosDaPartida, docker, observar, sobreposicaoLocalPresente } from './studio-start.mjs'
 import { bloqueios, conferencias } from './studio-doctor.mjs'
 
 /**
@@ -204,5 +204,26 @@ describe('a partida chama o `dsh` com o perfil', () => {
   it('o binario vem primeiro — node <bin> <flags>, e nao o contrario', () => {
     // Trocar a ordem faz o Node tratar `--profile` como flag DELE.
     expect(argumentosDaPartida('/b.js').indexOf('/b.js')).toBe(0)
+  })
+})
+
+describe('a sobreposicao local do perfil', () => {
+  it('sem o arquivo, a partida e a de sempre — nada de --patch', () => {
+    expect(argumentosDaPartida('/b.js')).toEqual(['/b.js', '--profile', PERFIL])
+  })
+
+  it('com o arquivo, ela entra DEPOIS do perfil, como sobreposicao', () => {
+    // A ordem importa: `--patch` aplica por cima do perfil, e é por isso que os
+    // caminhos desta máquina vencem os de produção sem que o perfil mude.
+    expect(argumentosDaPartida('/b.js', '/r/local.patch.yml')).toEqual(['/b.js', '--profile', PERFIL, '--patch', '/r/local.patch.yml'])
+  })
+
+  it('so e encontrada no lugar em que o instalador a grava', () => {
+    const base = mkdtempSync(resolve(tmpdir(), 'sobreposicao-'))
+    expect(sobreposicaoLocalPresente(base)).toBeUndefined()
+    mkdirSync(resolve(base, 'dsh-home', 'profiles', PERFIL), { recursive: true })
+    writeFileSync(resolve(base, 'dsh-home', 'profiles', PERFIL, 'local.patch.yml'), '# x\n')
+    expect(sobreposicaoLocalPresente(base)).toBe(resolve(base, 'dsh-home', 'profiles', PERFIL, 'local.patch.yml'))
+    rmSync(base, { recursive: true, force: true })
   })
 })

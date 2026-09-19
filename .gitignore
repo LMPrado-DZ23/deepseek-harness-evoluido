@@ -13,6 +13,8 @@ dsh-home/deliverables/
 dsh-home/profiles/node_modules/
 dsh-home/profiles/studio/node_modules/
 dsh-home/profiles/studio/cordis.yml
+# Gerado pelo instalador do construtor: os caminhos absolutos DESTA máquina.
+dsh-home/profiles/studio/local.patch.yml
 
 runtime/
 

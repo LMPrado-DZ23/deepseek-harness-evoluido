@@ -126,13 +126,26 @@ export const PERFIL = 'studio'
  * @param bin - o caminho do binário do `dsh`.
  * @returns a lista de argumentos, na ordem.
  */
-export function argumentosDaPartida(bin) {
-  return [bin, '--profile', PERFIL]
+export function argumentosDaPartida(bin, sobreposicao) {
+  // A sobreposição LOCAL — os caminhos absolutos desta máquina, gravados pelo
+  // instalador do construtor — entra só quando o arquivo existe. Sem ela, o
+  // perfil sobe com os caminhos de produção, byte por byte como antes.
+  return sobreposicao === undefined ? [bin, '--profile', PERFIL] : [bin, '--profile', PERFIL, '--patch', sobreposicao]
+}
+
+/**
+ * A sobreposição local, quando o instalador a gravou.
+ * @param base - a raiz do repositório.
+ * @returns o caminho, ou `undefined`.
+ */
+export function sobreposicaoLocalPresente(base) {
+  const caminho = resolve(base, 'dsh-home', 'profiles', PERFIL, 'local.patch.yml')
+  return existsSync(caminho) ? caminho : undefined
 }
 
 function arrancar(base) {
   const bin = require.resolve('@deepseek-ai/dsh/lib/bin.js')
-  const filho = spawn(process.execPath, argumentosDaPartida(bin), {
+  const filho = spawn(process.execPath, argumentosDaPartida(bin, sobreposicaoLocalPresente(base)), {
     cwd: base,
     stdio: 'inherit',
     env: { ...process.env, DSH_HOME: resolve(base, 'dsh-home') },
