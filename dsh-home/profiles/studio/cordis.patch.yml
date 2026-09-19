@@ -119,6 +119,179 @@
             sandboxMode: workspace-write
             requiredPermission: project.write
             scope: project
+          # ── o AGENTE GERAL (preset dz23-assistant, 19/09/2026) ──────────
+          # Leitura e consulta: T0. Coordenação reversível (lista, objetivos,
+          # delegação, web): T1, registrada. Mudar arquivo ou rodar comando: T2,
+          # com a confirmação da pessoa — as regras de `bash` e `write` acima.
+          read:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          read_image:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          glob:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          grep:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          skill:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          job_list:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          job_output:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          get_goal:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          list_agents:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          list_subagent_models:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          ask_user_question:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          todo_write:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          exit_plan_mode:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          web_search:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          web_fetch:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          job_kill:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          create_goal:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          update_goal:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          send_message:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          interrupt_agent:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          subagent:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          workflow:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          ralph:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          # Editar arquivo é escrever: o mesmo nível de `write`.
+          edit:
+            source:
+              kind: harness
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
           studio_agent_start:
             source: { kind: studio, external: false, stableChannel: true }
             inferredTier: T2
@@ -369,3 +542,8 @@
       name: '@dz23-studio/web'
       config:
         assistantRepositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')
+        # A pasta de trabalho pessoal do assistente, por espaço, quando não há
+        # repositório configurado. Fica dentro de `$DSH_HOME`, onde o produto já
+        # escreve tudo.
+        assistantWorkspaceRoot: !!js >-
+          process.env.DZ23_ASSISTANT_WORKSPACE_ROOT ?? `${process.env.DSH_HOME ?? '.'}/espacos`

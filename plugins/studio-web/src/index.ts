@@ -73,6 +73,8 @@ export interface StudioWebConfig {
   readonly allowedOrigins?: readonly string[]
   readonly previewFrameSources?: readonly string[]
   readonly assistantRepositories?: readonly AssistantRepositoryLaunchConfig[]
+  /** A raiz das pastas de trabalho pessoais do assistente (ver `workspaceRoot`). */
+  readonly assistantWorkspaceRoot?: string
 }
 
 export function createStudioWebHandler(config: {
@@ -258,6 +260,7 @@ export async function apply(ctx: Context, config: StudioWebConfig = {}): Promise
     tenancy: ctx.studioTenancy.service,
     sessions: ctx.sessionController,
     repositories: config.assistantRepositories ?? [],
+    ...(config.assistantWorkspaceRoot === undefined ? {} : { workspaceRoot: config.assistantWorkspaceRoot }),
     reportFailure: (phase, error) => {
       ctx.logger.warn(`dz23-studio-web: assistant session ${phase} failed: ${String(error)}`)
     },

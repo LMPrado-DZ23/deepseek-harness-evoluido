@@ -82,6 +82,8 @@ export function sobreposicaoDaPrevia({ base, porta, portaDoHarness }) {
     '- id: dz23-studio-preview',
     '  config:',
     `    publicPort: ${String(porta)}`,
+    // Repetido da base: esta entrada substitui a configuração inteira.
+    '    runtimeTimeoutMs: 30000',
     '    capacityMode: single-process',
     '    supervisor:',
     '      enabled: true',
@@ -97,12 +99,10 @@ export function sobreposicaoDaPrevia({ base, porta, portaDoHarness }) {
     ...lista(hosts, '      '),
     '    allowedOrigins:',
     ...lista(origens, '      '),
-    '- id: dz23-studio-web',
-    '  config:',
-    '    allowedHosts:',
-    ...lista(hosts, '      '),
-    '    allowedOrigins:',
-    ...lista(origens, '      '),
+    // Só a IDENTIDADE recebe os hosts: os outros plugins partem da lista
+    // dela (`confiancaPara`). Uma entrada aqui SUBSTITUI a configuração
+    // inteira do plugin — medido em 19/09/2026: a do `dz23-studio-web`
+    // apagava `assistantRepositories`.
     '',
   ].join('\n')
 }
@@ -179,11 +179,22 @@ function segredo(caminho) {
   return 'CRIADO'
 }
 
-/** Grava um arquivo gerado; se já existe diferente, para. */
-function gravarUmaVez(caminho, texto) {
+/**
+ * Grava um arquivo gerado; se já existe diferente, para — salvo com
+ * `--atualizar`, e só quando o arquivo existente é um que ESTE instalador
+ * gerou (a primeira linha diz). Arquivo escrito à mão nunca é trocado.
+ */
+function gravarUmaVez(caminho, texto, atualizar = false) {
   if (!existsSync(caminho)) { writeFileSync(caminho, texto, { mode: 0o600, flag: 'wx' }); return 'CRIADO' }
-  if (readFileSync(caminho, 'utf8') !== texto) throw new Error(`${caminho} já existe e é DIFERENTE. Nada foi trocado; confira-o à mão.`)
-  return 'IGUAL'
+  const atual = readFileSync(caminho, 'utf8')
+  if (atual === texto) return 'IGUAL'
+  if (atualizar && geradoPorEsteInstalador(atual)) { writeFileSync(caminho, texto, { mode: 0o600 }); return 'ATUALIZADO' }
+  throw new Error(`${caminho} já existe e é DIFERENTE. Nada foi trocado; confira-o à mão.`)
+}
+
+/** O arquivo foi gerado por este instalador? */
+export function geradoPorEsteInstalador(texto) {
+  return texto.startsWith('# GERADO por scripts/provision-preview.mjs') || /^\{\s*"porta"/u.test(texto)
 }
 
 function docker(...argumentos) {
@@ -261,8 +272,8 @@ if (chamadoDiretamente) {
       relatorio.supervisor = 'INICIADO'
     }
 
-    relatorio.sobreposicao = gravarUmaVez(resolve(raiz, SOBREPOSICAO_DA_PREVIA), sobreposicaoDaPrevia({ base, porta, portaDoHarness }))
-    relatorio.configuracao = gravarUmaVez(resolve(raiz, CONFIGURACAO_DA_PREVIA), `${JSON.stringify({ porta, portaDoHarness, segredoDaBorda: c.segredoDaBorda }, null, 2)}\n`)
+    relatorio.sobreposicao = gravarUmaVez(resolve(raiz, SOBREPOSICAO_DA_PREVIA), sobreposicaoDaPrevia({ base, porta, portaDoHarness }), atualizar)
+    relatorio.configuracao = gravarUmaVez(resolve(raiz, CONFIGURACAO_DA_PREVIA), `${JSON.stringify({ porta, portaDoHarness, segredoDaBorda: c.segredoDaBorda }, null, 2)}\n`, atualizar)
     console.log(JSON.stringify({ ...relatorio, abrir: `http://studio.dz23.localhost:${String(porta)}` }, null, 2))
   } catch (erro) {
     console.error(JSON.stringify({ erro: erro instanceof Error ? erro.message : String(erro), feito: relatorio }))

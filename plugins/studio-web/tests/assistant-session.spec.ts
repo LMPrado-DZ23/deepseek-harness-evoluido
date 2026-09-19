@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +7,7 @@ import type { SessionRecord } from '@dz23-studio/identity'
 import {
   ASSISTANT_AGENT_PRESET,
   AssistantSessionLauncher,
+  pastaDoEspaco,
   type AssistantRepositoryLaunchConfig,
   type AssistantSessionControllerPort,
 } from '../src/assistant-session.js'
@@ -48,6 +49,7 @@ async function fixture(options: {
   readonly create?: AssistantSessionControllerPort['create']
   readonly sharedHarnessClientAllowed?: boolean
   readonly releaseFails?: boolean
+  readonly workspaceRoot?: string
 } = {}) {
   const binds: string[] = []
   const releases: string[] = []
@@ -76,6 +78,7 @@ async function fixture(options: {
     },
     sessions: { create, inspect },
     repositories,
+    ...(options.workspaceRoot === undefined ? {} : { workspaceRoot: options.workspaceRoot }),
     reportFailure: (phase, error) => { failures.push({ phase, error }) },
   })
   return { launcher, create, inspect, binds, releases, failures, repository: repositories[0]! }
@@ -206,3 +209,34 @@ describe('governed Assistant Session launcher', () => {
 })
 
 function fakedPath(): string { return process.platform === 'win32' ? 'C:\\outro' : '/outro' }
+
+describe('a pasta de trabalho PESSOAL: o agente geral sem repositório configurado', () => {
+  it('sem repositório e com raiz, a conversa nasce na pasta do espaço, criada 0700', async () => {
+    const raiz = await mkdtemp(join(tmpdir(), 'frigg-espacos-')); roots.push(raiz)
+    const f = await fixture({ repositories: [], workspaceRoot: raiz })
+    const aberta = await f.launcher.launch(identitySession())
+    expect(aberta.reused).toBe(false)
+    const pasta = pastaDoEspaco(raiz, 'org-1', 'tenant-1')
+    expect(f.create.mock.calls[0]![0]).toEqual({ cwd: await realpath(pasta), agentPreset: ASSISTANT_AGENT_PRESET })
+    expect((await stat(pasta)).mode & 0o777).toBe(0o700)
+  })
+
+  it('sem repositório e sem raiz, continua "não configurado"', async () => {
+    const f = await fixture({ repositories: [] })
+    await expect(f.launcher.launch(identitySession())).rejects.toMatchObject({ code: 'NOT_CONFIGURED' })
+  })
+
+  it('o repositório configurado continua valendo antes da pasta pessoal', async () => {
+    const raiz = await mkdtemp(join(tmpdir(), 'frigg-espacos-')); roots.push(raiz)
+    const f = await fixture({ workspaceRoot: raiz })
+    await f.launcher.launch(identitySession())
+    expect(f.create.mock.calls[0]![0]).toEqual({ cwd: f.repository.repositoryPath, agentPreset: ASSISTANT_AGENT_PRESET })
+  })
+
+  it('o nome da pasta vem do escopo, e espaços diferentes não se encontram', () => {
+    expect(pastaDoEspaco('/r', 'org-1', 'tenant-1')).not.toBe(pastaDoEspaco('/r', 'org-1', 'tenant-2'))
+    expect(pastaDoEspaco('/r', 'org-1', 'tenant-1')).toMatch(/^\/r\/[a-f0-9]{32}$/u)
+    expect(pastaDoEspaco('/r', '../x', 'y').startsWith('/r/')).toBe(true)
+    expect(() => pastaDoEspaco('relativa', 'o', 't')).toThrow()
+  })
+})

@@ -5,11 +5,134 @@
   name: '@deepseek-ai/dsh-persona'
   config:
     text: >-
-      Você é o assistente do DZ23 STUDIO. Fale em português simples. Explique
-      claramente o que é conversa, proposta, teste e aplicação. Nunca diga que
-      uma proposta foi aplicada antes da segunda confirmação da pessoa. Nesta
-      versão, somente o agente local spawn-in-process está configurado. Codex e
-      Claude Code externos não podem ser iniciados por esta ponte.
+      Você é o FRIGG, um agente que faz o trabalho de ponta a ponta para quem
+      não programa. Fale em português simples. Você trabalha na pasta {{cwd}}:
+      pode pesquisar na internet, ler e escrever arquivos ali, rodar comandos,
+      planejar tarefas longas e dividi-las em etapas. Antes de uma tarefa
+      grande, diga o plano em poucas linhas; durante, mantenha a lista de
+      tarefas atualizada; no fim, diga o que foi feito e onde estão os
+      arquivos. Ações que mudam arquivos ou rodam comandos pedem a confirmação
+      da pessoa: explique em uma frase o que vai fazer e por quê. Nunca diga
+      que algo foi feito sem ter feito, e nunca invente o resultado de uma
+      pesquisa. Nesta versão, o trabalho em repositórios de código continua
+      pela ponte do Studio (studio_agent_* e studio_team_*), e só onde um
+      repositório foi liberado.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── o agente geral (pedido do titular, 19/09/2026) ─────────────────────────
+#
+# As MESMAS linhas do preset `standard` do Harness, que o FRIGG já carrega e
+# não mostrava: shell, arquivos, busca, tarefas de fundo, objetivos, modo de
+# plano, compactação, delegação, lista de tarefas, perguntas e web. Nada foi
+# reescrito — cada linha é um plugin do Harness fixado. O que o FRIGG
+# acrescenta é a POLÍTICA: cada ferramenta abaixo tem regra própria em
+# `dz23-studio-policy` (profiles/studio/cordis.patch.yml), e sem regra ela é
+# recusada (`requireAuthorizationDeclarations: true`).
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+    - id: plan-mode
+      name: '@deepseek-ai/dsh-plan-mode'
+      config:
+        section: |
+          Você está no modo de plano. Fique nele até exit_plan_mode dar certo ou a pessoa trocar o modo. Pedido para fazer algo, aqui, é pedido para PLANEJAR, e não para executar.
+
+          Primeiro investigue sem mudar nada: leia, pesquise e confira. Não escreva nem edite arquivos, não rode comando que altere algo e não execute o plano. Concordar numa conversa não aprova o plano e não encerra o modo: incorpore a decisão ao plano e apresente-o por exit_plan_mode.
+
+          Pergunte à pessoa (ask_user_question) só o que é escolha dela ou o que a investigação não consegue responder.
+
+          O plano precisa ser completo: objetivo e como saber que deu certo, etapas, o que pode dar errado e como conferir o resultado. Curto para ler, detalhado para outra pessoa conseguir fazer sem decidir nada.
+
+          Quando estiver pronto, chame exit_plan_mode com o plano em markdown, começando com um título #. Essa deve ser a única e última ferramenta da resposta. Não cole o plano como texto nem pergunte "posso seguir?".
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        modelSelectionSettings: true
+        backgroundMode: continuable
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+    - id: tool-ralph
+      name: '@deepseek-ai/dsh-tool-ralph'
+      config:
+        subagentProvider: spawn
+        maxRounds: 64
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+    searchTimeoutMs: 60000
 
 - id: dz23-assistant-tools
   name: cordis:group

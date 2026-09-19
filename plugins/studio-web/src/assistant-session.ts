@@ -8,6 +8,9 @@ import {
 import { KeyedMutex, type SessionRecord, type StudioIdentityService } from '@dz23-studio/identity'
 import { roleAllows } from '@dz23-studio/policy'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
+import { createHash } from 'node:crypto'
+import { mkdir, realpath } from 'node:fs/promises'
+import { isAbsolute, join } from 'node:path'
 import { t } from './i18n.js'
 
 export const ASSISTANT_AGENT_PRESET = 'dz23-assistant'
@@ -45,6 +48,19 @@ export interface AssistantSessionLauncherOptions {
   readonly tenancy: Pick<StudioTenancyService, 'authorizationFor'>
   readonly sessions: AssistantSessionControllerPort
   readonly repositories: readonly AssistantRepositoryLaunchConfig[]
+  /**
+   * A pasta de trabalho PESSOAL, quando o espaço não tem repositório.
+   *
+   * O assistente nascia amarrado a um repositório git configurado à mão em
+   * `DZ23_ASSISTANT_REPOSITORIES`; sem ele, "Conversar com o FRIGG" respondia
+   * "não configurado" — e a instalação pessoal nunca o configura. Pedido do
+   * titular em 19/09/2026: o FRIGG deve fazer o que um agente geral faz
+   * (pesquisar, ler e escrever arquivos, rodar comandos). Isso precisa de um
+   * lugar para trabalhar, e não de um repositório. Cada espaço ganha a sua
+   * pasta, 0700, debaixo desta raiz; as ferramentas de repositório continuam
+   * exigindo repositório.
+   */
+  readonly workspaceRoot?: string
   readonly reportFailure?: (phase: 'inspect' | 'create' | 'adopt', error: unknown) => void
 }
 
@@ -94,14 +110,15 @@ export class AssistantSessionLauncher {
       && candidate.tenantId === identitySession.tenant_id
       && candidate.workspaceId === identitySession.tenant_id
     ))
-    if (repository === undefined) {
+    const cwd = repository?.repositoryPath ?? await this.#pastaPessoal(identitySession)
+    if (cwd === undefined) {
       throw new AssistantSessionLaunchError(
         'NOT_CONFIGURED',
         t('assistant.notConfigured'),
       )
     }
 
-    const existing = await this.#existingSession(identitySession, repository)
+    const existing = await this.#existingSession(identitySession, cwd)
     if (existing !== undefined) {
       await this.options.identity.bindHarnessSession(identitySession, existing)
       return { session_id: existing, reused: true, preset: ASSISTANT_AGENT_PRESET }
@@ -110,7 +127,7 @@ export class AssistantSessionLauncher {
     let created: { readonly sessionId: SessionId; readonly agentPreset?: string }
     try {
       created = await this.options.sessions.create({
-        cwd: repository.repositoryPath,
+        cwd,
         agentPreset: ASSISTANT_AGENT_PRESET,
       })
     } catch (error) {
@@ -150,9 +167,17 @@ export class AssistantSessionLauncher {
     }
   }
 
+  /** A pasta do espaço, criada na primeira vez; `undefined` sem raiz configurada. */
+  async #pastaPessoal(identitySession: SessionRecord): Promise<string | undefined> {
+    if (this.options.workspaceRoot === undefined) return undefined
+    const pasta = pastaDoEspaco(this.options.workspaceRoot, identitySession.org_id, identitySession.tenant_id)
+    await mkdir(pasta, { recursive: true, mode: 0o700 })
+    return realpath(pasta)
+  }
+
   async #existingSession(
     identitySession: SessionRecord,
-    repository: ValidatedRepositoryConfig,
+    cwd: string,
   ): Promise<string | undefined> {
     const active = this.#activeByIdentitySession.get(identitySession.session_id)
     const candidates = [...new Set([
@@ -179,7 +204,7 @@ export class AssistantSessionLauncher {
         await this.#release(identitySession, rawId, t('assistant.releasedForeign'))
         continue
       }
-      if (inspected.meta.cwd !== repository.repositoryPath) {
+      if (inspected.meta.cwd !== cwd) {
         throw new AssistantSessionLaunchError(
           'SESSION_CONFLICT',
           t('assistant.repositoryConflict'),
@@ -187,7 +212,7 @@ export class AssistantSessionLauncher {
       }
       try {
         const adopted = await this.options.sessions.create({
-          cwd: repository.repositoryPath,
+          cwd,
           sessionId,
           agentPreset: ASSISTANT_AGENT_PRESET,
         })
@@ -217,3 +242,18 @@ async function validateRepositories(
   }
   return repositories
 }
+
+/**
+ * A pasta de um espaço: o NOME é derivado do escopo (org e espaço), nunca
+ * escrito por quem pede, então nenhum valor de fora escolhe o caminho.
+ * @param raiz - a raiz absoluta.
+ * @param orgId - a organização.
+ * @param tenantId - o espaço.
+ * @returns o caminho.
+ */
+export function pastaDoEspaco(raiz: string, orgId: string, tenantId: string): string {
+  if (!isAbsolute(raiz)) throw new Error(t('assistant.workspaceRootAbsolute'))
+  const nome = createHash('sha256').update(`${orgId}\u0000${tenantId}`).digest('hex').slice(0, 32)
+  return join(raiz, nome)
+}
+

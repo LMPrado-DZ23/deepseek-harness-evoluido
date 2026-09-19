@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CONTEINER, argumentosDoSupervisor, etiquetaDaImagem, sobreposicaoDaPrevia } from './provision-preview.mjs'
+import { CONTEINER, argumentosDoSupervisor, etiquetaDaImagem, geradoPorEsteInstalador, sobreposicaoDaPrevia } from './provision-preview.mjs'
 
 const A = `sha256:${'a'.repeat(64)}`
 const B = `sha256:${'b'.repeat(64)}`
@@ -66,13 +66,18 @@ describe('a sobreposição da prévia', () => {
     expect(texto).toContain('publicPort: 8088')
   })
 
-  it('acrescenta o host da borda SEM tirar os de sempre', () => {
-    // identidade e web; o host da borda também em `trustedHosts`.
-    for (const host of ['"127.0.0.1:3080"', '"localhost:3080"']) expect(texto.split(host).length).toBe(3)
-    expect(texto.split('"studio.dz23.localhost:8088"').length).toBe(4)
-    for (const origem of ['"http://localhost:3080"', '"http://127.0.0.1:3080"']) expect(texto.split(origem).length).toBe(3)
-    // identidade, web e a origem da prévia.
-    expect(texto.split('"http://studio.dz23.localhost:8088"').length).toBe(4)
+  it('acrescenta o host da borda SEM tirar os de sempre, e só na identidade', () => {
+    // identidade; o host da borda também em `trustedHosts`.
+    for (const host of ['"127.0.0.1:3080"', '"localhost:3080"']) expect(texto.split(host).length).toBe(2)
+    expect(texto.split('"studio.dz23.localhost:8088"').length).toBe(3)
+    for (const origem of ['"http://localhost:3080"', '"http://127.0.0.1:3080"']) expect(texto.split(origem).length).toBe(2)
+    // identidade e a origem da prévia.
+    expect(texto.split('"http://studio.dz23.localhost:8088"').length).toBe(3)
+  })
+
+  it('NÃO toca plugin cuja configuração ela apagaria (a entrada substitui a configuração inteira)', () => {
+    expect(texto).not.toContain('id: dz23-studio-web')
+    expect(texto).toContain('runtimeTimeoutMs: 30000')
     expect(texto).toContain('studioOrigin: "http://studio.dz23.localhost:8088"')
   })
 
@@ -87,5 +92,13 @@ describe('a etiqueta da imagem vem do conteúdo', () => {
     const raiz = new URL('..', import.meta.url).pathname
     expect(etiquetaDaImagem(raiz)).toMatch(/^frigg-preview-supervisor:[a-f0-9]{12}$/u)
     expect(etiquetaDaImagem(raiz)).toBe(etiquetaDaImagem(raiz))
+  })
+})
+
+describe('--atualizar só troca o que este instalador gerou', () => {
+  it('reconhece os dois arquivos gerados e nada mais', () => {
+    expect(geradoPorEsteInstalador(sobreposicaoDaPrevia({ base: '/dados/p/.frigg', porta: 8088, portaDoHarness: 3080 }))).toBe(true)
+    expect(geradoPorEsteInstalador('{\n  "porta": 8088\n}\n')).toBe(true)
+    expect(geradoPorEsteInstalador('- id: escrito-a-mao\n')).toBe(false)
   })
 })
