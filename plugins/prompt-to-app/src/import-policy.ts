@@ -86,7 +86,17 @@ export function assertGeneratedSource(files: readonly GeneratedFile[], perfil: P
  * @param source - a árvore.
  */
 export function assertClienteDeclarado(path: string, source: ts.SourceFile): void {
-  if (temDiretivaCliente(source)) return
+  const motivo = motivoDeCliente(source)
+  if (motivo !== undefined) throw new GeneratedFileRejectedError(t('errors.generatedUseClient', { path, construct: motivo }))
+}
+
+/**
+ * O que obriga o arquivo a ser de cliente, quando ele ainda não declara.
+ * @param source - a árvore.
+ * @returns a construção (`useState`, `onClick`…), ou `undefined`.
+ */
+function motivoDeCliente(source: ts.SourceFile): string | undefined {
+  if (temDiretivaCliente(source)) return undefined
   let motivo: string | undefined
   const walk = (node: ts.Node): void => {
     if (motivo !== undefined) return
@@ -95,7 +105,39 @@ export function assertClienteDeclarado(path: string, source: ts.SourceFile): voi
     ts.forEachChild(node, walk)
   }
   walk(source)
-  if (motivo !== undefined) throw new GeneratedFileRejectedError(t('errors.generatedUseClient', { path, construct: motivo }))
+  return motivo
+}
+
+/** A linha que o FRIGG acrescenta, dizendo que foi ele. */
+const DIRETIVA_DE_CLIENTE = "'use client'"
+export const DIRETIVA_COMPLETADA = ['// ' + t('values.diretivaCompletada'), DIRETIVA_DE_CLIENTE, ''].join('\n')
+
+/**
+ * COMPLETA a diretiva de cliente no perfil interativo.
+ *
+ * Medido em 19/09/2026: a recusa com a causa exata ("ponha 'use client'; como
+ * a primeira linha") foi IGNORADA pelo qwen2.5-coder:7b duas vezes seguidas —
+ * duas tentativas inteiras, e a tarefa terminou em falha com o contador certo
+ * na mão. A diretiva é exigência mecânica do framework, não decisão do
+ * aplicativo: ela não muda o que o código pode fazer (a varredura inteira
+ * continua valendo, e roda DEPOIS disto), só diz ao Next onde ele roda.
+ *
+ * Por isso aqui o texto do modelo GANHA uma linha — e a linha diz que foi o
+ * FRIGG, no próprio arquivo, para ninguém atribuí-la ao modelo. Só no perfil
+ * interativo, só em arquivo que usa estado ou evento e ainda não declara.
+ * `assertClienteDeclarado` continua de guarda para o que chegar sem passar
+ * por aqui.
+ * @param files - os arquivos da resposta.
+ * @param perfil - o perfil do projeto.
+ * @returns os arquivos, com a diretiva onde ela faltava.
+ */
+export function completarDiretivaCliente(files: readonly GeneratedFile[], perfil: PerfilDeGeracao): readonly GeneratedFile[] {
+  if (perfil !== 'interativo') return files
+  return files.map(file => {
+    if (!/\.[cm]?[jt]sx?$/u.test(file.path.toLowerCase())) return file
+    const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, scriptKind(file.path))
+    return motivoDeCliente(source) === undefined ? file : { ...file, content: `${DIRETIVA_COMPLETADA}${file.content}` }
+  })
 }
 
 function temDiretivaCliente(source: ts.SourceFile): boolean {

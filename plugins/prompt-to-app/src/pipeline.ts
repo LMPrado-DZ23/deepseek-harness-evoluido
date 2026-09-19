@@ -28,7 +28,7 @@ import {
 import { generatedFileSchema, writeGeneratedFiles, type GeneratedFile } from './generator.js'
 import { generateFormLayer, writeFormLayer } from './form-generator.js'
 import { generateSchedulingLayer, writeSchedulingLayer } from './scheduling-generator.js'
-import { assertGeneratedSource, generationRules } from './import-policy.js'
+import { assertGeneratedSource, completarDiretivaCliente, generationRules } from './import-policy.js'
 import { recoveryNoteFor, type ObservedRun } from './learning.js'
 import { generateSaasLayer, writeSaasLayer } from './saas-generator.js'
 import { prompt, t } from './i18n.js'
@@ -128,7 +128,10 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
     ].join('\n'))
     const decoded = decodeModelJson(result.value)
     const output = generatedOutputSchema.parse(decoded)
-    return { files: output.files, route: result.route, model: result.model, ...(result.usage === undefined ? {} : { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens }) }
+    // A diretiva de cliente é completada AQUI, na saída do modelo (ver
+    // `completarDiretivaCliente`): a varredura, o reparo e o disco veem o mesmo
+    // arquivo, e a linha acrescentada diz que foi o FRIGG.
+    return { files: [...completarDiretivaCliente(output.files, this.perfil)], route: result.route, model: result.model, ...(result.usage === undefined ? {} : { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens }) }
   }
 }
 

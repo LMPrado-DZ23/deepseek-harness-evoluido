@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { GeneratedFileRejectedError } from '../src/generator.js'
-import { generationRules, planningRules, assertGeneratedImports, assertGeneratedSource } from '../src/import-policy.js'
+import { DIRETIVA_COMPLETADA, completarDiretivaCliente, generationRules, planningRules, assertGeneratedImports, assertGeneratedSource } from '../src/import-policy.js'
 
 describe('generated import policy', () => {
   it('accepts only public UI utilities, repositories and other generated files', () => {
@@ -610,5 +610,31 @@ describe("perfil interativo: estado e evento exigem 'use client' (jornada real d
 
   it('o gerador interativo recebe a regra', () => {
     expect(generationRules('interativo').join('\n')).toContain("começa com a linha 'use client'")
+  })
+})
+
+describe("completarDiretivaCliente: o FRIGG põe a linha que o modelo pequeno não pôs", () => {
+  const semDiretiva = { path: 'src/GeneratedApp.tsx', content: "import { useState } from 'react'\nexport default function App(){const [n,setN]=useState(0);return <button onClick={()=>{setN(n+1)}}>{n}</button>}" }
+
+  it('no interativo, acrescenta a diretiva com a marca do FRIGG, e o resultado passa na política', () => {
+    const [completado] = completarDiretivaCliente([semDiretiva], 'interativo')
+    expect(completado!.content.startsWith(DIRETIVA_COMPLETADA)).toBe(true)
+    expect(completado!.content.endsWith(semDiretiva.content)).toBe(true)
+    expect(() => assertGeneratedSource([completado!], 'interativo')).not.toThrow()
+  })
+
+  it('não mexe no declarativo, no que já declara, nem no que não usa estado ou evento', () => {
+    expect(completarDiretivaCliente([semDiretiva], 'declarativo')[0]).toBe(semDiretiva)
+    const declarado = { ...semDiretiva, content: `'use client'\n${semDiretiva.content}` }
+    expect(completarDiretivaCliente([declarado], 'interativo')[0]).toBe(declarado)
+    const dados = { path: 'src/lib/meta.ts', content: 'export const META = 8' }
+    expect(completarDiretivaCliente([dados], 'interativo')[0]).toBe(dados)
+    const json = { path: 'content/app.json', content: '{}' }
+    expect(completarDiretivaCliente([json], 'interativo')[0]).toBe(json)
+  })
+
+  it('a completude não esconde o que a política recusa: o resto da varredura continua valendo', () => {
+    const perigoso = { path: 'src/GeneratedApp.tsx', content: "import { useState } from 'react'\nexport default function App(){const [n]=useState(0);return <p>{window.location.href}{n}</p>}" }
+    expect(() => assertGeneratedSource([...completarDiretivaCliente([perigoso], 'interativo')], 'interativo')).toThrow('window')
   })
 })

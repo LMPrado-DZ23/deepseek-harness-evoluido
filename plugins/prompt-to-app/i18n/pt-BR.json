@@ -127,6 +127,7 @@
     "confirmed": "confirmado",
     "notConfirmed": "não confirmado",
     "dynamicImport": "<dinâmico>",
+    "diretivaCompletada": "FRIGG: acrescentou a diretiva abaixo — este arquivo usa estado ou evento, que só existem no navegador.",
     "componenteProprio": "componente próprio não pode ser tag: escreva o conteúdo dele com elementos HTML aqui mesmo, neste arquivo"
   },
   "checks": {

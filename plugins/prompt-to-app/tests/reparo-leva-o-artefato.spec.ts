@@ -67,3 +67,21 @@ describe('o que a rodada de reparo leva ao modelo', () => {
     expect(modelo.prompts[0]).not.toMatch(/não recomece do zero/iu)
   })
 })
+
+describe("a saída do gerador já vem com a diretiva de cliente completada", () => {
+  class ModeloContador implements PromptModelPort {
+    async complete(): Promise<ModelResult> {
+      return { value: JSON.stringify({ files: [{ path: 'src/GeneratedApp.tsx', content: "import { useState } from 'react'\nexport default function A(){const [n,s]=useState(0);return <button onClick={()=>{s(n+1)}}>{n}</button>}" }] }), route: 'ollama', model: 'm' }
+    }
+  }
+
+  it('interativo: o arquivo com estado sai com a linha do FRIGG', async () => {
+    const saida = await new ModelCodeGenerator(new ModeloContador(), ator, 'melhor-qualidade', 'interativo').generate(spec, plan)
+    expect(saida.files[0]!.content.startsWith("// FRIGG: acrescentou a diretiva")).toBe(true)
+  })
+
+  it('declarativo: nada muda', async () => {
+    const saida = await new ModelCodeGenerator(new ModeloContador(), ator, 'melhor-qualidade', 'declarativo').generate(spec, plan)
+    expect(saida.files[0]!.content.startsWith('import')).toBe(true)
+  })
+})
