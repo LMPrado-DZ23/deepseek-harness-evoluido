@@ -38,6 +38,7 @@ import {
 } from './supervisor-config.js'
 import { listenBuilderUnix } from './unix-server.js'
 import { raizesDoConstrutorEm } from './installer.js'
+import { DEFAULT_SLOT_STARTUP_TIMEOUT_MS } from './manager-timeouts.js'
 import { isTerminalState } from './model.js'
 import { DockerEngine, type DockerEnginePort } from './docker-engine.js'
 import { ensureTemplateStoreVolume } from './template-store-volume.js'
@@ -46,9 +47,7 @@ import type { BuilderRpcMethods } from './protocol.js'
 export const BUILDER_MANAGER_EXIT = Object.freeze({ ok: 0, usage: 64, startup: 70, shutdown: 74 })
 export const BUILDER_MANAGER_MAX_SLOTS = 512
 const DEFAULT_LISTENER_INITIALIZATION_TIMEOUT_MS = 30_000
-// Covers store materialization (10m), adapter verification (8m), bounded overhead, and the
-// listener's complete independent deadline. Registry reload never truncates either phase.
-const DEFAULT_SLOT_STARTUP_TIMEOUT_MS = 21 * 60_000
+
 
 /**
  * Por quanto tempo uma vaga global reservada por `prepare` continua valendo

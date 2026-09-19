@@ -4,6 +4,7 @@ import { lstat, mkdir, readFile, writeFile, open } from 'node:fs/promises'
 import { posix } from 'node:path'
 import { builderPolicySha256 } from './docker-adapter.js'
 import { builderRuntimeRegistryPath } from './manager-registry.js'
+import { DEFAULT_SLOT_STARTUP_TIMEOUT_MS } from './manager-timeouts.js'
 import { provisionAndActivateBuilderRuntime, type ProvisionAndActivateResult } from './runtime-activation.js'
 import { builderRuntimeSocketPath, deriveBuilderRuntimeScopeId, type BuilderRuntimeScopeId } from './runtime-scope.js'
 import { canonicalTemplateStoreManifestBytes, computeTemplateTreeSha256 } from './store-security.js'
@@ -92,9 +93,17 @@ export interface ResultadoDaInstalacao {
   readonly raizesCriadas: readonly string[]
 }
 
-/** Quanto o instalador espera o socket do escopo aparecer, no total. */
-export const ESPERA_DO_SOCKET_MS = 120_000
-const PASSO_DA_ESPERA_MS = 1_000
+/**
+ * Quanto o instalador espera o socket do escopo aparecer, no total.
+ *
+ * É o MESMO orçamento que o gerente dá à partida de um escopo: antes do
+ * socket, ele materializa o store no volume (até 10 min) e confere a imagem
+ * (até 8 min). Eram 120 s, e na primeira instalação real o instalador desistiu
+ * com `SOCKET_NAO_RESPONDEU` enquanto o gerente ainda copiava os 560 MB do
+ * store — a espera menor que o trabalho transformava lentidão em falha.
+ */
+export const ESPERA_DO_SOCKET_MS = DEFAULT_SLOT_STARTUP_TIMEOUT_MS
+export const PASSO_DA_ESPERA_MS = 1_000
 
 /**
  * Instala o construtor, ou confere que ele já está instalado.

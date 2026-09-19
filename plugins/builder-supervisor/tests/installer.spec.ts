@@ -2,7 +2,8 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { posix } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { InstaladorError, gerarManifesto, identidadeDaInstalacao, instalarConstrutor, prepararRaizes, type InstaladorDependencias } from '../src/installer.js'
+import { ESPERA_DO_SOCKET_MS, InstaladorError, PASSO_DA_ESPERA_MS, gerarManifesto, identidadeDaInstalacao, instalarConstrutor, prepararRaizes, type InstaladorDependencias } from '../src/installer.js'
+import { DEFAULT_SLOT_STARTUP_TIMEOUT_MS } from '../src/manager-timeouts.js'
 import { provisionAndActivateBuilderRuntime } from '../src/runtime-activation.js'
 import { builderPolicySha256 } from '../src/docker-adapter.js'
 import type { BuilderSupervisorRootPolicy } from '../src/supervisor-config.js'
@@ -126,7 +127,9 @@ linux('o instalador do construtor', () => {
     ;(n.dependencias.socketExiste as ReturnType<typeof vi.fn>).mockResolvedValue(false)
     await expect(instalarConstrutor(n.opcoes, n.dependencias)).rejects.toMatchObject({ code: 'SOCKET_NAO_RESPONDEU' })
     // A espera é LIMITADA: não fica girando para sempre.
-    expect((n.dependencias.esperar as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThanOrEqual(121)
+    // E ela é do tamanho da partida do escopo no gerente, não menor que ela.
+    expect(ESPERA_DO_SOCKET_MS).toBe(DEFAULT_SLOT_STARTUP_TIMEOUT_MS)
+    expect((n.dependencias.esperar as ReturnType<typeof vi.fn>).mock.calls.length).toBe(ESPERA_DO_SOCKET_MS / PASSO_DA_ESPERA_MS)
   })
 
   it('uma raiz aberta para o grupo e RECUSADA, e nunca afrouxada nem corrigida', async () => {
