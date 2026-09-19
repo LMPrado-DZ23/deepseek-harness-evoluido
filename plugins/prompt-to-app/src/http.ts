@@ -21,6 +21,7 @@ import { ModelRouteUnavailableError } from './ports.js'
 import type { CodeGeneratorPort } from './pipeline.js'
 import type { EmergencyStopGuard, PromptToAppJobService } from './jobs.js'
 import { RUN_REPORT_FILE } from './run-report.js'
+import { CABECALHO_DA_ESPERA, OperacoesLongas, RespostaCapturada, pedidoRelido } from './operacoes-longas.js'
 import { FonteNaoServida, conteudoQueCabe, fonteAServir } from './fonte-do-artefato.js'
 import { FormCategoryCapabilityError, type PlannerCodeContext, type PlannerEngine } from './planner.js'
 import { consultedView } from './plan-consulted.js'
@@ -220,6 +221,8 @@ export const PROMPT_TO_APP_ROUTE_CONTRACTS = [
   { method: 'POST', path: '/projects/:projectId/generate', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/generate/cancel', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'GET', path: '/projects/:projectId/checkpoints', access: 'authorized', permission: 'project.read', scope: 'project' },
+  // O resultado de uma operação longa (`operacoes-longas.ts`): só LÊ, e só o dono.
+  { method: 'GET', path: '/projects/:projectId/operation', access: 'authorized', permission: 'project.read', scope: 'project' },
   { method: 'POST', path: '/projects/:projectId/undo', access: 'authorized', permission: 'project.write', scope: 'project' },
   { method: 'DELETE', path: '/projects/:projectId', access: 'authorized', permission: 'project.delete', scope: 'project' },
 ] as const satisfies readonly StudioRouteContract[]
@@ -312,6 +315,8 @@ export interface PromptToAppHttpConfig {
    * "não gastou nada".
    */
   readonly usage?: (actor: PromptToAppActor) => StudioWorkspaceUsage
+  /** As operações longas; ausente, uma instância do processo. */
+  readonly operacoes?: OperacoesLongas
 }
 
 /** O consumo somado do espaço de trabalho, como a rota o devolve. */
@@ -364,6 +369,58 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
       }
       if (matched === undefined) return json(response, 404, { error: t('errors.routeNotFound') })
 
+      /*
+        A espera LONGA (ver `operacoes-longas.ts`): as rotas que esperam o
+        modelo respondem 202 com um identificador quando o cliente sabe
+        perguntar pelo resultado depois. O trabalho é o MESMO `atender`, numa
+        resposta capturada — o resultado não tem como divergir do síncrono.
+      */
+      if (esperaLonga(request, matched) && matched.projectId !== undefined) {
+        const relido = await pedidoRelido(request)
+        const dono = { orgId: actor.orgId, tenantId: actor.tenantId, userId: actor.userId ?? '', projectId: matched.projectId }
+        const operacoes = config.operacoes ?? OPERACOES_PADRAO
+        const id = operacoes.iniciar(dono, async () => {
+          const capturada = new RespostaCapturada()
+          await atender(config, relido, capturada.comoResposta(), actor, matched, route)
+          return capturada.resultado()
+        })
+        return json(response, 202, { operacao_pendente: id })
+      }
+      if (request.method === 'GET' && matched.suffix === '/operation' && matched.projectId !== undefined) {
+        const id = new URL(request.url ?? '/', 'http://local').searchParams.get('id') ?? ''
+        const dono = { orgId: actor.orgId, tenantId: actor.tenantId, userId: actor.userId ?? '', projectId: matched.projectId }
+        const estado = (config.operacoes ?? OPERACOES_PADRAO).consultar(dono, id)
+        if (estado === undefined) return json(response, 404, { error: t('errors.operacaoDesconhecida') })
+        return json(response, 200, estado)
+      }
+      return await atender(config, request, response, actor, matched, route)
+    } catch (error) {
+      return json(response, statusOf(error), { error: error instanceof Error ? error.message : t('errors.invalidRequest') })
+    }
+  }
+}
+
+/** As rotas que esperam o modelo e aceitam a espera longa. */
+export const ROTAS_DE_ESPERA_LONGA: ReadonlySet<string> = new Set(['/intake/answer', '/intake/correct', '/plan', '/plan/slice', '/revise', '/ask'])
+
+/**
+ * O pedido vai pela espera longa?
+ * @param request - o pedido.
+ * @param matched - a rota reconhecida.
+ * @returns se sim.
+ */
+export function esperaLonga(request: IncomingMessage, matched: { readonly projectId?: string; readonly suffix: string }): boolean {
+  return request.method === 'POST' && matched.projectId !== undefined && ROTAS_DE_ESPERA_LONGA.has(matched.suffix)
+    && singleHeader(request.headers[CABECALHO_DA_ESPERA]) === 'longa'
+}
+
+const OPERACOES_PADRAO = new OperacoesLongas()
+
+async function atender(
+  config: PromptToAppHttpConfig, request: IncomingMessage, response: ServerResponse,
+  actor: PromptToAppActor, matched: { readonly projectId?: string; readonly suffix: string }, route: string,
+): Promise<void> {
+    try {
       if (request.method === 'GET' && route === '/health') return json(response, 200, await config.health(actor))
       if (request.method === 'GET' && route === '/export') {
         /*
@@ -631,7 +688,6 @@ export function createPromptToAppHttpHandler(config: PromptToAppHttpConfig) {
     } catch (error) {
       return json(response, statusOf(error), { error: error instanceof Error ? error.message : t('errors.invalidRequest') })
     }
-  }
 }
 
 const capturedMessageSchema = z.array(z.object({
@@ -918,7 +974,7 @@ export function matchRoute(method: string | undefined, path: string): { readonly
   // `/report` e `/checkpoints` só LEEM, e são as únicas leituras com sufixo. A
   // lista continua fechada: um sufixo novo precisa entrar aqui E no contrato de
   // rotas.
-  const readOnlySuffixes = new Set(['/report', '/checkpoints', '/source'])
+  const readOnlySuffixes = new Set(['/report', '/checkpoints', '/source', '/operation'])
   const allowed = (method === 'GET' && (suffix === '' || readOnlySuffixes.has(suffix)))
     || (method === 'DELETE' && suffix === '')
     || (method === 'POST' && suffix !== '' && !readOnlySuffixes.has(suffix))

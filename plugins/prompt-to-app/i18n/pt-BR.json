@@ -50,6 +50,7 @@
     "generatedOverwrite": "O modelo tentou substituir um arquivo existente: {path}",
     "generatedFileType": "O modelo tentou criar um tipo de arquivo não permitido: {path}",
     "generatedContentPath": "O modelo tentou criar um arquivo de conteúdo fora da lista permitida: {path}",
+    "operacaoDesconhecida": "Esta operação não existe mais. O FRIGG pode ter reiniciado; recarregue a página para ver o estado atual.",
     "generatedImport": "O arquivo {path} tentou importar um módulo não permitido: {module}",
     "generatedUseClient": "O arquivo {path} usa {construct}, que só funciona no navegador, e não começa com a linha 'use client';. Ponha 'use client'; como a PRIMEIRA linha do arquivo, antes dos imports.",
     "generatedImportHint": "O arquivo {path} tentou importar um módulo não permitido: {module}. O arquivo {target} existe; de {path}, importe-o exatamente como \"{suggestion}\".",

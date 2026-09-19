@@ -44,9 +44,14 @@ test('o que o pedido já diz não é perguntado, e uma resposta se corrige pela 
   await expect(campo).toHaveValue('Lançar e consultar as notas da turma')
   await expect(page.getByText('Corrigindo a resposta de:')).toBeVisible()
   const correcao = page.waitForResponse(resposta => resposta.url().endsWith('/intake/correct'))
+  // A correção espera o modelo: vai pela espera LONGA (202 e depois o
+  // resultado), e o resultado é o 201 que a rota daria.
+  const resultado = page.waitForResponse(async resposta => resposta.url().includes('/operation?id=')
+    && (await resposta.json().catch(() => null) as { estado?: string } | null)?.estado === 'PRONTA')
   await campo.fill('Consultar a média de cada disciplina')
   await enviar.click()
-  expect((await correcao).status()).toBe(201)
+  expect((await correcao).status()).toBe(202)
+  expect(await (await resultado).json()).toMatchObject({ estado: 'PRONTA', status: 201 })
   await expect(page.getByText('Consultar a média de cada disciplina')).toBeVisible()
   // O histórico fica: a resposta lida continua na conversa, e a correção só vale para a última.
   await expect(page.getByText('Lançar e consultar as notas da turma')).toBeVisible()

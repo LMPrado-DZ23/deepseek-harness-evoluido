@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path'
 const RAIZ_DO_REPOSITORIO = resolve(dirname(new URL(import.meta.url).pathname), '..')
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { PERFIL, SONDA_PADRAO, ambienteDaPartida, argumentosDaPartida, binDoHarness, docker, observar, sobreposicaoLocalPresente } from './studio-start.mjs'
+import { PERFIL, SONDA_PADRAO, ambienteDaPartida, argumentosDaPartida, binDoHarness, docker, enderecoComPrevia, observar, previaLocalPresente, sobreposicaoLocalPresente } from './studio-start.mjs'
 import { bloqueios, conferencias } from './studio-doctor.mjs'
 
 /**
@@ -254,5 +254,44 @@ describe('a sobreposicao local do perfil', () => {
     writeFileSync(resolve(base, 'dsh-home', 'profiles', PERFIL, 'local.patch.yml'), '# x\n')
     expect(sobreposicaoLocalPresente(base)).toBe(resolve(base, 'dsh-home', 'profiles', PERFIL, 'local.patch.yml'))
     rmSync(base, { recursive: true, force: true })
+  })
+})
+
+describe('a prévia local (pnpm preview:install)', () => {
+  it('a sobreposição da prévia vem DEPOIS da do construtor', () => {
+    expect(argumentosDaPartida('/b.js', '/r/local.patch.yml', '/r/preview.patch.yml'))
+      .toEqual(['/b.js', '--profile', PERFIL, '--patch', '/r/local.patch.yml', '--patch', '/r/preview.patch.yml'])
+    expect(argumentosDaPartida('/b.js', undefined, '/r/preview.patch.yml')).toEqual(['/b.js', '--profile', PERFIL, '--patch', '/r/preview.patch.yml'])
+  })
+
+  it('o segredo da borda só entra no ambiente do filho quando existe', () => {
+    expect(ambienteDaPartida('/d', {}).DZ23_EDGE_SECRET).toBeUndefined()
+    expect(ambienteDaPartida('/d', {}, 'x'.repeat(40)).DZ23_EDGE_SECRET).toBe('x'.repeat(40))
+  })
+
+  it('o convite do dsh vira o endereço no host da borda, com o mesmo caminho', () => {
+    expect(enderecoComPrevia('dsh web: http://127.0.0.1:3080/?token=abc', 8088)).toBe('http://studio.dz23.localhost:8088/?token=abc')
+    expect(enderecoComPrevia('outra linha', 8088)).toBeUndefined()
+  })
+
+  it('só liga com os DOIS arquivos, e recusa configuração incompleta', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const base = await mkdtemp(join(tmpdir(), 'frigg-previa-'))
+    try {
+      const pasta = join(base, 'dsh-home', 'profiles', PERFIL)
+      await mkdir(pasta, { recursive: true })
+      expect(previaLocalPresente(base)).toBeUndefined()
+      await writeFile(join(pasta, 'preview.local.json'), '{"porta":8088,"portaDoHarness":3080,"segredoDaBorda":"/s"}')
+      expect(previaLocalPresente(base)).toBeUndefined()
+      await rm(join(pasta, 'preview.local.json'))
+      await writeFile(join(pasta, 'preview.patch.yml'), '[]')
+      expect(previaLocalPresente(base)).toBeUndefined()
+      await writeFile(join(pasta, 'preview.local.json'), '{"porta":8088}')
+      expect(() => previaLocalPresente(base)).toThrow('incompleto')
+      await writeFile(join(pasta, 'preview.local.json'), '{"porta":8088,"portaDoHarness":3080,"segredoDaBorda":"/s"}')
+      expect(previaLocalPresente(base)).toEqual({ patch: join(pasta, 'preview.patch.yml'), porta: 8088, portaDoHarness: 3080, segredoDaBorda: '/s' })
+    } finally { await rm(base, { recursive: true, force: true }) }
   })
 })

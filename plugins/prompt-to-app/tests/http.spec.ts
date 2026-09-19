@@ -161,7 +161,7 @@ describe('prompt-to-app HTTP boundary', () => {
     // quem já pode ler as tarefas veria abrindo uma por uma, e o que ela poupa
     // é o trabalho, não a autorização.
     // 24 desde `POST /intake/correct` (PLAN-01): `project.write`, escopo `project`.
-    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(24)
+    expect(PROMPT_TO_APP_ROUTE_CONTRACTS).toHaveLength(25)
     expect(PROMPT_TO_APP_ROUTE_CONTRACTS.every(route => route.access === 'authorized' && route.permission !== null)).toBe(true)
   })
 
@@ -946,5 +946,88 @@ describe('a sintese da especificacao que falha NAO vira beco', () => {
       method: 'POST', body: JSON.stringify({ answer: '', recommend: false }),
     })
     expect(denovo.status).toBe(409)
+  })
+})
+
+describe('a espera LONGA: o pedido que espera o modelo não depende do navegador aguentar', () => {
+  async function projetoComEspecificacao(f: Awaited<ReturnType<typeof fixture>>): Promise<string> {
+    const criada = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    for (const answer of ['Clientes locais', 'Conhecer os serviços', 'Serviços e contato']) {
+      await f.request(`/projects/${criada.project.project_id}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+    }
+    return criada.project.project_id
+  }
+
+  async function esperar(f: Awaited<ReturnType<typeof fixture>>, projectId: string, id: string, como = f.request) {
+    for (let i = 0; i < 100; i++) {
+      const consulta = await como(`/projects/${projectId}/operation?id=${id}`)
+      const corpo = await consulta.json() as { estado?: string; status?: number; corpo?: unknown }
+      if (consulta.status !== 200 || corpo.estado === 'PRONTA') return { http: consulta.status, ...corpo }
+      await new Promise(resolve => { setTimeout(resolve, 5) })
+    }
+    throw new Error('não terminou')
+  }
+
+  it('responde 202 na hora, e o resultado é o mesmo status e corpo que a rota daria', async () => {
+    const f = await fixture()
+    const projectId = await projetoComEspecificacao(f)
+    const aceito = await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}', headers: { 'x-dz23-espera': 'longa' } })
+    expect(aceito.status).toBe(202)
+    const { operacao_pendente: id } = await aceito.json() as { operacao_pendente: string }
+    const final = await esperar(f, projectId, id)
+    expect(final).toMatchObject({ http: 200, estado: 'PRONTA', status: 201 })
+    expect((final.corpo as { plan: { slices: unknown[] } }).plan.slices).toHaveLength(1)
+    expect(f.repository.planRows).toHaveLength(1)
+  })
+
+  it('o CORPO do pedido chega ao trabalho em segundo plano (lido antes do 202)', async () => {
+    const f = await fixture()
+    const criada = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    const projectId = criada.project.project_id
+    const aceito = await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer: 'Clientes locais', recommend: false }), headers: { 'x-dz23-espera': 'longa' } })
+    expect(aceito.status).toBe(202)
+    const final = await esperar(f, projectId, (await aceito.json() as { operacao_pendente: string }).operacao_pendente)
+    expect(final.status).toBe(200)
+    expect(f.repository.turnRows.some(turn => turn.answer === 'Clientes locais')).toBe(true)
+  })
+
+  it('o ERRO da rota volta como o erro da rota', async () => {
+    const f = await fixture()
+    const criada = await (await f.request('/projects', { method: 'POST', body: JSON.stringify({
+      name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'local-only',
+    }) })).json() as { project: { project_id: string } }
+    const sincrono = await f.request(`/projects/${criada.project.project_id}/plan`, { method: 'POST', body: '{}' })
+    const aceito = await f.request(`/projects/${criada.project.project_id}/plan`, { method: 'POST', body: '{}', headers: { 'x-dz23-espera': 'longa' } })
+    const final = await esperar(f, criada.project.project_id, (await aceito.json() as { operacao_pendente: string }).operacao_pendente)
+    expect(final.status).toBe(sincrono.status)
+    expect(final.corpo).toEqual(await sincrono.json())
+  })
+
+  it('sem o cabeçalho, a rota responde como sempre', async () => {
+    const f = await fixture()
+    const projectId = await projetoComEspecificacao(f)
+    expect((await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
+  })
+
+  it('uma rota que não espera o modelo ignora o cabeçalho', async () => {
+    const f = await fixture()
+    const projectId = await projetoComEspecificacao(f)
+    const cancelar = await f.request(`/projects/${projectId}/generate/cancel`, { method: 'POST', body: '{}', headers: { 'x-dz23-espera': 'longa' } })
+    expect(await cancelar.json()).not.toHaveProperty('operacao_pendente')
+  })
+
+  it('outra organização não enxerga a operação, e um id inventado não existe', async () => {
+    const f = await fixture()
+    const projectId = await projetoComEspecificacao(f)
+    const aceito = await f.request(`/projects/${projectId}/plan`, { method: 'POST', body: '{}', headers: { 'x-dz23-espera': 'longa' } })
+    const { operacao_pendente: id } = await aceito.json() as { operacao_pendente: string }
+    await esperar(f, projectId, id)
+    const alheia = await f.requestAs('org-b', `/projects/${projectId}/operation?id=${id}`)
+    expect(alheia.status).toBe(404)
+    expect((await f.request(`/projects/${projectId}/operation?id=inventado`)).status).toBe(404)
   })
 })

@@ -78,5 +78,6 @@
   "corrigir": "Corrigir resposta",
   "corrigindo": "Corrigindo a resposta de:",
   "corrigirCancelar": "Cancelar correção",
-  "corrigirRotulo": "Corrigir resposta: {pergunta}"
+  "corrigirRotulo": "Corrigir resposta: {pergunta}",
+  "operacaoDemorada": "A operação demorou demais. Recarregue a página para ver o estado atual."
 }

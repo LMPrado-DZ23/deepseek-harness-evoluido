@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { iniciarBorda, segredoValido } from './preview-edge.mjs'
 import { bloqueios, conferencias, relatorio, rotasConfiguradas, versaoEsperada } from './studio-doctor.mjs'
 
 /**
@@ -153,11 +154,46 @@ export const PERFIL = 'studio'
  * @param bin - o caminho do binário do `dsh`.
  * @returns a lista de argumentos, na ordem.
  */
-export function argumentosDaPartida(bin, sobreposicao) {
+export function argumentosDaPartida(bin, sobreposicao, previa) {
   // A sobreposição LOCAL — os caminhos absolutos desta máquina, gravados pelo
   // instalador do construtor — entra só quando o arquivo existe. Sem ela, o
-  // perfil sobe com os caminhos de produção, byte por byte como antes.
-  return sobreposicao === undefined ? [bin, '--profile', PERFIL] : [bin, '--profile', PERFIL, '--patch', sobreposicao]
+  // perfil sobe com os caminhos de produção, byte por byte como antes. A da
+  // PRÉVIA vem depois, e só quando `pnpm preview:install` a gravou.
+  return [bin, '--profile', PERFIL, ...(sobreposicao === undefined ? [] : ['--patch', sobreposicao]), ...(previa === undefined ? [] : ['--patch', previa])]
+}
+
+/**
+ * A prévia local, quando `pnpm preview:install` a instalou.
+ *
+ * Os DOIS arquivos precisam existir: a sobreposição liga o supervisor no
+ * perfil, e a configuração diz onde está o segredo da borda. Um sem o outro
+ * subiria um Studio que exige um segredo que ninguém entrega — e o harness
+ * recusaria a partida inteira.
+ * @param base - a raiz do repositório.
+ * @returns a prévia, ou `undefined`.
+ */
+export function previaLocalPresente(base) {
+  const patch = resolve(base, 'dsh-home', 'profiles', PERFIL, 'preview.patch.yml')
+  const arquivo = resolve(base, 'dsh-home', 'profiles', PERFIL, 'preview.local.json')
+  if (!existsSync(patch) || !existsSync(arquivo)) return undefined
+  const config = JSON.parse(readFileSync(arquivo, 'utf8'))
+  if (!Number.isInteger(config.porta) || !Number.isInteger(config.portaDoHarness) || typeof config.segredoDaBorda !== 'string') {
+    throw new Error(`${arquivo} está incompleto.`)
+  }
+  return { patch, porta: config.porta, portaDoHarness: config.portaDoHarness, segredoDaBorda: config.segredoDaBorda }
+}
+
+/**
+ * O endereço para abrir o FRIGG QUANDO há prévia: o mesmo convite que o `dsh`
+ * anuncia, no host da borda. O cookie de admissão da prévia só é de primeira
+ * parte se o Studio e a prévia forem do mesmo site (`dz23.localhost`).
+ * @param linha - uma linha da saída do `dsh`.
+ * @param porta - a porta da borda.
+ * @returns o endereço, ou `undefined`.
+ */
+export function enderecoComPrevia(linha, porta) {
+  const achado = /dsh web: http:\/\/127\.0\.0\.1:\d+(\/\S*)/u.exec(linha)
+  return achado === null ? undefined : `http://studio.dz23.localhost:${String(porta)}${achado[1]}`
 }
 
 /**
@@ -186,21 +222,37 @@ export function sobreposicaoLocalPresente(base) {
  * @param ambiente - o ambiente de quem chamou.
  * @returns o ambiente do filho.
  */
-export function ambienteDaPartida(base, ambiente) {
+export function ambienteDaPartida(base, ambiente, segredoDaBorda) {
   return {
     ...ambiente,
     DSH_HOME: resolve(base, 'dsh-home'),
     DZ23_OLLAMA_PLACEHOLDER: ambiente.DZ23_OLLAMA_PLACEHOLDER ?? 'ollama-local-placeholder-not-a-secret',
+    // O segredo da borda vive num arquivo 0600 fora do repositório e só existe
+    // no ambiente DO FILHO: não é impresso, não vai para argumento de linha de
+    // comando e não fica no ambiente de quem chamou.
+    ...(segredoDaBorda === undefined ? {} : { DZ23_EDGE_SECRET: segredoDaBorda }),
   }
 }
 
-function arrancar(base) {
+async function arrancar(base) {
   const bin = binDoHarness(base)
-  const filho = spawn(process.execPath, argumentosDaPartida(bin, sobreposicaoLocalPresente(base)), {
+  const previa = previaLocalPresente(base)
+  const segredo = previa === undefined ? undefined : segredoValido(readFileSync(previa.segredoDaBorda, 'utf8'))
+  if (previa !== undefined) await iniciarBorda({ porta: previa.porta, harnessHost: '127.0.0.1', harnessPorta: previa.portaDoHarness, segredo })
+  const filho = spawn(process.execPath, argumentosDaPartida(bin, sobreposicaoLocalPresente(base), previa?.patch), {
     cwd: base,
-    stdio: 'inherit',
-    env: ambienteDaPartida(base, process.env),
+    stdio: previa === undefined ? 'inherit' : ['inherit', 'pipe', 'inherit'],
+    env: ambienteDaPartida(base, process.env, segredo),
   })
+  if (previa !== undefined) {
+    filho.stdout.on('data', pedaco => {
+      process.stdout.write(pedaco)
+      for (const linha of String(pedaco).split('\n')) {
+        const endereco = enderecoComPrevia(linha, previa.porta)
+        if (endereco !== undefined) process.stdout.write(`\nFRIGG com prévia — abra este endereço: ${endereco}\n`)
+      }
+    })
+  }
   filho.on('exit', codigo => { process.exit(codigo ?? 0) })
   // Sem isto, um `Ctrl+C` deixaria o Studio rodando sem dono.
   for (const sinal of ['SIGINT', 'SIGTERM']) {
@@ -224,7 +276,10 @@ export function principal(argumentos = process.argv.slice(2), base = raiz) {
 
   process.stdout.write('\nAbrindo o FRIGG. Quando ele terminar de subir, o endereço aparece abaixo.\n')
   process.stdout.write('Para parar, aperte Ctrl+C.\n\n')
-  arrancar(base)
+  void arrancar(base).catch(erro => {
+    process.stderr.write(`O FRIGG não subiu: ${erro instanceof Error ? erro.message : String(erro)}\n`)
+    process.exit(1)
+  })
 }
 
 if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) principal()
