@@ -438,6 +438,7 @@ declarada.
 | UX-ANEXO-01 | O pedido aceita o que o servidor aceita (10.000 caracteres) e um arquivo de texto anexado | Pedido do titular em 19/09 ('esta limitado de caracteres, nao tem opcao de anexar arquivo') | v1.0 | BETA | apps/studio-web/src/home/anexo.ts (novo), home/HomeScreen.tsx, home/home.css, i18n/home.pt-BR.json, i18n/pt-BR.json, src/home/anexo.spec.ts, tests/anexo.spec.ts | A tela cortava em 1.000 caracteres o que o servidor aceitava ate 10.000. O anexo entra no pedido visivel e editavel, marcado com o nome do arquivo; o que nao cabe e cortado com aviso; arquivo grande ou binario e recusado com a causa. e2e real com arquivo CSV e axe sem violacoes. studio-web 1.034; e2e 162 | execucao: so texto — o modelo local nao le imagem, e oferecer seria mentira | Anexo no compositor da tarefa e arquivo guardado no espaco do projeto ainda nao existem | anexo de qualquer tipo no assistente geral |
 | IDN-TRUST-01 | Uma lista so de hosts confiaveis: a da identidade | Jornada real de 19/09 (a previa pelo host studio.dz23.localhost bateu em 'Host nao autorizado' em quatro lugares) | v1.0 | BETA | plugins/identity/src/service.ts (requestTrust, confiancaPara), plugins/prompt-to-app/src/index.ts, integration-hub/src/index.ts, tenancy/src/index.ts, studio-web/src/index.ts, mission/src/index.ts, plugins/identity/tests/confianca-unica.spec.ts, fakes em integration-hub/tenancy/studio-web tests | Cinco plugins tinham a propria copia de '127.0.0.1:porta e localhost:porta' (a missao nem aceitava configuracao); a identidade aceitava o host novo e os outros recusavam. Agora cada um parte da lista da identidade quando nao recebe a propria, e um teste estrutural recusa lista de loopback escrita em outro plugin. Portoes 32/32; raiz 4.426; studio-web 1.034; e2e 162; PostgreSQL 65. Sabotagens: 2, todas pegas | execucao: nenhum plugin perdeu a configuracao propria; so o padrao mudou de fonte | - | abrir a previa no WSL2 |
 | AGENTE-GERAL-01 | 'Conversar com o FRIGG' vira agente geral: pasta de trabalho por espaco, as ferramentas do preset standard do Harness e uma regra de politica para cada uma | Pedido do titular em 19/09 ('a ideia e ele fazer tudo que o Manus faz') | v1.0 | BETA | dsh-home/.agent-presets/dz23-assistant/agent.cordis.yml (persona; bash, arquivos, busca, tarefas de fundo, objetivos, modo de plano, compactacao, delegacao, perguntas, lista de tarefas, web), dsh-home/profiles/studio/cordis.patch.yml (27 regras novas; assistantWorkspaceRoot), plugins/studio-web/src/assistant-session.ts (workspaceRoot, pastaDoEspaco), src/index.ts, scripts/provision-preview.mjs (a sobreposicao nao apaga mais a configuracao do web), .gitignore, plugins/policy/tests/regras-do-agente-geral.spec.ts (novo), plugins/studio-web/tests/assistant-session.spec.ts, scripts/provision-preview.spec.mjs | Medido: o assistente exigia um repositorio git configurado a mao (DZ23_ASSISTANT_REPOSITORIES) e sem ele respondia 'nao configurado' — a instalacao pessoal nunca o configura; e o preset montava tool-skill SEM regra para `skill`, entao toda chamada era recusada. Achado junto, medido com --dump-config: uma entrada de sobreposicao SUBSTITUI a configuracao inteira do plugin, e a da previa apagava assistantRepositories. Ler e consultar: T0; coordenar e pesquisar: T1; mudar arquivo ou rodar comando: T2 (a pessoa confirma). Portoes 32/32; raiz 4.449; studio-web 1.034; e2e 162; PostgreSQL 65. Sabotagens: 3, todas pegas | execucao: nada do Harness foi reescrito; sao os plugins fixados, montados no preset do FRIGG | NAO EXECUTADO no real ainda; a tela da conversa mostra so rotulo e estado de cada ferramenta (sem arvore, plano ou entregaveis); anexo do assistente continua 512 KB e so imagem/texto; a sobreposicao do construtor tambem substitui a do hub (hoje sem efeito: os padroes coincidem) | abrir a conversa no WSL2 e medir com o modelo local |
+| AGENTE-GERAL-02 | A conversa abre na instalacao PESSOAL: a sessao sintetica nao recebe vinculo, e o processo lembra a conversa | Teste real de 19/09 ('Sessao invalida' ao abrir a conversa) | v1.0 | BETA | plugins/identity/src/service.ts (ehSessaoPessoal), plugins/studio-web/src/assistant-session.ts (#vincular), plugins/identity/tests/service.spec.ts, plugins/studio-web/tests/assistant-session.spec.ts | Medido no Chrome do titular: 'Abrir conversa segura' respondia 'Sessao invalida.' — a sessao do modo pessoal e sintetica, nao e gravada, e bindHarnessSession a recusava; a conversa governada NUNCA abriu na instalacao pessoal. Agora o vinculo so e pulado para a sessao sintetica DESTE momento (token zerado, mesmo principal, endereco local). Portoes 32/32; raiz 4.452; studio-web 1.034; e2e 162; PostgreSQL 65. Sabotagens: 2, todas pegas | execucao: fora do modo pessoal o vinculo continua obrigatorio | Depois de reiniciar o FRIGG, a conversa pessoal comeca outra (o historico continua na lista do Harness) | medir a conversa com o modelo local |
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -446,16 +447,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 214 |
+| `BETA` | 215 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 324.**
+**Total de requisitos rastreados: 325.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 288 |
+| v1.0 | 289 |
 | v1.x | 33 |
 | v2 | 3 |

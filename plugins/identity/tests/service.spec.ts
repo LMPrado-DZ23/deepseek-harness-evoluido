@@ -899,6 +899,16 @@ describe('a sessao sintetica do modo pessoal', () => {
     service.setBindHost('0.0.0.0')
     expect(service.personalSession()).toBeUndefined()
   })
+  it('ehSessaoPessoal reconhece SO a sessao sintetica deste momento', () => {
+    const { service } = makeHarness()
+    service.setBindHost('127.0.0.1')
+    const sessao = service.personalSession()!
+    expect(service.ehSessaoPessoal(sessao)).toBe(true)
+    expect(service.ehSessaoPessoal({ ...sessao, token_hash: 'a'.repeat(64) })).toBe(false)
+    expect(service.ehSessaoPessoal({ ...sessao, tenant_id: 'outro' })).toBe(false)
+    service.setBindHost('0.0.0.0')
+    expect(service.ehSessaoPessoal(sessao)).toBe(false)
+  })
 })
 
 describe('a porta pessoal fecha quando existe gente', () => {

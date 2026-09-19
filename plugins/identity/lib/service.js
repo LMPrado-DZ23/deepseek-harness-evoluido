@@ -359,6 +359,22 @@ export class StudioIdentityService {
      * ou o servidor escutando fora do endereço local.
      * @returns a sessão pessoal, ou `undefined`.
      */
+    /**
+     * A sessão é a SINTÉTICA do modo pessoal (ver `personalSession`)?
+     *
+     * Ela não está gravada, então não pode receber vínculo de conversa do
+     * Harness — `bindHarnessSession` a recusava com "Sessão inválida", e o
+     * assistente nunca abria na instalação pessoal (medido em 19/09/2026). Quem
+     * precisa saber disso é quem vincula: no modo pessoal há uma pessoa só, no
+     * endereço local, e o vínculo não protege ninguém de ninguém.
+     * @param session - a sessão.
+     * @returns se é a sessão pessoal DESTE momento.
+     */
+    ehSessaoPessoal(session) {
+        const pessoal = this.personalPrincipal(this.#bindHost);
+        return pessoal !== undefined && session.token_hash === SEM_SEGREDO && session.session_id === pessoal.sessionId
+            && session.user_id === pessoal.userId && session.org_id === pessoal.orgId && session.tenant_id === pessoal.tenantId;
+    }
     personalSession() {
         const principal = this.personalPrincipal(this.#bindHost);
         if (principal === undefined)

@@ -126,6 +126,18 @@ export declare class StudioIdentityService {
      * ou o servidor escutando fora do endereço local.
      * @returns a sessão pessoal, ou `undefined`.
      */
+    /**
+     * A sessão é a SINTÉTICA do modo pessoal (ver `personalSession`)?
+     *
+     * Ela não está gravada, então não pode receber vínculo de conversa do
+     * Harness — `bindHarnessSession` a recusava com "Sessão inválida", e o
+     * assistente nunca abria na instalação pessoal (medido em 19/09/2026). Quem
+     * precisa saber disso é quem vincula: no modo pessoal há uma pessoa só, no
+     * endereço local, e o vínculo não protege ninguém de ninguém.
+     * @param session - a sessão.
+     * @returns se é a sessão pessoal DESTE momento.
+     */
+    ehSessaoPessoal(session: SessionRecord): boolean;
     personalSession(): SessionRecord | undefined;
     /** Se os cookies desta instalação levam `Secure`. */
     get cookiesAreSecure(): boolean;
