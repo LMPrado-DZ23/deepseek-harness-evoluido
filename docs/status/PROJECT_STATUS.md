@@ -204,9 +204,16 @@ produto pelo caminho real e pergunta a ele. Restaurar cada um dos três defeitos
 que impediam abrir derruba a prova, com assinatura própria. Ela não precisa de
 Docker nem de modelo, e por isso entrou na CI.
 
-**As próximas são, nesta ordem:** `PLAN-01` (perguntas adaptativas — a decisão
-de desenho já está escrita no DAG, para executar e não decidir), `ABRIR-03` e,
-assim que houver ambiente completo, `ABRIR-05` e o resto da jornada.
+**`ABRIR-07` está entregue:** `pnpm builder:doctor` responde, em qualquer
+máquina, se dá para construir ali — e separa o que é AMBIENTE (daemon, disco,
+rede, sistema de arquivos, submódulo) do que é ENGENHARIA. A engenharia que
+falta tem nome: **o instalador reproduzível do construtor** (`ABRIR-08`). O
+README do supervisor já dizia que o `provision-cli` "não provisiona volume
+Docker nem torna o serviço ativo" — isso não é bloqueio externo, é trabalho.
+
+**As próximas são, nesta ordem:** `ABRIR-08` (o instalador — engenharia, que dá
+para escrever e testar sem o ambiente completo), `PLAN-01`, `ABRIR-03` e, quando
+houver um ambiente com as duas metades, `ABRIR-05` e o resto da jornada.
 
 ## DIRETIVA DO TITULAR — 18/09/2026: REAPROVEITAR ANTES DE REIMPLEMENTAR
 

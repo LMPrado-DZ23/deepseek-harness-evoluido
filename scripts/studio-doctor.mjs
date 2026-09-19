@@ -337,7 +337,23 @@ export function avisos(lista) {
  * pode ser conferida sem capturar a saída do processo, e o que esta missão
  * inteira aprendeu é que o que não se consegue conferir é o que quebra calado.
  */
-export function relatorio(lista) {
+/**
+ * As frases de fechamento do relatório, por assunto.
+ *
+ * Elas são PARÂMETRO desde 19/09/2026, quando o conferidor do construtor
+ * nasceu: ele responde a outra pergunta ("dá para construir aqui?") e precisava
+ * das mesmas quatro marcas, da mesma ordem-por-causa e do mesmo "termine no
+ * próximo comando". Copiar o renderizador para trocar três frases teria criado
+ * duas descrições do mesmo formato, e elas divergiriam no primeiro conserto de
+ * uma delas.
+ */
+export const ASSUNTO_DO_STUDIO = Object.freeze({
+  bloqueado: 'O Studio ainda não pode abrir. Falta isto:',
+  repetir: 'Depois rode `pnpm studio` de novo.',
+  abreMasFalta: 'O Studio vai abrir. Mas ainda falta isto para ele criar um aplicativo:',
+})
+
+export function relatorio(lista, assunto = ASSUNTO_DO_STUDIO) {
   const linhas = []
   for (const item of lista) {
     // Quatro marcas, e nao tres. Um `>>>` num item que NAO bloqueia poria, na
@@ -349,7 +365,7 @@ export function relatorio(lista) {
   const passo = primeiroPasso(lista)
   if (passo !== undefined) {
     linhas.push('')
-    linhas.push(`O Studio ainda não pode abrir. Falta isto: ${passo.titulo.toLowerCase()}.`)
+    linhas.push(`${assunto.bloqueado} ${passo.titulo.toLowerCase()}.`)
     if (passo.porque !== undefined) linhas.push(passo.porque)
     linhas.push('')
     linhas.push('Rode este comando:')
@@ -357,14 +373,14 @@ export function relatorio(lista) {
     const restantes = bloqueios(lista).length - 1
     if (restantes > 0) {
       linhas.push('')
-      linhas.push(`Depois rode \`pnpm studio\` de novo. Ainda faltam outros ${String(restantes)} passo(s), e eles aparecem um por vez.`)
+      linhas.push(`${assunto.repetir} Ainda faltam outros ${String(restantes)} passo(s), e eles aparecem um por vez.`)
     }
     return linhas.join('\n')
   }
   const pendentes = avisos(lista)
   if (pendentes.length > 0) {
     linhas.push('')
-    linhas.push('O Studio vai abrir. Mas ainda falta isto para ele criar um aplicativo:')
+    linhas.push(assunto.abreMasFalta)
     for (const item of pendentes) {
       linhas.push(`  - ${item.titulo}: ${item.viu}. ${item.faca ?? ''}`.trimEnd())
     }

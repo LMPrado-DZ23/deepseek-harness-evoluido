@@ -17,6 +17,7 @@
   ],
   "scripts": {
     "studio": "node scripts/studio-start.mjs",
+    "builder:doctor": "node scripts/builder-doctor.mjs --self-test && node scripts/builder-doctor.mjs",
     "studio:doctor": "node scripts/studio-start.mjs --conferir",
     "build:edge": "docker build -f deploy/caddy/Dockerfile -t dz23-studio-caddy:p29c .",
     "build:studio-image": "node scripts/build-studio-image.mjs",
