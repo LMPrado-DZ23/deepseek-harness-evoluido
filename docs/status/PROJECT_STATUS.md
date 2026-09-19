@@ -18,6 +18,27 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-19
 
+## ONDE A JORNADA DO APLICATIVO PAROU — 19/09/2026, 19h45 (horário de Brasília)
+
+Contador de copos, projeto `0709b65c…`, qwen2.5-coder:7b no WSL2 do titular:
+
+- tentativa `f9dd3959` 1: compilou, passou nos testes de unidade, reprovou só
+  em UM texto da tela ("Botão para Zerar"), com o diagnóstico exato (ABRIR-08l);
+- tentativa 2: passou das etapas de construção e teste e parou em `verify`
+  com `FINISH_INCONCLUSIVE` — é a PRIMEIRA vez que uma criação real chega ao
+  fechamento do construtor (exportar o pacote e limpar). O gerente não grava
+  nada útil no log (`~/.frigg/builder-install/gerente.log`), então a causa
+  ainda não é conhecida.
+
+**Próximo:** descobrir por que `lifecycle.finish` não fecha no WSL2 (exportação
+do pacote, limpeza ou conferência de `exported`); fazer o gerente registrar o
+motivo; repetir a criação até `VERIFIED_PROTOTYPE` e abrir a prévia.
+
+Scripts no Downloads do titular (WSL2 sem rede): `frigg-atualizar-sem-rede.sh`
+(puxa, liga pacotes novos, compila, reinicia o FRIGG), `frigg-completo.sh`
+(o mesmo + reinicia o gerente do construtor), `frigg-subir-tudo.sh` (depois de
+reiniciar o computador), `frigg-runs.py` (estado das criações).
+
 ## DIREÇÃO EM VIGOR — 19/09/2026, noite (decisão do titular)
 
 O titular trouxe uma auditoria externa e a adotou: **parar de abrir frentes de
