@@ -2,7 +2,7 @@ import { ROTA_LOCAL } from '@dz23-studio/route-health'
 import { esquemaDoPedido, marcaDoPedido } from '../src/index.ts'
 import { describe, expect, it } from 'vitest'
 import {
-  SaidaEstruturadaIndisponivel, TETO_DE_SAIDA,
+  SaidaEstruturadaIndisponivel, TETO_DE_SAIDA, JANELA_DE_CONTEXTO,
   consumirMarca, corpoEstruturado, esquemaJsonDaSaida, leituraDaResposta,
   desvioEstruturado, enderecoNativo, gerarEstruturado,
   marcarEstruturada, pedacosDaResposta, textoDeUmaMensagem,
@@ -79,6 +79,11 @@ describe('o schema que desce é o MESMO que confere na volta', () => {
       válida e incompleta é pior que inválida: ela passa no schema.
     */
     expect(corpoEstruturado('m', 'p', esquemaJsonDaSaida()).options.num_predict).toBe(TETO_DE_SAIDA)
+    // A janela cabe o prompt de geração (~2.300 tokens) MAIS a resposta inteira:
+    // sem ela, o padrão de 4.096 do servidor cortava o aplicativo no meio.
+    const janela = corpoEstruturado('m', 'p', esquemaJsonDaSaida()).options.num_ctx
+    expect(janela).toBe(JANELA_DE_CONTEXTO)
+    expect(janela).toBeGreaterThanOrEqual(TETO_DE_SAIDA + 4_096)
     expect(TETO_DE_SAIDA).toBeGreaterThan(2000)
   })
 })

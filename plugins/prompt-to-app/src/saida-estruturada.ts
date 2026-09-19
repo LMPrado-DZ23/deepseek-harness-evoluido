@@ -68,11 +68,23 @@ export interface CorpoEstruturado {
   readonly prompt: string
   readonly stream: false
   readonly format: Record<string, unknown>
-  readonly options: { readonly temperature: number; readonly num_predict: number }
+  readonly options: { readonly temperature: number; readonly num_predict: number; readonly num_ctx: number }
 }
 
 /** Quantos tokens de resposta um aplicativo inteiro precisa caber. */
 export const TETO_DE_SAIDA = 8192
+
+/**
+ * A JANELA de contexto pedida ao servidor local: prompt + resposta.
+ *
+ * Sem ela, o Ollama usa a janela padrão dele (4.096 tokens nesta instalação —
+ * medido em 19/09/2026 com `ollama ps`), e `num_predict` alto não adianta: o
+ * prompt de geração tem ~2.300 tokens, sobram ~1.800 para a resposta, e o
+ * aplicativo era cortado no meio. Na primeira criação real no WSL2 a tentativa
+ * 1 morreu com "JSON inválido" exatamente assim. O `qwen2.5-coder:7b` aceita
+ * 32k; 16k cabe o prompt e o `TETO_DE_SAIDA` inteiro com folga.
+ */
+export const JANELA_DE_CONTEXTO = 16_384
 
 /**
  * O corpo da requisição estruturada.
@@ -95,7 +107,7 @@ export function corpoEstruturado(modelo: string, texto: string, esquema: Record<
       passa no schema. Um teto apertado transforma a gramática em fabricante de
       truncamento silencioso.
     */
-    options: { temperature: temperatura, num_predict: TETO_DE_SAIDA },
+    options: { temperature: temperatura, num_predict: TETO_DE_SAIDA, num_ctx: JANELA_DE_CONTEXTO },
   }
 }
 
