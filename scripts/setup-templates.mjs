@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
+import { normalizarStoreDoPnpm } from './template-store-lib.mjs'
 
 if (!process.argv.includes('--approve-t2')) {
   process.stderr.write('Setup recusado: confirme a instalação de dependências com --approve-t2.\n')
@@ -31,6 +32,9 @@ try {
 } finally {
   rmSync(fetchRoot, { recursive: true, force: true })
 }
+// O registro de projetos do pnpm 11 aponta para o espaço temporário que acabou
+// de ser apagado; o construtor recusa link no store. Ver `template-store-lib.mjs`.
+process.stdout.write(`STORE_REGISTRO_REMOVIDO=${String(await normalizarStoreDoPnpm(store))}\n`)
 const build = spawnSync('docker', ['build', '--file', 'deploy/builder/Dockerfile', '--tag', 'dz23-studio-builder:local', '.'], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' })
 if (build.status !== 0) process.exit(build.status ?? 1)
 const inspect = spawnSync('docker', ['image', 'inspect', 'dz23-studio-builder:local', '--format', '{{.Id}}'], { cwd: root, encoding: 'utf8', shell: process.platform === 'win32' })

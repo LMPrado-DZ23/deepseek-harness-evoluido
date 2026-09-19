@@ -16,9 +16,13 @@ import { posix } from 'node:path'
   adulterado não pode fazer o supervisor ler sem fim —, agora com folga de
   pouco mais de 2x sobre o medido. O manifesto acompanha as entradas: cada
   uma ocupa perto de 300 bytes (caminho do store, hash, tamanho, tipo).
+
+  O teto POR ARQUIVO também subiu, de 64 para 128 MiB: o maior arquivo do
+  store medido é o binário do compilador do Next.js (`@next/swc-linux-x64-gnu`),
+  com 96.731.560 bytes.
 */
 export const TEMPLATE_MANIFEST_MAX_BYTES = 24 * 1024 * 1024
-export const TEMPLATE_ENTRY_MAX_BYTES = 64 * 1024 * 1024
+export const TEMPLATE_ENTRY_MAX_BYTES = 128 * 1024 * 1024
 export const TEMPLATE_STORE_MAX_BYTES = 1536 * 1024 * 1024
 export const TEMPLATE_STORE_MAX_ENTRIES = 60_000
 
