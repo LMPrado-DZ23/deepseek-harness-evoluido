@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { bloqueios, relatorio } from './studio-doctor.mjs'
-import { ASSUNTO_DO_CONSTRUTOR, ESPACO_ESTIMADO_GB, conferenciasDoConstrutor } from './builder-doctor.mjs'
+import { ASSUNTO_DO_CONSTRUTOR, ESPACO_ESTIMADO_GB, conferenciasDoConstrutor, espacoOndeAsImagensMoram } from './builder-doctor.mjs'
 
 /**
  * Uma máquina pronta, para os casos quebrarem UM fato por vez.
@@ -85,5 +85,34 @@ describe('o conferidor do construtor', () => {
     expect(lista.filter(item => item.estado === 'NAO_SEI').map(item => item.id))
       .toEqual(['docker-cliente', 'arquitetura', 'sistema-de-arquivos'])
     expect(bloqueios(lista)).toEqual([])
+  })
+})
+
+describe('onde o espaco e medido', () => {
+  /*
+    O DEFEITO MEDIDO na máquina do titular: a primeira versão media o disco do
+    CLONE. Lá o clone está em `/mnt/c` (203 GB livres) e as imagens moram na
+    raiz do daemon, no ext4 do WSL2 (880 GB). A resposta saía certa por acaso,
+    e sobre o disco errado.
+  */
+  const sonda = (tabela) => ({ espacoLivreGb: caminho => tabela[caminho] })
+
+  it('mede na RAIZ DO DOCKER, e diz onde mediu', () => {
+    expect(espacoOndeAsImagensMoram('/var/lib/docker', sonda({ '/var/lib/docker': 880, '/mnt/c/clone': 203 })))
+      .toEqual({ espacoLivreGb: 880, espacoMedidoEm: '/var/lib/docker' })
+  })
+
+  it('raiz recusada, mede o diretorio de cima — e o texto diz que foi ali', () => {
+    const medido = espacoOndeAsImagensMoram('/var/lib/docker', sonda({ '/var/lib': 870 }))
+    expect(medido).toEqual({ espacoLivreGb: 870, espacoMedidoEm: '/var/lib' })
+    const item = conferenciasDoConstrutor({ ...pronto(), imagemPresente: false, ...medido })
+      .find(candidato => candidato.id === 'espaco')
+    expect(item?.viu).toContain('em /var/lib')
+  })
+
+  it('sem daemon, NAO SEI — e nunca o disco do clone fingindo ser o das imagens', () => {
+    expect(espacoOndeAsImagensMoram(undefined, sonda({ '/mnt/c/clone': 203 }))).toEqual({})
+    const item = conferenciasDoConstrutor({ ...pronto(), espacoLivreGb: undefined }).find(candidato => candidato.id === 'espaco')
+    expect(item?.estado).toBe('NAO_SEI')
   })
 })

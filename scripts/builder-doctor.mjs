@@ -142,9 +142,9 @@ export function conferenciasDoConstrutor(observado) {
     ...(observado.espacoLivreGb === undefined
       ? { estado: 'NAO_SEI', viu: 'não foi possível medir' }
       : observado.imagemPresente === true || observado.espacoLivreGb >= ESPACO_ESTIMADO_GB
-        ? { estado: 'OK', viu: `${String(observado.espacoLivreGb)} GB livres` }
+        ? { estado: 'OK', viu: `${String(observado.espacoLivreGb)} GB livres${ondeMediu(observado)}` }
         : {
-          estado: 'FALTA', viu: `${String(observado.espacoLivreGb)} GB livres, e a estimativa é ${String(ESPACO_ESTIMADO_GB)} GB`,
+          estado: 'FALTA', viu: `${String(observado.espacoLivreGb)} GB livres${ondeMediu(observado)}, e a estimativa é ${String(ESPACO_ESTIMADO_GB)} GB`,
           porque: 'A estimativa NÃO é medição: ninguém construiu esta imagem ainda. Ela soma a base declarada, o Node, o pnpm e as duas árvores de dependências.',
           faca: 'Libere espaço no disco onde o Docker guarda as imagens, ou construa em outra máquina.',
         }),
@@ -219,17 +219,28 @@ export function conferenciasDoConstrutor(observado) {
   return lista
 }
 
+/**
+ * O trecho que diz ONDE o espaço foi medido.
+ * @param observado - o observado.
+ * @returns o trecho, ou vazio quando não se sabe.
+ */
+function ondeMediu(observado) {
+  return observado.espacoMedidoEm === undefined ? '' : ` em ${observado.espacoMedidoEm}`
+}
+
 /** Uma sonda que não toca em rede nem em processo — o padrão é o disco real. */
 export const SONDA_DO_CONSTRUTOR = {
   docker() {
     const versao = spawnSync('docker', ['--version'], { encoding: 'utf8', timeout: 10_000 })
     if (versao.status !== 0) return { cliente: false }
-    const info = spawnSync('docker', ['info', '--format', '{{.ServerVersion}}'], { encoding: 'utf8', timeout: 20_000 })
+    const info = spawnSync('docker', ['info', '--format', '{{.ServerVersion}}|{{.DockerRootDir}}'], { encoding: 'utf8', timeout: 20_000 })
+    const [servidor, raizDoDocker] = info.status === 0 ? info.stdout.trim().split('|') : []
     return {
       cliente: true,
       versao: versao.stdout.trim(),
-      daemon: info.status === 0 && info.stdout.trim() !== '',
-      servidor: info.status === 0 ? info.stdout.trim() : undefined,
+      daemon: info.status === 0 && (servidor ?? '') !== '',
+      servidor,
+      raiz: raizDoDocker === '' ? undefined : raizDoDocker,
     }
   },
   espacoLivreGb(caminho) {
@@ -261,6 +272,32 @@ export const SONDA_DO_CONSTRUTOR = {
   },
 }
 
+/**
+ * O espaço livre ONDE AS IMAGENS MORAM, e onde ele foi medido.
+ *
+ * A primeira versão media no disco do CLONE, e errou na máquina do titular: o
+ * clone está em `/mnt/c` (o disco do Windows, 203 GB livres) e as imagens do
+ * Docker moram na raiz do daemon, no ext4 do WSL2 (880 GB). A resposta estava
+ * certa por acaso e sobre o disco errado — o tipo de acerto que vira erro no
+ * primeiro lugar onde os dois discos divergem.
+ *
+ * A raiz do daemon costuma ser de uso exclusivo do administrador, e a leitura
+ * pode ser recusada. Aí mede-se o diretório de cima, e a resposta DIZ que foi
+ * ali. Sem raiz nenhuma para medir, a resposta é "não sei" — nunca o disco do
+ * clone fingindo ser o das imagens.
+ * @param raizDoDocker - `DockerRootDir`, quando o daemon respondeu.
+ * @param sonda - de onde vem a medida.
+ * @returns o espaço em GB e o caminho medido, ou nada.
+ */
+export function espacoOndeAsImagensMoram(raizDoDocker, sonda) {
+  if (raizDoDocker === undefined) return {}
+  for (const caminho of [raizDoDocker, dirname(raizDoDocker)]) {
+    const espaco = sonda.espacoLivreGb(caminho)
+    if (espaco !== undefined) return { espacoLivreGb: espaco, espacoMedidoEm: caminho }
+  }
+  return {}
+}
+
 /** Os sistemas de arquivos que o provisionamento aceita. */
 export const SISTEMAS_SUPORTADOS = Object.freeze(['ext4', 'xfs'])
 
@@ -283,7 +320,7 @@ export async function observarConstrutor(base = raiz, sonda = SONDA_DO_CONSTRUTO
     arquitetura: process.arch,
     imagemPresente: imagem.status === 0,
     imagemReferencia: imagem.status === 0 ? 'dz23-studio/builder:local' : undefined,
-    espacoLivreGb: sonda.espacoLivreGb(base),
+    ...espacoOndeAsImagensMoram(docker.raiz, sonda),
     redeAlcancavel: bloqueados.length === 0,
     redeBloqueada: bloqueados,
     submoduloPresente: existsSync(resolve(base, 'third_party/deepseek-harness/package.json')),
