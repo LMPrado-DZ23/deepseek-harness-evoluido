@@ -170,12 +170,36 @@ export function sobreposicaoLocalPresente(base) {
   return existsSync(caminho) ? caminho : undefined
 }
 
+/**
+ * O ambiente com que o `dsh` sobe.
+ *
+ * `DZ23_OLLAMA_PLACEHOLDER` é o "nome de chave" que o perfil declara para a
+ * rota do Ollama (`apiKeyEnv`), porque o adaptador de modelos recusa rota sem
+ * chave — e o Ollama local não tem chave nenhuma. Os roteiros de prova sempre
+ * o preenchiam; a PARTIDA de verdade não. Medido em 19/09/2026 na primeira
+ * jornada no WSL2: a leitura do pedido (que vai pelo caminho estruturado)
+ * funcionou, e a síntese da especificação, que passa pelo adaptador, morreu com
+ * "no credential for provider route ollama" — e o conferidor tinha dito "IA:
+ * Ollama, ok". O valor NÃO é segredo e diz isso no próprio texto; um valor que
+ * a pessoa já tenha posto é respeitado.
+ * @param base - a raiz do repositório.
+ * @param ambiente - o ambiente de quem chamou.
+ * @returns o ambiente do filho.
+ */
+export function ambienteDaPartida(base, ambiente) {
+  return {
+    ...ambiente,
+    DSH_HOME: resolve(base, 'dsh-home'),
+    DZ23_OLLAMA_PLACEHOLDER: ambiente.DZ23_OLLAMA_PLACEHOLDER ?? 'ollama-local-placeholder-not-a-secret',
+  }
+}
+
 function arrancar(base) {
   const bin = binDoHarness(base)
   const filho = spawn(process.execPath, argumentosDaPartida(bin, sobreposicaoLocalPresente(base)), {
     cwd: base,
     stdio: 'inherit',
-    env: { ...process.env, DSH_HOME: resolve(base, 'dsh-home') },
+    env: ambienteDaPartida(base, process.env),
   })
   filho.on('exit', codigo => { process.exit(codigo ?? 0) })
   // Sem isto, um `Ctrl+C` deixaria o Studio rodando sem dono.

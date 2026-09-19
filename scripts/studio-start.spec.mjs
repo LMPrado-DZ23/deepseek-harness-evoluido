@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path'
 const RAIZ_DO_REPOSITORIO = resolve(dirname(new URL(import.meta.url).pathname), '..')
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { PERFIL, SONDA_PADRAO, argumentosDaPartida, binDoHarness, docker, observar, sobreposicaoLocalPresente } from './studio-start.mjs'
+import { PERFIL, SONDA_PADRAO, ambienteDaPartida, argumentosDaPartida, binDoHarness, docker, observar, sobreposicaoLocalPresente } from './studio-start.mjs'
 import { bloqueios, conferencias } from './studio-doctor.mjs'
 
 /**
@@ -114,6 +114,15 @@ describe('observar — a pasta vazia', () => {
     // está. O ambiente responde sem abrir conexão nenhuma.
     expect(observar(base, { versions: process.versions, env: {} }, sondaParada).rotasConfiguradas).toEqual([])
     expect(observar(base, { versions: process.versions, env: { DZ23_OMNIROUTE_KEY: "k" } }, sondaParada).rotasConfiguradas).toEqual(['omniroute'])
+  })
+})
+
+describe('ambienteDaPartida', () => {
+  it('preenche o nome de chave do Ollama local, que não é segredo, e respeita o que já estiver posto', () => {
+    const padrao = ambienteDaPartida('/dados/frigg', { PATH: '/bin' })
+    expect(padrao).toMatchObject({ PATH: '/bin', DSH_HOME: '/dados/frigg/dsh-home' })
+    expect(padrao.DZ23_OLLAMA_PLACEHOLDER).toMatch(/not-a-secret/u)
+    expect(ambienteDaPartida('/dados/frigg', { DZ23_OLLAMA_PLACEHOLDER: 'meu' }).DZ23_OLLAMA_PLACEHOLDER).toBe('meu')
   })
 })
 
