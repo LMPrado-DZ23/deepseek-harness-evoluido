@@ -84,6 +84,6 @@ foi MEDIDO; "existe no código" não é "funciona para a pessoa".
 | 9. Arquivo real para baixar | BETA | AGENTE-GERAL-03: download da pasta de trabalho como anexo | medido com modelo real produzindo o arquivo |
 | 10. Sobreviver a reinício | BETA | conversa e lembretes são registro do Harness; criação retoma (ABRIR-08) | medido na jornada inteira |
 | 11. Agendamento numa tela, cancelável | BETA (parcial) | AGENDADO-01: lembretes listados e cancelados pela conversa | PAUSAR não existe no Harness; tarefa que começa sozinha numa conversa NOVA não existe |
-| 12. Prompt-to-App até prévia aberta | NOT_EXECUTED | EB-04: o modelo real escreveu, compilou, parou na checagem de tipos; o conserto (ABRIR-08k) está no código | rodar até build, verificação e prévia no WSL2 |
+| 12. Prompt-to-App até prévia aberta | NOT_EXECUTED | EB-04: com modelo real, o aplicativo gerado COMPILOU e passou nos testes de unidade no construtor isolado (19/09, tarde); reprovou em textos da tela; o conserto (ABRIR-08l) está no código | passar a verificação da tela e abrir a prévia |
 | Conexões de IA (local, chave, linha de comando) | BETA | LLM-CLI-01 + UX-CONEXOES-01 | linha de comando no WSL2 do titular depende de rede |
 | MCP e conectores dentro da conversa | BETA | MCP-CONVERSA-01: listar/perguntar/chamar pelo Hub, contra servidor MCP real | ligar conector exige manifesto assinado (chave de publicador vazia por padrão) |

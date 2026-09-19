@@ -190,3 +190,36 @@ function schedulingSlot(spec: AppSpecV1): string { const entity=spec.entities.fi
 function renderFlow(check: AcceptanceCheck): string { const flow=check.flow!;const marker=`DZ23-${check.id}`;const enter=flow.submit_requires_auth?'await loginAsOwner(page);':"await page.goto('/');";const provePrivate=flow.submit_requires_auth?'':`await expect(page.getByTestId(${JSON.stringify(flow.list_test_id)})).toHaveCount(0);await loginAsOwner(page);`;return `test(${JSON.stringify(check.label)},async({page})=>checked(${JSON.stringify(check.id)},async()=>{${enter}const form=page.getByTestId(${JSON.stringify(flow.form_test_id)});${fieldEntries(flow,marker).join(';')};await form.getByRole('button',{name:${JSON.stringify(tGeneratedApp('common.save'))}}).click();${provePrivate}await expect(page.getByTestId(${JSON.stringify(flow.list_test_id)})).toContainText(${JSON.stringify(markerValue(flow,marker))})}))` }
 function renderCrud(check: AcceptanceCheck): string { const flow=check.flow!;const marker=`DZ23-${check.id}`;const edited=`${marker}-edited`;const saveChanges=JSON.stringify(tGeneratedApp('common.saveChanges'));return `test(${JSON.stringify(check.label)},async({page})=>checked(${JSON.stringify(check.id)},async()=>{await loginAsOwner(page);const form=page.getByTestId(${JSON.stringify(flow.form_test_id)});${fieldEntries(flow,marker).join(';')};await form.getByRole('button',{name:${JSON.stringify(tGeneratedApp('common.add'))}}).click();let row=page.getByTestId(${JSON.stringify(flow.list_test_id)}).getByRole('listitem').filter({hasText:${JSON.stringify(marker)}});await expect(row).toBeVisible();const edit=row.locator('form').filter({hasText:${saveChanges}});await edit.locator(${JSON.stringify(`[name="${flow.marker_field}"]`)}).fill(${JSON.stringify(edited)});await edit.getByRole('button',{name:${saveChanges}}).click();row=page.getByTestId(${JSON.stringify(flow.list_test_id)}).getByRole('listitem').filter({hasText:${JSON.stringify(edited)}});await expect(row).toBeVisible();page.once('dialog',dialog=>dialog.accept());await row.getByRole('button',{name:${JSON.stringify(tGeneratedApp('common.delete'))}}).click();await expect(page.getByText(${JSON.stringify(edited)},{exact:false})).toHaveCount(0)}))` }
 function renderDashboard(check: AcceptanceCheck): string { const flow=check.flow!;const slug=dataIdentifier(check.expected??'registro');const symbol=slug.split('_').map(part=>`${part.charAt(0).toUpperCase()}${part.slice(1)}`).join('');const values=Object.fromEntries(flow.fields.map(field=>[field.name,field.type==='number'?42:field.type==='date'?'2099-09-04':field.type==='boolean'?true:field.type==='selection'?field.options?.[0]??'Teste':field.type==='email'?'dashboard@example.test':field.type==='phone'?'11987654321':`DZ23-${field.name}`]));return `test(${JSON.stringify(check.label)},async({page})=>checked(${JSON.stringify(check.id)},async()=>{const { openDatabase }=await import('../../src/db/client');const { ${symbol}Repository }=await import('../../src/server/repositories/${slug}');const database=openDatabase();try{new ${symbol}Repository(database).create(${JSON.stringify(values)})}finally{database.close()}await loginAsOwner(page);await expect(page.getByText('1',{exact:true}).first()).toBeVisible();const tables=page.locator('table');const charts=page.locator('svg[aria-hidden="true"]');expect(await tables.count()).toBeGreaterThan(0);await expect(charts).toHaveCount(await tables.count());await expect(page.locator('main > section form').filter({has:page.locator('input:not([type="hidden"]),select,textarea')})).toHaveCount(0)}))` }
+
+/**
+ * Os TEXTOS que a tela tem de mostrar, exatamente, para a verificação passar.
+ *
+ * Medido em 19/09/2026 no WSL2 do titular: o contador de copos COMPILOU,
+ * passou nos testes de unidade e reprovou em 8 das 18 conferências da tela,
+ * todas do tipo "este texto não apareceu" — o modelo escreveu um contador que
+ * funciona com títulos dele, e não com os nomes da especificação. Ninguém tinha
+ * dito ao modelo que esses nomes são conferidos, letra por letra.
+ * @param checks - as conferências da especificação.
+ * @returns os textos, sem repetição, na ordem em que aparecem.
+ */
+export function textosExigidos(checks: readonly AcceptanceCheck[]): readonly string[] {
+  const textos = checks
+    .filter(check => check.status === 'PENDING' && check.expected !== undefined && ['page', 'section', 'entity', 'criterion'].includes(check.kind))
+    .map(check => check.expected!)
+  return [...new Set(textos)]
+}
+
+/**
+ * Os textos que a verificação da tela procurou e NÃO achou, lidos da saída do
+ * Playwright (`Locator: getByText('…'`).
+ *
+ * O diagnóstico de reparo era "e2e: exit 1": o modelo recebia a notícia da
+ * reprovação e nenhuma pista do que consertar. Aqui volta a lista exata.
+ * @param saida - o que o passo de teste escreveu.
+ * @returns os textos, sem repetição.
+ */
+export function textosQueFaltaram(saida: string): readonly string[] {
+  const limpa = saida.replace(/\u001b\[[0-9;]*m/gu, '')
+  const achados = [...limpa.matchAll(/Locator: getByText\('((?:[^'\\]|\\.)*)'/gu)].map(achado => achado[1]!.replace(/\\'/gu, "'"))
+  return [...new Set(achados)]
+}

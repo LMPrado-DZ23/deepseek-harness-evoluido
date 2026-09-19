@@ -14,7 +14,7 @@ import { generateCrudLayer, writeCrudLayer } from './crud-generator.js'
 import { generateDataLayer, writeDataLayer } from './data-generator.js'
 import { generateDashboardLayer, writeDashboardLayer } from './dashboard-generator.js'
 import { renderDesignTokens } from './design.js'
-import { acceptanceChecks, parseAcceptanceReport, writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
+import { acceptanceChecks, parseAcceptanceReport, textosExigidos, textosQueFaltaram, writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
 import {
   acceptanceAttestation,
   canonicalDocument,
@@ -114,6 +114,9 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
       // sendo recusado, gastando uma tentativa inteira por chute.
       ...generationRules(this.perfil),
       prompt('prompts.generateSpec', { spec: JSON.stringify(spec) }), prompt('prompts.generatePlan', { plan: JSON.stringify(plan.slices) }),
+      // Os textos que a verificação procura: sem esta linha o modelo só
+      // descobria que eram conferidos letra por letra depois de reprovar.
+      ...(textosExigidos(acceptanceChecks(spec)).length === 0 ? [] : [prompt('prompts.generateTextos', { textos: JSON.stringify(textosExigidos(acceptanceChecks(spec))) })]),
       ...(diagnostic === undefined ? [] : [prompt('prompts.generateRepair', { diagnostic })]),
       /*
         E os ARQUIVOS da tentativa anterior, junto com a causa. Sem eles o
@@ -567,7 +570,13 @@ export class PromptToAppPipeline {
             diagnostic = 'PROCESS_OUTPUT_LIMIT_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; stopRetries = true; break
           }
           if (result.timed_out) { diagnostic = 'BUDGET_EXCEEDED'; failedStage = buildPassed ? 'test' : 'build'; break }
-          if (result.exit_code !== 0 || execution.state === 'FAILED') { diagnostic = `${step}: exit ${result.exit_code}`; failedStage = buildPassed ? 'test' : 'build'; break }
+          if (result.exit_code !== 0 || execution.state === 'FAILED') {
+            // Com a lista do que a tela não mostrou, o reparo sabe o que fazer;
+            // sem ela ("e2e: exit 1"), recomeçava às cegas.
+            const faltaram = step === 'e2e' ? textosQueFaltaram(`${result.stdout}\n${result.stderr}`) : []
+            diagnostic = faltaram.length > 0 ? prompt('prompts.repairTextos', { textos: JSON.stringify(faltaram) }) : `${step}: exit ${result.exit_code}`
+            failedStage = buildPassed ? 'test' : 'build'; break
+          }
           if (step === 'build' && execution.state === 'BUILD_OK') buildPassed = true
           if (step === 'e2e' && execution.state === 'E2E_OK') testPassed = true
         }

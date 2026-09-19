@@ -67,14 +67,14 @@ describe('o gerador entrega o conteúdo com title', () => {
 
   it('usa o nome da primeira página da especificação, e o prompt pede o campo', async () => {
     const modelo = new Modelo()
-    const spec = { schema_version: 1, problem: 'p', pages: [{ name: 'Contador de Copos', sections: ['a'] }] } as unknown as AppSpecV1
+    const spec = { schema_version: 1, problem: 'p', pages: [{ name: 'Contador de Copos', sections: ['a'] }], entities: [], acceptance_criteria: [], language: 'pt-BR' } as unknown as AppSpecV1
     const { files } = await new ModelCodeGenerator(modelo, ator, 'melhor-qualidade', 'interativo').generate(spec, plan)
     expect(JSON.parse(files.find(file => file.path === 'content/app.json')!.content).title).toBe('Contador de Copos')
     expect(modelo.prompts[0]).toMatch(/content\/app\.json é um objeto JSON e sempre tem o campo title/u)
   })
 
   it('sem página, cai no título do FRIGG', async () => {
-    const spec = { schema_version: 1, problem: 'p', pages: [] } as unknown as AppSpecV1
+    const spec = { schema_version: 1, problem: 'p', pages: [], entities: [], acceptance_criteria: [], language: 'pt-BR' } as unknown as AppSpecV1
     const { files } = await new ModelCodeGenerator(new Modelo(), ator, 'melhor-qualidade', 'interativo').generate(spec, plan)
     expect(JSON.parse(files.find(file => file.path === 'content/app.json')!.content).title).toBe('Aplicativo criado no FRIGG')
   })

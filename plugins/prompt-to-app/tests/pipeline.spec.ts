@@ -805,6 +805,16 @@ describe('Prompt-to-App pipeline', () => {
     expect(failures.every(run => run.artifact_sha256 == null)).toBe(true)
   })
 
+  it('a tela que não mostrou os textos devolve ao reparo QUAIS textos faltaram, e não só "e2e: exit 1"', async () => {
+    const saida = "Locator: getByText('Serviços', { exact: true }).first()"
+    const f = await fixture({ execute: async (_directory, command) => ({ exitCode: command === 'pnpm run test:e2e' ? 1 : 0, stdout: command === 'pnpm run test:e2e' ? saida : '', stderr: '', timedOut: false }) })
+    const generate = varying()
+    await f.pipeline.run(actor, 'project', { generate })
+    const diagnostico = String((vi.mocked(generate).mock.calls[1] as unknown[] | undefined)?.[2] ?? '')
+    expect(diagnostico).toContain('A tela não mostrou estes textos')
+    expect(diagnostico).toContain('["Serviços"]')
+  })
+
   it('a rodada de reparo leva os ARQUIVOS da tentativa recusada, e não só a causa', async () => {
     /*
       Medido em 18/09/2026 contra o Ollama do titular: a primeira tentativa

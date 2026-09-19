@@ -33,7 +33,7 @@ class ModeloQueRegistra implements PromptModelPort {
   }
 }
 
-const spec = { schema_version: 1, problem: 'p', pages: [] } as unknown as AppSpecV1
+const spec = { schema_version: 1, problem: 'p', pages: [], entities: [], acceptance_criteria: [], language: 'pt-BR' } as unknown as AppSpecV1
 const plan = { slices: [] } as unknown as StudioPlan
 const ator = { orgId: 'o', tenantId: 't' } as never
 
