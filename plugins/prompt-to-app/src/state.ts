@@ -52,7 +52,7 @@ export function canUndoFrom(state: ProjectState): boolean {
   return UNDO_TRANSITIONS[state].length > 0
 }
 
-const GENERATION_START_STATES: readonly ProjectState[] = ['PLAN_APPROVED', 'BUILD_FAILED', 'TESTS_FAILED', 'CANCELLED', 'INTERRUPTED']
+export const GENERATION_START_STATES: readonly ProjectState[] = ['PLAN_APPROVED', 'BUILD_FAILED', 'TESTS_FAILED', 'CANCELLED', 'INTERRUPTED']
 
 export function canStartGeneration(state: ProjectState): boolean {
   return GENERATION_START_STATES.includes(state)

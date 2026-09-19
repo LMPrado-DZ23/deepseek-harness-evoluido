@@ -12,6 +12,7 @@ import { impressaoDoEnvioLocal, intencaoDeEnvio, intencaoPorImpressao, type Inte
 import { HEADLINE_CAPABILITY, capabilityLines, capabilityName, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
+import { podeTentarDeNovo } from './tentarDeNovo'
 import { NotificationOptIn } from './pwa/NotificationOptIn'
 import { browserEmergencyStopPort, EmergencyStop } from './EmergencyStop'
 import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointListValue, type RunReportValue } from './RunReport'
@@ -843,7 +844,12 @@ export function App() {
       {/* Tentar de novo é AÇÃO, e por isso está aqui e não no relato: ele
           também oferecia o botão, e a mesma ação em dois lugares faz a pessoa
           procurar qual dos dois é o de verdade. */}
-      {result?.state === 'INTERRUPTED' ? <PendingButton className="dz-acao-botao-secundario" label={t.creation.retry} busyLabel={t.creation.retryBusy} action={generate} /> : null}
+      {/* SABOTAGEM SOBREVIVE, e está declarado: trocar `podeTentarDeNovo` pela
+          condição antiga não derruba teste nenhum, porque o servidor de e2e não
+          produz uma criação que falha na montagem. A DECISÃO está coberta em
+          `tentarDeNovo.spec.ts` e casada com o servidor em
+          `plugins/prompt-to-app/tests/tentar-de-novo.spec.ts`; esta linha só a usa. */}
+      {podeTentarDeNovo(result?.state) ? <PendingButton className="dz-acao-botao-secundario" label={t.creation.retry} busyLabel={t.creation.retryBusy} action={generate} /> : null}
       {preview === null ? null : <button type="button" className="dz-acao-botao-secundario" onClick={() => { setPainel({ tipo: 'preview' }); setLayout(atual => proximoLayout(atual, { tipo: 'abrir' })) }}>{t.preview.title}</button>}
       <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'uso' })}>{tarefaCopy.verUso}</button>
       <button type="button" className="dz-acao-botao-secundario" onClick={() => setPainel({ tipo: 'diagnostico' })}>{tarefaCopy.verDiagnostico}</button>
