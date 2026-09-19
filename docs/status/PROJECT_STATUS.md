@@ -18,6 +18,38 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-19
 
+## DIREÇÃO EM VIGOR — 19/09/2026, noite (decisão do titular)
+
+O titular trouxe uma auditoria externa e a adotou: **parar de abrir frentes de
+infraestrutura e fechar UMA jornada vertical real, no computador dele, com
+modelo real**, comparável ao Manus Desktop. Enquanto ela não passar, nada de
+marketplace, fornecedor novo ou categoria nova. O checkpoint seguinte mostra a
+jornada funcionando (gravada), não números de testes. Os doze passos:
+
+1. abrir o FRIGG por um atalho simples;
+2. conversa geral;
+3. anexar qualquer arquivo;
+4. plano e tarefas visíveis;
+5. pesquisar na internet e, quando preciso, operar um navegador visível e supervisionável;
+6. ler/escrever arquivos e rodar comandos só na pasta autorizada;
+7. confirmação para ação sensível;
+8. delegar a pelo menos dois subagentes, com o estado deles na tela;
+9. produzir um arquivo real para baixar;
+10. sobreviver a reinício e retomar conversa e tarefa;
+11. agendamento que aparece numa tela, pode ser pausado e cancelado;
+12. Prompt-to-App até build, verificação e prévia aberta.
+
+Travas medidas nesta noite, e que decidem a ordem:
+
+- **o WSL2 do titular não alcança a internet** (curl à API do provedor não
+  responde em 20 s; `pnpm install` fica em ETIMEDOUT). Isso afeta o passo 5, as
+  conexões por linha de comando e qualquer instalação nova ali. Mudar rede do
+  WSL2 exige pedido objetivo ao titular (regra dele);
+- **o modelo local é lento demais para o agente** (0,66 token/s com qwen3:8b).
+
+README, PROJECT_STATUS, CAPABILITY_MATRIX e o livro mestre devem dizer o mesmo
+estado; a auditoria achou o README desatualizado.
+
 ## O QUE ACABOU DE ACONTECER — 19/09/2026 (WSL2 do titular, jornada real)
 
 **Direção nova do titular, com a tela na mão:** "a ideia é ele fazer tudo que o

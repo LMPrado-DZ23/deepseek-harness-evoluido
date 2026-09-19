@@ -201,13 +201,14 @@ pulados.
 - Nenhum *deploy* de produção. O destino de publicação hoje é **local**.
 - A imagem OCI ainda não foi construída (falta rota de rede para registro de
   pacotes no ambiente de build).
-- **Nenhum modelo de verdade escreveu um aplicativo aqui.** O caminho inteiro é
-  provado contra dobro. Há uma medição com Ollama real registrada em `EB-04`: o
-  código que um modelo pequeno devolveu **passa** nas guardas, mas o prompt real
-  não completa em tempo utilizável em CPU.
-- **178 dos 287 requisitos estão em `BETA`**: construídos e provados **neste
-  ambiente**, não na vida real. 69 estão em `STABLE`, e o resto tem o motivo
-  escrito, um por um.
+- **Nenhum aplicativo criado por modelo real chegou à prévia aberta ainda.**
+  O `qwen2.5-coder:7b`, no computador do titular, escreveu pelo próprio produto
+  um jogo da velha e um contador que passaram nas guardas; o contador compilou
+  e parou na checagem de tipos, e o conserto (o `title` do conteúdo) está no
+  código. Falta rodar até build, verificação e prévia (`EB-04`).
+- **A maioria dos requisitos está em `BETA`**: construídos e provados **neste
+  ambiente**, não na vida real. A contagem atual está no fim do livro mestre, e
+  só lá — escrita aqui ela envelhecia e passava a discordar.
 
 A lista completa, com bloqueio e próximo passo de cada um, está no
 [livro-razão de requisitos](./docs/MASTER_REQUIREMENTS_LEDGER.md) e na
