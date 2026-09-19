@@ -2,10 +2,25 @@ import { createHash, createPrivateKey, createPublicKey, sign, verify, type KeyOb
 import type { Stats } from 'node:fs'
 import { posix } from 'node:path'
 
-export const TEMPLATE_MANIFEST_MAX_BYTES = 2 * 1024 * 1024
+/*
+  OS TETOS DO STORE, e de onde eles vêm.
+
+  Eram 10.000 entradas, 512 MB e manifesto de 2 MB — números escolhidos antes
+  de existir um store de verdade. Em 19/09/2026 o `setup-templates` rodou pela
+  primeira vez numa máquina real (WSL2 do titular) e o store dos dois modelos,
+  com o Next.js 16, MEDIU 23.340 entradas e 560.262.517 bytes: os tetos antigos
+  recusariam o único store que o produto sabe montar, e o instalador pararia
+  com "fonte insegura" por um número que ninguém mediu.
+
+  Os tetos continuam existindo pelo mesmo motivo de antes — um store
+  adulterado não pode fazer o supervisor ler sem fim —, agora com folga de
+  pouco mais de 2x sobre o medido. O manifesto acompanha as entradas: cada
+  uma ocupa perto de 300 bytes (caminho do store, hash, tamanho, tipo).
+*/
+export const TEMPLATE_MANIFEST_MAX_BYTES = 24 * 1024 * 1024
 export const TEMPLATE_ENTRY_MAX_BYTES = 64 * 1024 * 1024
-export const TEMPLATE_STORE_MAX_BYTES = 512 * 1024 * 1024
-export const TEMPLATE_STORE_MAX_ENTRIES = 10_000
+export const TEMPLATE_STORE_MAX_BYTES = 1536 * 1024 * 1024
+export const TEMPLATE_STORE_MAX_ENTRIES = 60_000
 
 export type TemplateManifestEntry =
   | { readonly path: string; readonly type: 'directory' }

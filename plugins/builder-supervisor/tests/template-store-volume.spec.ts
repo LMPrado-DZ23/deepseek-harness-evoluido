@@ -9,7 +9,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DockerEnginePort } from '../src/docker-engine.js'
 import { deriveBuilderRuntimeScopeId } from '../src/runtime-scope.js'
-import { TEMPLATE_ENTRY_MAX_BYTES, computeTemplateTreeSha256, type TemplateManifestEntry, type TemplateStoreManifest } from '../src/store-security.js'
+import { TEMPLATE_ENTRY_MAX_BYTES, TEMPLATE_STORE_MAX_ENTRIES, computeTemplateTreeSha256, type TemplateManifestEntry, type TemplateStoreManifest } from '../src/store-security.js'
 import {
   TEMPLATE_STORE_CLAIM_TTL_MS,
   TEMPLATE_STORE_VERIFICATION_CLEANUP_BUDGET_MS,
@@ -287,7 +287,7 @@ describe('template store Docker volume materialization', () => {
 
   it('enforces the downloaded archive entry-count limit before canonicalization', async () => {
     const fixture = manifestFixture()
-    const tooMany = dockerTar([dir('template-store/'), dir('template-store/tree/'), ...Array.from({ length: 10_001 }, (_, index) => file(`template-store/tree/f${index}`, ''))])
+    const tooMany = dockerTar([dir('template-store/'), dir('template-store/tree/'), ...Array.from({ length: TEMPLATE_STORE_MAX_ENTRIES + 1 }, (_, index) => file(`template-store/tree/f${index}`, ''))])
     await expect(validateTemplateStoreArchive(shortReader(tooMany, 512) as Pick<FileHandle, 'read'>, tooMany.byteLength, 'v1.0.0', fixture.manifest.tree_sha256, false, AbortSignal.timeout(5_000))).rejects.toMatchObject({ code: 'TEMPLATE_STORE_INVALID' })
   })
 
@@ -304,7 +304,7 @@ describe('template store Docker volume materialization', () => {
     expect(Buffer.concat(written)).toEqual(content)
     const stalledWriter = { async write(value: Buffer) { return { bytesWritten: 0, buffer: value } } }
     await expect(writeTemplateStoreBytes(stalledWriter as Pick<FileHandle, 'write'>, content)).rejects.toMatchObject({ code: 'TEMPLATE_STORE_INVALID' })
-    expect(() => validateTemplateStoreEntryCount(10_001)).toThrow('TEMPLATE_STORE_INVALID')
+    expect(() => validateTemplateStoreEntryCount(TEMPLATE_STORE_MAX_ENTRIES + 1)).toThrow('TEMPLATE_STORE_INVALID')
   })
 
   it.runIf(process.platform === 'linux' && !RUNNING_AS_ROOT)('falha fechado quando a limpeza do estágio de download é impedida', async () => {
