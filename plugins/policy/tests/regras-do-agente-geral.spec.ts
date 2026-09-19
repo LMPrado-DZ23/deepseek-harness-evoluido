@@ -34,6 +34,7 @@ const FERRAMENTAS_POR_PLUGIN: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-tool-todo': ['todo_write'],
   '@deepseek-ai/dsh-tool-web': ['web_search', 'web_fetch'],
   '@deepseek-ai/dsh-tool-skill': ['skill'],
+  '@deepseek-ai/dsh-schedule': ['schedule_create', 'schedule_list', 'schedule_delete'],
 }
 
 const montados = [...preset.matchAll(/^\s*name: '(@deepseek-ai\/[^']+)'/gmu)].map(achado => achado[1]!)
@@ -83,7 +84,8 @@ describe('o modelo padrão da conversa (19/09/2026: sem chave, a conversa parava
 })
 
 describe('os modelos locais declarados: o das criações e o do agente', () => {
-  const trecho = perfil.slice(perfil.indexOf('      ollama:'), perfil.indexOf('- insert:'))
+  const inicio = perfil.indexOf('      ollama:')
+  const trecho = perfil.slice(inicio, perfil.indexOf('\n- ', inicio))
   const expressao = /models: !!js >-\n((?: {10}.*\n)+)/u.exec(trecho)![1]!.split('\n').map(linha => linha.trim()).join(' ')
   const avaliar = (env: Record<string, string>) => new Function('process', `return (${expressao})`)({ env }) as { id: string }[]
 
@@ -94,5 +96,13 @@ describe('os modelos locais declarados: o das criações e o do agente', () => {
   it('com modelo do agente, os dois, sem repetir', () => {
     expect(avaliar({ DZ23_OLLAMA_MODEL: 'qwen2.5-coder:7b', DZ23_AGENT_MODEL: 'frigg-qwen3' }).map(m => m.id)).toEqual(['qwen2.5-coder:7b', 'frigg-qwen3'])
     expect(avaliar({ DZ23_OLLAMA_MODEL: 'x', DZ23_AGENT_MODEL: 'x' }).map(m => m.id)).toEqual(['x'])
+  })
+})
+
+describe('os lembretes agendados', () => {
+  it('o perfil monta o overlay oficial e cada ferramenta tem regra', () => {
+    expect(perfil).toContain("name: '@deepseek-ai/dsh-schedule'")
+    expect(perfil).toContain("name: '@deepseek-ai/dsh-time-context'")
+    for (const ferramenta of FERRAMENTAS_POR_PLUGIN['@deepseek-ai/dsh-schedule']!) expect(regras, ferramenta).toContain(ferramenta)
   })
 })

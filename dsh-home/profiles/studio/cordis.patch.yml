@@ -57,6 +57,18 @@
       process.env.DZ23_AGENT_MODEL
         ?? (process.env.DZ23_OLLAMA_BASE_URL === undefined ? 'deepseek-v4-flash' : (process.env.DZ23_OLLAMA_MODEL ?? 'qwen3-coder'))
 
+# LEMBRETES AGENDADOS do agente (pedido do titular, 19/09/2026: o FRIGG deve
+# fazer o que o Manus faz). É o overlay oficial do Harness
+# (`apps/cli/config/examples/schedule/cordis.yml`): o agente agenda uma vez,
+# numa hora certa ou a cada N minutos (mínimo 5), e o lembrete chega como
+# mensagem NA MESMA conversa. Sobrevive a reinício; não manda e-mail nem push.
+# Cada ferramenta tem regra em `dz23-studio-policy` (T1).
+- insert:
+    - id: time-context
+      name: '@deepseek-ai/dsh-time-context'
+    - id: schedule
+      name: '@deepseek-ai/dsh-schedule'
+
 # The official DeepSeek route is already supplied by dsh-base under its
 # physical id `deepseek-official`. These two declared OpenAI-compatible routes
 # add no second gateway and resolve every credential by reference.
@@ -312,6 +324,27 @@
             inferredTier: T2
             sandboxMode: workspace-write
             requiredPermission: project.write
+            scope: project
+          schedule_create:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          schedule_delete:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          schedule_list:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
             scope: project
           studio_agent_start:
             source: { kind: studio, external: false, stableChannel: true }
