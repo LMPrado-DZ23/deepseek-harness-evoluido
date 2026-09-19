@@ -203,7 +203,9 @@ describe('relatorio', () => {
     const texto = relatorio(conferencias(tudoPronto({ arranqueResolvivel: false })))
     expect(texto).toContain('O Studio ainda não pode abrir.')
     expect(texto).toContain('Rode este comando:')
-    expect(texto).toContain("pnpm install --frozen-lockfile --filter '@dz23-studio/*...'")
+    // O comando é o do HARNESS: é o build dele que produz o `bin.js` da partida.
+    expect(texto).toContain('pnpm --dir third_party/deepseek-harness build:official')
+    expect(texto).not.toContain("pnpm install --frozen-lockfile --filter '@dz23-studio/*...'")
     expect(texto).not.toContain('ERR_MODULE_NOT_FOUND')
     expect(texto).not.toContain('node:internal')
   })

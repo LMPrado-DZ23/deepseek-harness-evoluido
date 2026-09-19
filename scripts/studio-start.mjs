@@ -23,7 +23,6 @@ import { bloqueios, conferencias, relatorio, rotasConfiguradas, versaoEsperada }
  */
 
 const raiz = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const require = createRequire(resolve(raiz, 'package.json'))
 
 /**
  * O que dá para ver do disco, sem iniciar nada.
@@ -55,7 +54,7 @@ export function observar(base = raiz, ambiente = process, sonda = SONDA_PADRAO) 
     // Um pacote QUALQUER do Harness já compilado. Conferir todos custaria uma
     // varredura inteira para responder a mesma pergunta.
     harnessCompilado: existsSync(resolve(harness, 'packages', 'core', 'agent-default-model', 'lib')),
-    arranqueResolvivel: resolvivel('@deepseek-ai/dsh-app-boot'),
+    arranqueResolvivel: arranqueDoHarness(base),
     studioInstalado: existsSync(resolve(base, 'node_modules', '@dz23-studio')),
     studioCompilado: existsSync(resolve(base, 'plugins', 'prompt-to-app', 'lib')),
     perfilPresente: existsSync(resolve(base, 'dsh-home', 'profiles', 'studio', 'package.json')),
@@ -68,8 +67,36 @@ export function observar(base = raiz, ambiente = process, sonda = SONDA_PADRAO) 
 }
 
 /** O pacote existe e dá para chegar até ele a partir daqui? */
-function resolvivel(nome) {
-  try { require.resolve(`${nome}/package.json`); return true } catch { return false }
+/**
+ * O binário do `dsh` que dá a partida: o do Harness FIXADO, e não uma cópia.
+ *
+ * Medido em 19/09/2026 no primeiro clone limpo (WSL2, `ext4`) que seguiu a
+ * sequência canônica do README: a partida resolvia `@deepseek-ai/dsh` pela raiz
+ * do repositório, onde o pnpm deixa a cópia INJETADA do `apps/studio-runtime`
+ * — sem as dependências dela. O conferidor dizia "o pacote que dá a partida:
+ * não encontrado" e mandava rodar o mesmo `pnpm install` que acabara de rodar,
+ * num laço sem saída. No ambiente onde a partida tinha sido provada, a raiz
+ * tinha 262 ligações de uma instalação completa anterior, e o defeito não
+ * aparecia. O Harness compilado pelo `build:official` tem o `bin.js` e resolve
+ * o `dsh-app-boot` pelo `node_modules` dele — é o caminho que o próprio
+ * bootstrap prepara.
+ * @param base - a raiz do repositório.
+ * @returns o caminho absoluto do `bin.js`.
+ */
+export function binDoHarness(base) {
+  return resolve(base, 'third_party', 'deepseek-harness', 'apps', 'cli', 'lib', 'bin.js')
+}
+
+/**
+ * A partida resolve? O `bin.js` existe E o `dsh-app-boot` se resolve A PARTIR
+ * DELE — que é exatamente o que o Node vai fazer quando o `dsh` subir.
+ * @param base - a raiz do repositório.
+ * @returns se dá para dar a partida.
+ */
+export function arranqueDoHarness(base) {
+  const bin = binDoHarness(base)
+  if (!existsSync(bin)) return false
+  try { createRequire(bin).resolve('@deepseek-ai/dsh-app-boot'); return true } catch { return false }
 }
 
 /**
@@ -144,7 +171,7 @@ export function sobreposicaoLocalPresente(base) {
 }
 
 function arrancar(base) {
-  const bin = require.resolve('@deepseek-ai/dsh/lib/bin.js')
+  const bin = binDoHarness(base)
   const filho = spawn(process.execPath, argumentosDaPartida(bin, sobreposicaoLocalPresente(base)), {
     cwd: base,
     stdio: 'inherit',

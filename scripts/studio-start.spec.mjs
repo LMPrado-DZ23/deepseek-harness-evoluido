@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path'
 const RAIZ_DO_REPOSITORIO = resolve(dirname(new URL(import.meta.url).pathname), '..')
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { PERFIL, SONDA_PADRAO, argumentosDaPartida, docker, observar, sobreposicaoLocalPresente } from './studio-start.mjs'
+import { PERFIL, SONDA_PADRAO, argumentosDaPartida, binDoHarness, docker, observar, sobreposicaoLocalPresente } from './studio-start.mjs'
 import { bloqueios, conferencias } from './studio-doctor.mjs'
 
 /**
@@ -34,6 +34,7 @@ const criar = caminho => {
   const alvo = resolve(base, caminho)
   mkdirSync(dirname(alvo), { recursive: true })
   writeFileSync(alvo, '{}')
+  return alvo
 }
 
 beforeEach(() => { base = mkdtempSync(resolve(tmpdir(), 'dz23-studio-')) })
@@ -113,6 +114,25 @@ describe('observar — a pasta vazia', () => {
     // está. O ambiente responde sem abrir conexão nenhuma.
     expect(observar(base, { versions: process.versions, env: {} }, sondaParada).rotasConfiguradas).toEqual([])
     expect(observar(base, { versions: process.versions, env: { DZ23_OMNIROUTE_KEY: "k" } }, sondaParada).rotasConfiguradas).toEqual(['omniroute'])
+  })
+})
+
+describe('observar — a partida é a do Harness FIXADO', () => {
+  it('só resolve quando o bin.js do Harness existe E o dsh-app-boot se resolve a partir dele', () => {
+    expect(observar(base, process, sondaParada).arranqueResolvivel).toBe(false)
+    criar('third_party/deepseek-harness/apps/cli/lib/bin.js')
+    // O bin sozinho não basta: sem as dependências, o Node cai na primeira importação.
+    expect(observar(base, process, sondaParada).arranqueResolvivel).toBe(false)
+    writeFileSync(criar('third_party/deepseek-harness/node_modules/@deepseek-ai/dsh-app-boot/package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-app-boot', main: 'index.js' }))
+    criar('third_party/deepseek-harness/node_modules/@deepseek-ai/dsh-app-boot/index.js')
+    expect(observar(base, process, sondaParada).arranqueResolvivel).toBe(true)
+    expect(binDoHarness(base)).toBe(resolve(base, 'third_party/deepseek-harness/apps/cli/lib/bin.js'))
+  })
+
+  it('a cópia injetada na raiz NÃO conta: foi ela que fez o laço sem saída no clone limpo', () => {
+    writeFileSync(criar('node_modules/@deepseek-ai/dsh/package.json'), '{"name":"@deepseek-ai/dsh"}')
+    criar('node_modules/@deepseek-ai/dsh/lib/bin.js')
+    expect(observar(base, process, sondaParada).arranqueResolvivel).toBe(false)
   })
 })
 

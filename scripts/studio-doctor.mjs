@@ -112,10 +112,11 @@ export function conferencias(observado) {
         // Esta é A conferência que existia para ser escrita. Sem ela, o que a
         // pessoa via era `ERR_MODULE_NOT_FOUND` e oito linhas de pilha.
         porque: 'Sem ele o Studio não tem por onde começar, e o erro que aparece é uma mensagem interna do Node.',
-        // O MESMO comando do BOOTSTRAP, e não uma variação mais curta: o
-        // procedimento canônico é o que foi provado, e duas formas de instalar
-        // seriam duas verdades sobre a mesma coisa.
-        faca: "pnpm install --frozen-lockfile --filter '@dz23-studio/*...'",
+        // O pacote que dá a partida é o `dsh` do Harness FIXADO (ver
+        // `binDoHarness`), e quem o prepara são os dois passos do Harness no
+        // BOOTSTRAP. Mandar rodar o `install` do Studio aqui era mandar a
+        // pessoa repetir, em laço, um comando que não resolve isto.
+        faca: 'pnpm --dir third_party/deepseek-harness build:official',
       }),
     bloqueia: true,
   })
