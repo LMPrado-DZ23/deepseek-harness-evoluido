@@ -508,21 +508,25 @@ declarada.
 
 | AUDIT-PACKAGING-CLOCK-01 | Teste de devolucao de capacidade nao depende da velocidade do filesystem | Falha adicional de timeout na suite de 20/09/2026 | v1.0 | BETA | plugins/integration-hub/tests/service.spec.ts | Falhou na suite completa e passou isolado; relogio controlado apos entrada no empacotador; mutacao de vazamento de vaga detectada | execucao: filesystem real; somente timers do teste sao controlados; limite de producao nao foi aumentado | Teste de contrato, nao benchmark de latencia de exportacao | repetir CI quando runners executarem etapas |
 
+| AUDIT-QUESTION-CLIENT-01 | Pergunta recupera o mesmo turno depois de fechar aba com resposta perdida | Continuidade da conversa, 20/09/2026 | v1.0 | BETA | apps/studio-web/src/App.tsx, src/plan/pendingIntent.ts, tests/question-retry.spec.ts | Navegador reproduziu chave nova; recuperacao conserva turno, confirmacao permite pergunta nova e armazenamento negado impede POST; duas mutacoes detectadas | execucao: metadados sem texto, escopo por pessoa/org/tenant/projeto e tipo; confirmacao so depois de reler conversa | Mesmo perfil e conta; pergunta atual responde fatos da tarefa sem modelo; questionario, correcao e mudanca de plano ainda em memoria; sem instalacao real | fechar reenvio da sintese e persistir demais envios |
+
+| AUDIT-SYNTHESIS-REPLAY-01 | Ultima resposta e sintese recuperam resultado sem repetir consumo incerto | Auditoria de 20/09/2026 | v1.0 | FAILED | plugins/prompt-to-app/src/http.ts, audit/evidence/20260920/synthesis-replay-findings.json, audit/evidence/20260920/synthesis-replay-regressions.ts.txt | Quatro regressoes em copia isolada: resposta final salva devolve 409, inclusive apos correcao; modelo sobe de 3 para 4 apos falha e de 4 para 5 no reenvio de correcao | NAO SATISFEITO: sintese ocorre fora do recibo duravel do turno | Modelo controlado, sem medicao de cobranca real; nenhuma correcao de producao nesta entrega | implementar recibo de sintese e recuperacao de especificacao/estado/trilha com protecao de progresso posterior |
+
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 264 |
+| `BETA` | 265 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
-| `FAILED` | 2 |
+| `FAILED` | 3 |
 
-**Total de requisitos rastreados: 375.**
+**Total de requisitos rastreados: 377.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 338 |
+| v1.0 | 340 |
 | v1.x | 34 |
 | v2 | 3 |

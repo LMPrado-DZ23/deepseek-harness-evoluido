@@ -18,6 +18,21 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Perguntas duraveis — VALIDADAS LOCALMENTE, 20/09/2026
+
+Pergunta agora reserva metadados antes de enviar e recupera o mesmo turno
+apos fechar a aba. Duas mutacoes detectadas; interface 1.111 PASS; navegador
+completo 184 PASS/3 SKIP/0 FAIL; 32 portoes PASS; raiz 4.487 PASS/174 FAIL/68 SKIP,
+sem novos nomes de falha.
+Ultimo checkpoint remoto: `72190e148e3ef03dcc4fe3a37ca10aef2ee04917`.
+Proxima frente EM EXECUCAO: AUDIT-SYNTHESIS-REPLAY-01 tem quatro regressoes
+confirmadas em copia isolada: 409 no reenvio da ultima resposta, inclusive apos
+correcao posterior; nova chamada ao modelo apos falha (3 -> 4) e em correcao
+reenviada (4 -> 5). HIGH interno aberto, sem correcao de producao neste checkpoint.
+Casos e resultados em audit/evidence/20260920/synthesis-replay-findings.json.
+DESKTOP-PRADO offline em 18:18 UTC; CI 35528112231 falhou sem etapas/logs.
+Sem merge, release ou declaracao de produto pronto.
+
 ## Revisao duravel e transicao final — VALIDADAS LOCALMENTE, 20/09/2026
 
 Revisao agora conserva chave no navegador, orienta retomada e preserva o recibo

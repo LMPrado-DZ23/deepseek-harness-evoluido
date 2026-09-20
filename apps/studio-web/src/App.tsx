@@ -21,7 +21,7 @@ import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointL
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
 import { currentSessionMode, currentSessionPrincipal, currentSessionScope } from './session/currentSession'
-import { confirmPlanIntent, preparePlanIntent, prepareCreationIntent, prepareRevisionIntent, type PendingIntent, type PendingPlanIntent } from './plan/pendingIntent'
+import { confirmPlanIntent, preparePlanIntent, prepareCreationIntent, prepareRevisionIntent, prepareQuestionIntent, type PendingIntent, type PendingPlanIntent } from './plan/pendingIntent'
 import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
 import { TAREFAS_MUDARAM, WorkspaceShell } from './shell/WorkspaceShell'
 import { HomeScreen } from './home/HomeScreen'
@@ -297,25 +297,9 @@ export function App() {
     }
   }
   /*
-    A intenção dos envios DENTRO da tarefa — perguntar e pedir alteração.
-
-    Um `ref` por tipo, e não um só: a pessoa pode ter uma pergunta que falhou e
-    depois pedir uma alteração, e uma chave compartilhada faria a segunda ser
-    recusada por conflito com a primeira.
-
-    Pelo mesmo motivo da criação, eles SOBREVIVEM à falha: é isso que faz o
-    reenvio depois de um tempo esgotado chegar com a mesma chave e receber a
-    mesma mensagem, em vez da segunda.
-  */
-  const intencaoDaPergunta = useRef<IntencaoDeCriacao | null>(null)
-  /*
-    Os dois últimos envios que faltavam ter identidade de intenção.
-
-    A RESPOSTA do questionário é o caso que mais custava: com "recomendar", ela
-    CHAMA modelo, e o reenvio depois de a resposta se perder chamava de novo e
-    cobrava de novo. A MUDANÇA no plano não duplicava efeito — a guarda de
-    estado barrava a segunda —, mas devolvia um erro de repetição para quem só
-    tinha reenviado a mesma intenção.
+    Respostas do questionario e pedidos de mudanca ainda conservam a chave
+    apenas nesta montagem. Criacao, pergunta, revisao e edicao/etapa de plano
+    usam IndexedDB; estes dois envios continuam pendentes de migracao.
   */
   const intencaoDaResposta = useRef<IntencaoDeCriacao | null>(null)
   const intencaoDaMudanca = useRef<IntencaoDeCriacao | null>(null)
@@ -477,18 +461,20 @@ export function App() {
    */
   async function perguntar(texto: string) {
     if (projectId === null) return false
-    const envio = intencaoPorImpressao(intencaoDaPergunta.current, impressaoDoEnvioLocal('pergunta', projectId, texto))
-    intencaoDaPergunta.current = envio
     return safelyWithResult(async () => {
+      const scope = await currentSessionScope()
+      if (scope === null) throw new Error(enviosTexto.identidade)
+      let envio: PendingIntent
+      try { envio = await prepareQuestionIntent(scope, projectId, texto) }
+      catch { throw new Error(enviosTexto.indisponivel) }
       await api(`/projects/${projectId}/ask`, {
-        method: 'POST', body: JSON.stringify({ question: texto, request_key: envio.chave }),
+        method: 'POST', body: JSON.stringify({ question: texto, request_key: envio.key }),
       })
-      // A mensagem existe: a intenção terminou. A próxima pergunta leva chave
-      // nova — senão a segunda seria recusada por conflito com a primeira.
       if (!await refreshDetalhes()) return false
-      if (intencaoDaPergunta.current?.chave === envio.chave) intencaoDaPergunta.current = null
+      await acknowledgePlanIntent(envio)
     })
   }
+
   /**
    * CORRIGE uma resposta do questionário (PLAN-01).
    *

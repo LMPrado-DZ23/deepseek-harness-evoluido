@@ -124,7 +124,12 @@ export async function prepareRevisionIntent(scope: readonly [string, string, str
   return prepareIntent({ scope, projectId, kind: 'revision', material: material.trim().replace(/\s+/gu, ' '), baseRevision: null }, factory)
 }
 
-async function prepareIntent(input: PlanIntentInput | { scope: readonly [string, string, string]; projectId: string; kind: 'create' | 'revision'; material: string; baseRevision: null }, factory: IDBFactory): Promise<PendingIntent> {
+/** Pergunta sobre a tarefa reutiliza somente metadados, sem guardar seu texto. */
+export async function prepareQuestionIntent(scope: readonly [string, string, string], projectId: string, material: string, factory: IDBFactory = window.indexedDB): Promise<PendingIntent> {
+  return prepareIntent({ scope, projectId, kind: 'ask', material: material.trim().replace(/\s+/gu, ' '), baseRevision: null }, factory)
+}
+
+async function prepareIntent(input: PlanIntentInput | { scope: readonly [string, string, string]; projectId: string; kind: 'create' | 'revision' | 'ask'; material: string; baseRevision: null }, factory: IDBFactory): Promise<PendingIntent> {
   if ((input.baseRevision !== null && (!Number.isSafeInteger(input.baseRevision) || input.baseRevision < 1)) || input.scope.some(value => value === '') || input.projectId === '') {
     throw new Error('PLAN_INTENT_INPUT_INVALID')
   }

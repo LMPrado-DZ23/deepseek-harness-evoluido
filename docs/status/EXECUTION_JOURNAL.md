@@ -270,3 +270,21 @@ em audit/evidence/20260920/revision-client-verification.json.
 em question-retry.spec.ts, ainda fora deste checkpoint. CI nao executa etapas,
 computador alvo offline, PostgreSQL/instalacao real e demais funcionalidades
 continuam pendentes. Missao EXECUTING, sem merge ou release.
+
+
+## 2026-09-20 — pergunta duravel e falhas da sintese
+
+**Acao.** AUDIT-QUESTION-CLIENT-01 reproduziu outra chave/turno apos fechar a
+aba. Perguntas agora usam metadados persistentes por pessoa/organizacao/tenant/
+projeto; confirmacao vem depois da releitura. Navegador focado recuperou o turno,
+permitiu pergunta nova apos confirmar e impediu POST sem armazenamento.
+Duas mutacoes detectadas. Validacao final em question-client-verification.json.
+
+**Proxima frente iniciada.** AUDIT-SYNTHESIS-REPLAY-01 tem quatro regressoes
+confirmadas em copia isolada: ultima resposta salva recebe 409 no reenvio;
+falha na sintese seguida da mesma chave chama modelo novamente (3 -> 4);
+correcao reenviada tambem repete (4 -> 5); resposta antiga apos correcao recebe 409.
+Ainda nao corrigido. Casos preservados como texto fora da suite normal, para
+nao apresentar teste nao executado ou suite vermelha como entrega aprovada.
+Modelo controlado; nenhum custo de provedor real foi medido. A correcao deve
+cobrir recibo, especificacao, estado, auditoria e progresso posterior.

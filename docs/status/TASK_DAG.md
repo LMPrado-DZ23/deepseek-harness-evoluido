@@ -30,7 +30,8 @@ Atualização da auditoria de 20/09/2026 (base `997fa20`):
 | AUDIT-REVISION-CLIENT-01 | P1 | Conservar revisao ao fechar aba e orientar retomada | AUDIT-REVISION-RECOVERY-01 | REVIEW — quatro casos focados, dez mutacoes, navegador completo 183 PASS/3 SKIP e 32 portoes |
 | AUDIT-GENERATION-SETTLE-01 | P1 | Esperar projeto e execucao concluirem antes de encerrar acompanhamento | — | REVIEW — falha real reproduzida, navegador e duas mutacoes |
 | AUDIT-PACKAGING-CLOCK-01 | P2 | Remover dependencia do relogio real no teste de capacidade | — | REVIEW — falha sob carga investigada, relogio controlado e mutacao detectada |
-| AUDIT-QUESTION-CLIENT-01 | P1 | Recuperar pergunta depois de fechar a aba | AUDIT-CLIENT-REPLAY-01 | RUNNING — regressao de reabertura escrita |
+| AUDIT-QUESTION-CLIENT-01 | P1 | Recuperar pergunta depois de fechar a aba | AUDIT-CLIENT-REPLAY-01 | REVIEW — reabertura, nova pergunta e armazenamento negado passaram; duas mutacoes, navegador 184 PASS/3 SKIP e 32 portoes |
+| AUDIT-SYNTHESIS-REPLAY-01 | P1 | Recuperar ultima resposta e sintese sem refazer consumo incerto | AUDIT-INTAKE-REPLAY-01 | RUNNING — quatro regressoes confirmadas: 409 apos resposta salva e chamadas repetidas na sintese/correcao; conserto pendente |
 | ABRIR-03-R | P1 | Recuperar cadastro interrompido sem emitir sessao antes de criar o espaco | ABRIR-03 | REVIEW — prova JSON em tres processos e quatro mutacoes; PC real pendente |
 | AUDIT-ENTRY-01 | P1 | Abrir o FRIGG pelo launcher e manter a admissão | — | REVIEW — runtime real e nove destinos; criação ainda bloqueada |
 | AUDIT-MOBILE-01 | P2 | Manter campo e envio acessíveis em telas móveis estreitas | — | REVIEW — 8 testes Chromium; aparelhos reais pendentes |

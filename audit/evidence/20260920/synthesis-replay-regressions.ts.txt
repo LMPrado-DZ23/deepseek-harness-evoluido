@@ -1,0 +1,62 @@
+  it('AUDIT-SYNTHESIS: ultima resposta com chave recupera a mesma especificacao', async () => {
+    const f = await fixture()
+    const projectId = await ateAUltimaResposta(f)
+    for (const answer of perguntas.slice(0, 2)) await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+    const body = JSON.stringify({ answer: perguntas[2], recommend: false, request_key: 'synthesis-replay-success-001' })
+    const first = await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body })
+    expect(first.status).toBe(201)
+    const saved = await first.json() as { spec: { spec_id: string } }
+    const calls = vi.mocked(f.model.complete).mock.calls.length
+    const replay = await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body })
+    expect(replay.status).toBe(201)
+    expect((await replay.json() as { spec: { spec_id: string } }).spec.spec_id).toBe(saved.spec.spec_id)
+    expect(vi.mocked(f.model.complete).mock.calls.length).toBe(calls)
+  })
+
+  it('AUDIT-SYNTHESIS: nao repete consumo incerto ao reenviar a mesma chave', async () => {
+    const f = await fixture()
+    const projectId = await ateAUltimaResposta(f)
+    for (const answer of perguntas.slice(0, 2)) await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+    vi.mocked(f.model.complete).mockRejectedValueOnce(new Error('PROVIDER_RESPONSE_LOST'))
+    const body = JSON.stringify({ answer: perguntas[2], recommend: false, request_key: 'synthesis-replay-failure-001' })
+    const first = await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body })
+    expect(first.status).toBeGreaterThanOrEqual(500)
+    const calls = vi.mocked(f.model.complete).mock.calls.length
+    await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body })
+    expect(vi.mocked(f.model.complete).mock.calls.length).toBe(calls)
+  })
+
+  it('AUDIT-SYNTHESIS: reenvio da correcao nao sintetiza outra versao', async () => {
+    const f = await fixture()
+    const projectId = await ateAUltimaResposta(f)
+    for (const answer of perguntas) await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+    const body = JSON.stringify({ question_id: 'content', answer: 'Horarios e contato', request_key: 'synthesis-correction-replay-001' })
+    const first = await f.request(`/projects/${projectId}/intake/correct`, { method: 'POST', body })
+    expect(first.status).toBe(201)
+    const saved = await first.json() as { spec: { spec_id: string } }
+    const calls = vi.mocked(f.model.complete).mock.calls.length
+    const replay = await f.request(`/projects/${projectId}/intake/correct`, { method: 'POST', body })
+    expect(replay.status).toBe(201)
+    expect(vi.mocked(f.model.complete).mock.calls.length).toBe(calls)
+    expect((await replay.json() as { spec: { spec_id: string } }).spec.spec_id).toBe(saved.spec.spec_id)
+  })
+
+  it('AUDIT-SYNTHESIS: resposta antiga recupera spec original sem desfazer correcao posterior', async () => {
+    const f = await fixture()
+    const projectId = await ateAUltimaResposta(f)
+    for (const answer of perguntas.slice(0, 2)) await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body: JSON.stringify({ answer, recommend: false }) })
+    const body = JSON.stringify({ answer: perguntas[2], recommend: false, request_key: 'synthesis-old-replay-001' })
+    const first = await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body })
+    expect(first.status).toBe(201)
+    const original = await first.json() as { spec: { spec_id: string } }
+    const correction = await f.request(`/projects/${projectId}/intake/correct`, { method: 'POST', body: JSON.stringify({ question_id: 'content', answer: 'Horarios e contato', request_key: 'synthesis-new-correction-001' }) })
+    expect(correction.status).toBe(201)
+    const revised = await correction.json() as { spec: { spec_id: string } }
+    const calls = vi.mocked(f.model.complete).mock.calls.length
+    const replay = await f.request(`/projects/${projectId}/intake/answer`, { method: 'POST', body })
+    expect(replay.status).toBe(201)
+    expect((await replay.json() as { spec: { spec_id: string } }).spec.spec_id).toBe(original.spec.spec_id)
+    const actor = { userId: 'user-1', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' as const }
+    expect((await f.service.latestSpec(actor, projectId)).spec_id).toBe(revised.spec.spec_id)
+    expect(vi.mocked(f.model.complete).mock.calls.length).toBe(calls)
+  })
