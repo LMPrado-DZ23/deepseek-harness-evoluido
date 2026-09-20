@@ -257,3 +257,26 @@ export function textosQueFaltaram(saida: string): readonly string[] {
     .map(texto => { const expressao = /^\/(.*)\/u$/su.exec(texto); return expressao === null ? texto : expressao[1]!.replace(/\\(.)/gu, '$1') })
   return [...new Set(achados)]
 }
+
+/**
+ * O que a verificação de ACESSIBILIDADE reprovou, lido da saída do
+ * Playwright (o axe devolve cada violação como objeto no diff).
+ *
+ * O reparo recebia "e2e: exit 1" e recomeçava às cegas — medido em
+ * 20/09/2026: um contador certo reprovou duas vezes por contraste (botões
+ * `bg-blue-500`/`bg-red-500` com texto branco, 3,7:1 e 3,8:1, contra 4,5:1), e o
+ * modelo não tinha como saber. Aqui voltam a regra, os elementos e a medida.
+ * @param saida - a saída do passo.
+ * @returns as regras, os trechos de HTML e as mensagens de contraste; vazio se não houve.
+ */
+export function violacoesDeAcessibilidade(saida: string): { readonly regras: readonly string[]; readonly elementos: readonly string[]; readonly contrastes: readonly string[] } {
+  // As cores da saída ([31m…[39m) ficam: os padrões abaixo casam por dentro delas.
+  const limpa = saida
+  if (!limpa.includes('result.violations')) return { regras: [], elementos: [], contrastes: [] }
+  const unicos = (padrao: RegExp) => [...new Set([...limpa.matchAll(padrao)].map(achado => achado[1]!.replace(/\\"/gu, '"')))]
+  return {
+    regras: unicos(/"help": "([^"]{1,200})"/gu).slice(0, 5),
+    elementos: unicos(/"html": "((?:[^"\\]|\\.){1,300})"/gu).slice(0, 6),
+    contrastes: unicos(/"message": "(Element has insufficient color contrast[^"]{1,300})"/gu).slice(0, 6),
+  }
+}

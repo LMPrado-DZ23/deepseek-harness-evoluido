@@ -14,7 +14,7 @@ import { generateCrudLayer, writeCrudLayer } from './crud-generator.js'
 import { generateDataLayer, writeDataLayer } from './data-generator.js'
 import { generateDashboardLayer, writeDashboardLayer } from './dashboard-generator.js'
 import { renderDesignTokens } from './design.js'
-import { acceptanceChecks, parseAcceptanceReport, textosExigidos, textosQueFaltaram, writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
+import { acceptanceChecks, parseAcceptanceReport, textosExigidos, textosQueFaltaram, violacoesDeAcessibilidade, writeAcceptanceArtifacts, type AcceptanceCheck } from './acceptance.js'
 import {
   acceptanceAttestation,
   canonicalDocument,
@@ -118,6 +118,10 @@ export class ModelCodeGenerator implements CodeGeneratorPort {
       // Os textos que a verificação procura: sem esta linha o modelo só
       // descobria que eram conferidos letra por letra depois de reprovar.
       ...(textosExigidos(acceptanceChecks(spec)).length === 0 ? [] : [prompt('prompts.generateTextos', { textos: JSON.stringify(textosExigidos(acceptanceChecks(spec))) })]),
+      // A suíte do modelo roda o axe e reprova contraste abaixo de 4,5:1. Sem
+      // esta linha, o primeiro contador real (Mistral, 20/09) usou bg-blue-500 e
+      // bg-red-500 com texto branco e reprovou duas vezes.
+      prompt('prompts.generateContraste'),
       ...(diagnostic === undefined ? [] : [prompt('prompts.generateRepair', { diagnostic })]),
       /*
         E os ARQUIVOS da tentativa anterior, junto com a causa. Sem eles o
@@ -575,7 +579,8 @@ export class PromptToAppPipeline {
             // Com a lista do que a tela não mostrou, o reparo sabe o que fazer;
             // sem ela ("e2e: exit 1"), recomeçava às cegas.
             const faltaram = step === 'e2e' ? textosQueFaltaram(`${result.stdout}\n${result.stderr}`) : []
-            diagnostic = faltaram.length > 0 ? prompt('prompts.repairTextos', { textos: JSON.stringify(faltaram) }) : `${step}: exit ${result.exit_code}`
+            const acessibilidade = step === 'e2e' ? violacoesDeAcessibilidade(`${result.stdout}\n${result.stderr}`) : undefined
+            diagnostic = diagnosticoDoE2e(step, result.exit_code, faltaram, acessibilidade)
             failedStage = buildPassed ? 'test' : 'build'; break
           }
           if (step === 'build' && execution.state === 'BUILD_OK') buildPassed = true
@@ -1149,4 +1154,26 @@ async function readJsonFile(path: string): Promise<unknown> {
     if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024) return undefined
     return JSON.parse(await readFile(path, 'utf8'))
   } catch { return undefined }
+}
+
+/**
+ * O diagnóstico de um passo que reprovou, na ordem do que é mais acionável:
+ * textos que faltaram, depois violações de acessibilidade, e só então o
+ * código de saída.
+ * @param step - o passo.
+ * @param codigo - o código de saída.
+ * @param faltaram - os textos que a tela não mostrou.
+ * @param acessibilidade - o que o axe reprovou.
+ * @returns o texto que o reparo recebe.
+ */
+export function diagnosticoDoE2e(step: string, codigo: number, faltaram: readonly string[], acessibilidade: ReturnType<typeof violacoesDeAcessibilidade> | undefined): string {
+  if (faltaram.length > 0) return prompt('prompts.repairTextos', { textos: JSON.stringify(faltaram) })
+  if (acessibilidade !== undefined && acessibilidade.regras.length > 0) {
+    return prompt('prompts.repairAcessibilidade', {
+      regras: acessibilidade.regras.join('; '),
+      elementos: JSON.stringify(acessibilidade.elementos),
+      contrastes: acessibilidade.contrastes.join(' '),
+    })
+  }
+  return `${step}: exit ${codigo}`
 }

@@ -71,3 +71,38 @@ describe('a conferência de ENTIDADE aceita o nome dentro de um rótulo', () => 
     expect(textosQueFaltaram("    Locator: getByText('/Contagem de Água/u').first()\n    Locator: getByText('/Meta \\(8\\)/u').first()")).toEqual(['Contagem de Água', 'Meta (8)'])
   })
 })
+
+const SAIDA_DO_AXE = [
+  '    > 19 |   expect(result.violations.filter(item => [\'critical\', \'serious\'].includes(item.impact ?? \'\'))).toEqual([])',
+  '    [31m+     "help": "Elements must meet minimum color contrast ratio thresholds",[39m',
+  '    [31m+     "id": "color-contrast",[39m',
+  '    [31m+             "message": "Element has insufficient color contrast of 3.7 (foreground color: #ffffff, background color: #2b7fff, font size: 12.0pt (16px), font weight: normal). Expected contrast ratio of 4.5:1",[39m',
+  '    [31m+                 "html": "<button class=\\"px-4 py-2 bg-blue-500 text-white rounded\\">Beber um copo</button>",[39m',
+  '    [31m+         "html": "<button class=\\"px-4 py-2 bg-blue-500 text-white rounded\\">Beber um copo</button>",[39m',
+  '    [31m+             "message": "Element has insufficient color contrast of 3.8 (foreground color: #ffffff, background color: #fb2c36, font size: 12.0pt (16px), font weight: normal). Expected contrast ratio of 4.5:1",[39m',
+  '    [31m+         "html": "<button class=\\"px-4 py-2 bg-red-500 text-white rounded\\">Zerar</button>",[39m',
+].join('\n')
+
+describe('o reparo sabe o que a ACESSIBILIDADE reprovou', () => {
+  it('lê regra, elementos e contraste da saída REAL do Playwright (a do computador do titular)', async () => {
+    const { violacoesDeAcessibilidade } = await import('../src/acceptance.ts')
+    expect(violacoesDeAcessibilidade(SAIDA_DO_AXE)).toEqual({
+      regras: ['Elements must meet minimum color contrast ratio thresholds'],
+      elementos: ['<button class="px-4 py-2 bg-blue-500 text-white rounded">Beber um copo</button>', '<button class="px-4 py-2 bg-red-500 text-white rounded">Zerar</button>'],
+      contrastes: [
+        'Element has insufficient color contrast of 3.7 (foreground color: #ffffff, background color: #2b7fff, font size: 12.0pt (16px), font weight: normal). Expected contrast ratio of 4.5:1',
+        'Element has insufficient color contrast of 3.8 (foreground color: #ffffff, background color: #fb2c36, font size: 12.0pt (16px), font weight: normal). Expected contrast ratio of 4.5:1',
+      ],
+    })
+    expect(violacoesDeAcessibilidade('e2e falhou por outro motivo "help": "x"')).toEqual({ regras: [], elementos: [], contrastes: [] })
+  })
+  it('o diagnóstico prefere textos que faltaram, depois acessibilidade, e só então o código', async () => {
+    const { diagnosticoDoE2e } = await import('../src/pipeline.ts')
+    const { violacoesDeAcessibilidade } = await import('../src/acceptance.ts')
+    const axe = violacoesDeAcessibilidade(SAIDA_DO_AXE)
+    expect(diagnosticoDoE2e('e2e', 1, ['Título'], axe)).toContain('"Título"')
+    const acessivel = diagnosticoDoE2e('e2e', 1, [], axe)
+    expect(acessivel).toContain('ACESSIBILIDADE'); expect(acessivel).toContain('bg-blue-500'); expect(acessivel).toContain('3.8')
+    expect(diagnosticoDoE2e('e2e', 1, [], { regras: [], elementos: [], contrastes: [] })).toBe('e2e: exit 1')
+  })
+})

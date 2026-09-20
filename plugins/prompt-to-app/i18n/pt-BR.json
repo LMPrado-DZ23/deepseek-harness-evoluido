@@ -205,7 +205,9 @@
     "generateRepairFiles": "Estes são os arquivos que você produziu na tentativa anterior. Devolva-os INTEIROS, com a causa acima corrigida e o resto preservado. Não recomece do zero, não remova comportamento que já estava escrito e não troque a abordagem: {files}",
     "leitura": "Leia o pedido e as respostas de uma pessoa que quer criar um aplicativo. Para cada pergunta abaixo, devolva o que o TEXTO DELA já responde, com as palavras dela, em uma frase curta. Se o texto não responde uma pergunta, devolva null para ela: não deduza, não complete e não invente. Produza SOMENTE JSON com as chaves audience, goal e content. Perguntas: {questions}. Pedido: {brief}. Respostas até aqui: {answers}",
     "generateTextos": "A verificação automática procura estes textos na tela, EXATAMENTE assim (mesmas letras, acentos e maiúsculas), visíveis na página inicial: {textos}. Escreva cada um como título, rótulo ou texto visível; não traduza, não abrevie e não troque por sinônimo.",
-    "repairTextos": "A tela não mostrou estes textos, que a verificação exige EXATAMENTE assim e visíveis: {textos}. Mantenha o que já funciona e acrescente cada um como título ou rótulo visível."
+    "repairTextos": "A tela não mostrou estes textos, que a verificação exige EXATAMENTE assim e visíveis: {textos}. Mantenha o que já funciona e acrescente cada um como título ou rótulo visível.",
+    "repairAcessibilidade": "A verificação automática de ACESSIBILIDADE reprovou a tela: {regras}. Elementos: {elementos}. {contrastes} Corrija só esses elementos e mantenha todo o resto que já passou. Para contraste com texto branco, use um fundo mais escuro (por exemplo bg-blue-700 ou bg-red-700); ou texto escuro sobre fundo claro.",
+    "generateContraste": "A tela passa por uma verificação automática de acessibilidade: todo texto precisa de contraste de pelo menos 4,5:1 com o fundo. Com texto branco, use fundos escuros (por exemplo bg-blue-700, bg-red-700, bg-slate-800); nunca bg-*-500 ou mais claro com texto branco."
   },
   "stages": {
     "install": "Preparando as ferramentas do seu aplicativo",

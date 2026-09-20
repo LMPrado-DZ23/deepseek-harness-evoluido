@@ -987,6 +987,24 @@ describe('Prompt-to-App pipeline', () => {
     await real.generate(spec, plan)
     const prompt = prompts[0] ?? ''
     for (const regra of generationRules()) expect(prompt).toContain(regra)
+    // A regra de contraste que a suíte vai cobrar com o axe.
+    expect(prompt).toContain('contraste de pelo menos 4,5:1')
+  })
+
+  it('o reparo recebe o que a ACESSIBILIDADE reprovou, e não "e2e: exit 1"', async () => {
+    const saidaDoAxe = [
+      '> 19 |   expect(result.violations.filter(item => true)).toEqual([])',
+      '+     "help": "Elements must meet minimum color contrast ratio thresholds",',
+      '+             "message": "Element has insufficient color contrast of 3.7 (foreground color: #ffffff, background color: #2b7fff). Expected contrast ratio of 4.5:1",',
+      '+         "html": "<button class=\\"bg-blue-500 text-white\\">Beber um copo</button>",',
+    ].join('\n')
+    const f = await fixture({ execute: async (_directory, command) => command === 'pnpm run test:e2e'
+      ? { exitCode: 1, stdout: saidaDoAxe, stderr: '', timedOut: false }
+      : { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false } })
+    const generator: CodeGeneratorPort = { generate: vi.fn(async () => cleanGeneration) }
+    await f.pipeline.run(actor, 'project', generator)
+    const falha = f.runs.find(run => run.state === 'FAILED')!.failure_code ?? ''
+    expect(falha).toContain('ACESSIBILIDADE'); expect(falha).toContain('bg-blue-500')
   })
 
   it('a criação PARA antes do limite quando a tentativa repete código e falha', async () => {
