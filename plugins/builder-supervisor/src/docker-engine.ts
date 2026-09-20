@@ -19,7 +19,13 @@ export interface DockerEnginePort {
   putArchiveHandle?(container: string, destination: string, archiveHandle: FileHandle, maximumBytes: number, signal: AbortSignal): Promise<void>
   startContainer(id: string, signal: AbortSignal): Promise<void>
   waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }>
-  containerLogs(id: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }>
+  /**
+   * Os registros do contêiner. Por padrão ACOMPANHA (`follow=1`): a resposta só
+   * termina quando o contêiner sai — é o que quem espera o fim de um passo
+   * quer. `acompanhar: false` devolve o que há AGORA, para quem sonda um
+   * contêiner que deve continuar vivo (o exportador).
+   */
+  containerLogs(id: string, maximumBytes: number, signal: AbortSignal, opcoes?: { readonly acompanhar?: boolean }): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }>
   downloadArchive(container: string, source: string, destination: FileHandle, maximumBytes: number, signal: AbortSignal): Promise<{ readonly bytes: number; readonly sha256: string }>
   stopContainer(id: string, signal: AbortSignal): Promise<void>
   removeContainer(id: string, signal: AbortSignal): Promise<void>
@@ -98,13 +104,13 @@ export class DockerEngine implements DockerEnginePort {
     if (!Number.isSafeInteger(result.StatusCode)) throw new Error('INVALID_DOCKER_RESPONSE')
     return { StatusCode: Number(result.StatusCode) }
   }
-  async containerLogs(id: string, maximumBytes: number, signal: AbortSignal): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
+  async containerLogs(id: string, maximumBytes: number, signal: AbortSignal, opcoes: { readonly acompanhar?: boolean } = {}): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
     if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new Error('INVALID_LOG_LIMIT')
     return new Promise((resolve, reject) => {
       let settled = false; let pending = Buffer.alloc(0); let total = 0
       const stdout: Buffer[] = []; const stderr: Buffer[] = []
       const fail = (error: unknown) => { if (!settled) { settled = true; reject(error) } }
-      const request = this.runtime.request({ socketPath: this.socketPath, method: 'GET', path: `/containers/${encodeURIComponent(id)}/logs?stdout=1&stderr=1&follow=1`, signal }, response => {
+      const request = this.runtime.request({ socketPath: this.socketPath, method: 'GET', path: `/containers/${encodeURIComponent(id)}/logs?stdout=1&stderr=1&follow=${opcoes.acompanhar === false ? '0' : '1'}`, signal }, response => {
         if (response.statusCode !== 200) { response.resume(); fail(new Error(`DOCKER_STATUS_${response.statusCode ?? 0}`)); return }
         response.on('data', chunk => {
           if (settled) return

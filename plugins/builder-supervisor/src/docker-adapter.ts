@@ -338,7 +338,7 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
         await this.options.engine.startContainer(exporter, signal)
         const completion = await esperarExportacao(this.options.engine, exporter, signal)
         if (completion.StatusCode !== 0) {
-          const saida = await this.options.engine.containerLogs(exporter, 64 * 1024, AbortSignal.timeout(5_000)).catch(() => undefined)
+          const saida = await this.options.engine.containerLogs(exporter, 64 * 1024, AbortSignal.timeout(5_000), { acompanhar: false }).catch(() => undefined)
           this.options.diagnostico?.({ evento: 'exportador-saiu-com-erro', status: completion.StatusCode, saida: saida === undefined ? '' : saida.stderr.toString('utf8').slice(-600) })
           throw new BuilderSupervisorError('EXPORT_INVALID')
         }
@@ -473,7 +473,10 @@ export async function esperarExportacao(
     signal.throwIfAborted()
     const vez = await Promise.race([saida, new Promise<undefined>(resolver => { const espera = setTimeout(resolver, intervaloMs) as unknown as { unref?: () => void }; espera.unref?.() })])
     if (vez !== undefined) return { StatusCode: vez.codigo === 0 ? -1 : vez.codigo }
-    const logs = await engine.containerLogs(exportador, 64 * 1024, signal).catch(() => undefined)
+    // SEM acompanhar: com `follow=1` a resposta só termina quando o contêiner
+    // sai, e o exportador não sai — medido em 20/09/2026, a espera morria no
+    // prazo de 210 s do fechamento.
+    const logs = await engine.containerLogs(exportador, 64 * 1024, signal, { acompanhar: false }).catch(() => undefined)
     if (logs !== undefined && logs.stdout.toString('utf8').includes(EXPORTACAO_PRONTA)) return { StatusCode: 0 }
   }
 }

@@ -108,6 +108,16 @@ linux('Docker Engine Unix transport', () => {
     await fixture.close()
   })
 
+  it('sem acompanhar, pede follow=0; por padrao, follow=1', async () => {
+    const caminhos: string[] = []
+    const fixture = await daemon((request, response) => { caminhos.push(request.url ?? ''); response.writeHead(200); response.end(frame(1, 'ok')) })
+    const engine = new DockerEngine(fixture.socket, 1_000)
+    await engine.containerLogs('vivo', 100, new AbortController().signal, { acompanhar: false })
+    await engine.containerLogs('fim', 100, new AbortController().signal)
+    expect(caminhos).toEqual(['/containers/vivo/logs?stdout=1&stderr=1&follow=0', '/containers/fim/logs?stdout=1&stderr=1&follow=1'])
+    await fixture.close()
+  })
+
   it('decodes Docker frames split across transport chunks', async () => {
     const payload = Buffer.concat([frame(1, 'out'), frame(2, 'err')])
     const fixture = await daemon((_request, response) => { response.writeHead(200); for (const byte of payload) response.write(Buffer.from([byte])); response.end() })

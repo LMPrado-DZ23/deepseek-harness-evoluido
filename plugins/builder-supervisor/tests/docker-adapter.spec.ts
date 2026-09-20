@@ -624,8 +624,14 @@ class FakeEngine implements DockerEnginePort {
       signal.addEventListener('abort', () => { this.waitResolvers.delete(id); reject(signal.reason) }, { once: true })
     })
   }
-  async containerLogs(id: string, maximumBytes: number): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
+  async containerLogs(id: string, maximumBytes: number, signal?: AbortSignal, opcoes?: { readonly acompanhar?: boolean }): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
     const papel = this.containers.find(row => row.Id === id)?.Labels['dz23.role']
+    // Como o Docker de verdade: ACOMPANHAR um contêiner que continua vivo só
+    // termina quando ele sai (ou quando o pedido é cancelado).
+    const vivo = this.containers.find(row => row.Id === id)?.State === 'running'
+    if (papel === 'export' && vivo && opcoes?.acompanhar !== false && this.exportExitCode === 0 && !this.exporterExitsBeforeReady) {
+      return new Promise((_resolve, reject) => { signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true }) })
+    }
     if (papel === 'export' && this.exportExitCode === 0 && !this.exporterExitsBeforeReady) return { stdout: Buffer.from(`${EXPORTACAO_PRONTA}\n`), stderr: Buffer.alloc(0) }
     if (papel === 'template-verify') return { stdout: Buffer.from(this.templateDigest), stderr: Buffer.alloc(0) }
     if (this.logs.stdout.byteLength + this.logs.stderr.byteLength > maximumBytes) throw new Error('DOCKER_RESPONSE_TOO_LARGE')
