@@ -173,3 +173,12 @@ recibo corrompido, bloqueio do armazenamento e limpeza seletiva no logout.
 Nove mutacoes foram detectadas depois de compilar cada candidata. As fontes
 foram restauradas; 32 portoes PASS, interface 1.095 PASS, navegador 174 PASS/3 SKIP.
 Raiz: 4.461 PASS/174 FAIL/68 SKIP, sem falhas novas. Outros envios ainda usam memoria.
+
+
+## 2026-09-20 — pedido antigo nao deve alterar proposta nova
+
+Duas regressoes demonstraram reaplicacao indevida apos reiniciar o servico ou
+perder o resultado. O recibo agora identifica outra versao preservada. Uma
+reserva sem resultado nao escolhe o plano corrente por suposicao. Recibos
+legados sem vinculo falham com orientacao para conferir o plano. 1.409 testes
+do plugin e prova JSON real em processos separados passaram; 32 portoes PASS; quatro mutacoes detectadas.

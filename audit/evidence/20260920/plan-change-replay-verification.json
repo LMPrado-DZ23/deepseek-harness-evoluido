@@ -1,0 +1,65 @@
+{
+  "date": "2026-09-20",
+  "requirement": "AUDIT-CHANGE-REPLAY-01",
+  "source_snapshot": "0cf75f103d023e721ea38fb906c4b246e8b79599",
+  "regression_before_fix": {
+    "failed": 2,
+    "passed": 40
+  },
+  "plugin_tests": 1409,
+  "gates_passed": 32,
+  "mutations": [
+    {
+      "mutation": "reapply_missing",
+      "detected": true,
+      "test_assertion_failure": true
+    },
+    {
+      "mutation": "read_latest",
+      "detected": true,
+      "test_assertion_failure": true
+    },
+    {
+      "mutation": "lose_result_id",
+      "detected": true,
+      "test_assertion_failure": true
+    },
+    {
+      "mutation": "lose_revision",
+      "detected": true,
+      "test_assertion_failure": true
+    }
+  ],
+  "json_proof_node22": {
+    "proof": "PLAN_DURABLE_REPLAY",
+    "status": "PASS",
+    "storage": "Harness JSON + DomainPromptToAppRepository",
+    "separateProcesses": true,
+    "results": [
+      {
+        "phase": "write",
+        "status": "PASS",
+        "modelCalls": 2
+      },
+      {
+        "phase": "replay",
+        "status": "PASS",
+        "modelCalls": 2
+      }
+    ]
+  },
+  "root": {
+    "numPassedTests": 4467,
+    "numFailedTests": 174,
+    "numPendingTests": 68
+  },
+  "new_failure_names": [],
+  "frontend_and_browser": "NOT_REPEATED: backend-only change; previous checkpoint 1095 unit, 174 browser PASS/3 SKIP",
+  "limits": [
+    "Single service instance, no distributed CAS",
+    "Old receipts without linked plan fail closed; no inferred migration",
+    "Client plan-change key still memory only",
+    "CI 35522785506: both jobs failure, no steps/logs; cause unknown",
+    "Native install, real model, PostgreSQL unverified"
+  ]
+}

@@ -293,6 +293,7 @@ export class PromptToAppService {
     executar: (idReservado: string | undefined) => Promise<{ readonly id: string, readonly valor: T }>,
     reler: (resultId: string) => Promise<T | undefined>,
     retryMissingResult = true,
+    uncertainMessage = t('errors.planSliceUncertain'),
   ): Promise<T> {
     if (requestKey === undefined || this.#repository.creationKeys === undefined || this.#repository.putCreationKey === undefined) {
       return (await executar(undefined)).valor
@@ -311,7 +312,7 @@ export class PromptToAppService {
         // pode virar atalho para ler o que é de outra pessoa.
         const existente = await reler(desfecho.resultId)
         if (existente !== undefined) return existente
-        if (!retryMissingResult) throw new PromptToAppError('REPLAY', t('errors.planSliceUncertain'))
+        if (!retryMissingResult) throw new PromptToAppError('REPLAY', uncertainMessage)
         // A reserva ficou e o efeito não: o processo caiu entre as duas
         // escritas. Termina com o MESMO identificador.
         return (await executar(desfecho.resultId)).valor
@@ -764,11 +765,16 @@ export class PromptToAppService {
     }
   }
 
-  async #replayPlan(actor: PromptToAppActor, projectId: string, planId: string): Promise<StudioPlan | undefined> {
+  async #findPlan(actor: PromptToAppActor, projectId: string, planId: string): Promise<StudioPlan | undefined> {
     this.project(actor, projectId)
     const rows = this.#planStore === undefined ? this.#repository.plans()
       : await listPlans(this.#planStore, { orgId: actor.orgId, tenantId: actor.tenantId })
     const plan = rows.find(row => row.plan_id === planId && row.project_id === projectId && this.#sameScope(actor, row))
+    return plan
+  }
+
+  async #replayPlan(actor: PromptToAppActor, projectId: string, planId: string): Promise<StudioPlan | undefined> {
+    const plan = await this.#findPlan(actor, projectId, planId)
     if (plan !== undefined) await this.#recordPlanEdit(actor, plan)
     return plan
   }
@@ -806,35 +812,28 @@ export class PromptToAppService {
     this.#authorize(actor, 'project.write')
     const texto = reason.trim()
     if (texto.length < 3 || texto.length > 2_000) throw new PromptToAppError('INVALID', t('errors.planChangeLength'))
-    /*
-      O pedido de alteração NÃO duplicava efeito antes disto: a guarda de estado
-      já barrava o segundo. O que ele fazia era pior de explicar para quem usa —
-      devolvia um ERRO de repetição para quem só tinha reenviado o mesmo pedido
-      depois de perder a resposta, e a pessoa via "não dá mais" para um pedido
-      que tinha dado certo.
-
-      Não há segunda contabilidade: é a MESMA reserva durável dos outros envios.
-      A releitura não tem identificador próprio porque o plano é um por tarefa —
-      ela confere o ESTADO: o plano ainda está em alteração pedida, e o pedido
-      gravado é este. Se outra pessoa mudou o plano no meio, a releitura não
-      reconhece, e o envio segue para a guarda de estado, que recusa com a
-      verdade de agora.
-    */
+    this.project(actor, projectId)
+    this.#requirePlanReceipts(requestKey)
+    // Cada recibo aponta para a versão preservada, nunca para o plano corrente.
+    // Reservas antigas/incompletas não autorizam aplicar a intenção a outra versão.
     return this.#comChaveDeEnvio(
       actor, projectId, 'mudanca', texto, requestKey,
-      async () => ({ id: projectId, valor: await this.#pedirAlteracao(actor, projectId, texto) }),
-      async () => {
-        const atual = await this.plan(actor, projectId).catch(() => undefined)
-        return atual !== undefined && atual.status === 'CHANGE_REQUESTED' && atual.change_request === texto ? atual : undefined
-      },
+      async id => { const value = await this.#pedirAlteracao(actor, projectId, texto, id); return { id: value.plan_id, valor: value } },
+      id => this.#findPlan(actor, projectId, id),
+      false, t('errors.planChangeUncertain'),
     )
   }
 
-  async #pedirAlteracao(actor: PromptToAppActor, projectId: string, texto: string): Promise<StudioPlan> {
+  async #pedirAlteracao(actor: PromptToAppActor, projectId: string, texto: string, resultId?: string): Promise<StudioPlan> {
     return this.#withPlanWrite(actor, projectId, async () => {
       const value = await this.plan(actor, projectId)
       if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planChangeUnavailable'))
-      const updated = { ...value, status: 'CHANGE_REQUESTED' as const, change_request: texto, updated_at: this.#now().toISOString() }
+      const now = this.#now().toISOString()
+      const updated = {
+        ...value,
+        ...(resultId === undefined ? {} : { plan_id: resultId, revision: planRevision(value) + 1, created_at: now }),
+        status: 'CHANGE_REQUESTED' as const, change_request: texto, updated_at: now,
+      }
       await this.#putPlan(updated)
       return updated
     })

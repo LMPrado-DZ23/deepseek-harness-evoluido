@@ -490,23 +490,25 @@ declarada.
 
 | ABRIR-03-R | Cadastro retoma a criacao do espaco interrompida antes de emitir sessao | Auditoria da continuidade, 20/09/2026 | v1.0 | BETA | plugins/identity/src/service.ts, src/model.ts, tests/service.spec.ts, scripts/prove-personal-adoption.mjs | 190 testes de identidade/tenancy; quatro mutacoes detectadas; JSON real com falha de escrita, recuperacao e nova reabertura em tres processos | execucao: marcador persistido antes do provisionamento; removido somente depois de concluir; logins completos nao repetem provisionamento; falha ao confirmar nao emite sessao | Email capturado, sem SMTP; binario antigo nao aceita registro pendente com campo novo; sem CAS distribuido; conversas pessoais ainda em memoria | validar no computador alvo e continuar continuidade do cliente |
 
-| AUDIT-CLIENT-REPLAY-01 | Edicao e etapa reapresentam a mesma intencao apos fechar a aba, sem guardar texto localmente | Continuidade de reenvios, 20/09/2026 | v1.0 | BETA | apps/studio-web/src/plan/pendingIntent.ts, src/App.tsx, src/session/currentSession.ts, src/session/signOut.ts, tests/journey.spec.ts, tests/signout.spec.ts | Navegador real: fechamento/reabertura, duas abas simultaneas, usuario/org/tenant separados, respostas antigas, corrupcao e logout; nove mutacoes detectadas | execucao: IndexedDB em transacao com durabilidade strict solicitada; hashes, chave e revisao apenas; nenhum POST sem reserva confirmada; erro visivel quando armazenamento falha | Mesmo perfil de navegador; rascunho nao persistido e precisa ser redigitado; outros envios ainda em memoria; limpar dados do site/logout perde recibos locais; sem prova de queda de energia, outros navegadores ou CAS distribuido | concluir verificacao final; ampliar demais envios |
+| AUDIT-CLIENT-REPLAY-01 | Edicao e etapa reapresentam a mesma intencao apos fechar a aba, sem guardar texto localmente | Continuidade de reenvios, 20/09/2026 | v1.0 | BETA | apps/studio-web/src/plan/pendingIntent.ts, src/App.tsx, src/session/currentSession.ts, src/session/signOut.ts, tests/journey.spec.ts, tests/signout.spec.ts | Navegador real: fechamento/reabertura, duas abas simultaneas, usuario/org/tenant separados, respostas antigas, corrupcao e logout; nove mutacoes detectadas | execucao: IndexedDB em transacao com durabilidade strict solicitada; hashes, chave e revisao apenas; nenhum POST sem reserva confirmada; erro visivel quando armazenamento falha | Mesmo perfil de navegador; rascunho nao persistido e precisa ser redigitado; outros envios ainda em memoria; limpar dados do site/logout perde recibos locais; sem prova de queda de energia, outros navegadores ou CAS distribuido | ampliar demais envios; validar instalacao real |
+
+| AUDIT-CHANGE-REPLAY-01 | Pedido antigo de alteracao recupera a versao original sem alterar proposta posterior | Auditoria de reenvios, 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, tests/identidade-do-envio.spec.ts, scripts/prove-plan-replay.mjs | Duas regressoes reproduzidas; nova versao ligada ao recibo; JSON real em dois processos | execucao: leitura pelo identificador reservado, sem gerar auditoria de edicao; reserva incompleta ou legada sem resultado e recusada | Uma instancia; cliente dessa rota ainda em memoria; recibos antigos sem vinculo nao podem recuperar resposta original; nao ha migracao por suposicao | validar instalacao real e persistir intencao do cliente |
 
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 256 |
+| `BETA` | 257 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 367.**
+**Total de requisitos rastreados: 368.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 330 |
+| v1.0 | 331 |
 | v1.x | 34 |
 | v2 | 3 |

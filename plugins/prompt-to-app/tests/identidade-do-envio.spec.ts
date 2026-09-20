@@ -371,6 +371,69 @@ describe('pedir ALTERAÇÃO NO PLANO com identidade de envio', () => {
     expect(segundo.revision).toBe(primeiro.revision)
   })
 
+  it('reenvio antigo apos nova proposta e reinicio recupera o resultado original sem alterar a atual', async () => {
+    const { service, repository } = comPlano()
+    const original = await service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)
+    const next = { ...original, plan_id: 'proposal-next', revision: (original.revision ?? 1) + 1, status: 'PROPOSED' as const, change_request: null }
+    await repository.putPlan(next)
+    const restarted = new PromptToAppService({ repository })
+    expect(await restarted.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).toEqual(original)
+    expect(await restarted.plan(ana, 'proj-1')).toEqual(next)
+    expect(repository.approvalRows).toHaveLength(0)
+  })
+
+  it('reserva sem resultado nao aplica pedido antigo a proposta atual', async () => {
+    const { service, repository } = comPlano()
+    const original = await service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)
+    repository.planRowsInternos = [{ ...original, plan_id: 'proposal-next', revision: (original.revision ?? 1) + 1, status: 'PROPOSED', change_request: null }]
+    const before = structuredClone(repository.planRowsInternos)
+    const restarted = new PromptToAppService({ repository })
+    await expect(restarted.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(repository.planRowsInternos).toEqual(before)
+  })
+
+  it('preserva a proposta anterior e vincula o recibo a uma nova revisao', async () => {
+    const { service, repository } = comPlano()
+    const before = structuredClone(repository.planRowsInternos[0]!)
+    const changed = await service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)
+    expect(changed.plan_id).not.toBe(before.plan_id)
+    expect(changed.revision).toBe(2)
+    expect(repository.keyRows[0]!.result_id).toBe(changed.plan_id)
+    expect(repository.planRowsInternos.find(row => row.plan_id === before.plan_id)).toEqual(before)
+    expect(await service.plan(ana, 'proj-1')).toEqual(changed)
+    await expect(service.requestPlanChange(deOutroEspaco, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(repository.keyRows).toHaveLength(1)
+  })
+
+  it('queda na escrita do resultado deixa reserva incerta sem reaplicar depois', async () => {
+    const { service, repository } = comPlano()
+    const before = structuredClone(repository.planRowsInternos)
+    const put = repository.putPlan
+    repository.putPlan = async () => { throw new Error('disco indisponivel') }
+    await expect(service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toThrow('disco indisponivel')
+    repository.putPlan = put
+    const restarted = new PromptToAppService({ repository })
+    await expect(restarted.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(repository.planRowsInternos).toEqual(before)
+  })
+
+  it('recibo legado com identificador aleatorio nao altera nova proposta', async () => {
+    const { service, repository } = comPlano()
+    repository.keyRows.push({ request_key: CHAVE, org_id: ana.orgId, tenant_id: ana.tenantId, user_id: ana.userId,
+      fingerprint: impressaoDoEnvio({ tipo: 'mudanca', projectId: 'proj-1', texto: PEDIDO }), project_id: 'proj-1',
+      kind: 'mudanca', result_id: 'legacy-unlinked-id', created_at: AGORA })
+    await expect(service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect((await service.plan(ana, 'proj-1')).status).toBe('PROPOSED')
+  })
+
+  it('sem armazenamento de recibos recusa a chave antes de alterar o plano', async () => {
+    const { repository } = comPlano()
+    const broken = Object.assign(Object.create(repository), { creationKeys: undefined, putCreationKey: undefined }) as PromptToAppRepository
+    const service = new PromptToAppService({ repository: broken })
+    await expect(service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'INVALID' })
+    expect(repository.planRowsInternos[0]!.status).toBe('PROPOSED')
+  })
+
   it('SEM chave, o segundo pedido continua recusado pela guarda de estado', async () => {
     // A guarda não foi enfraquecida: ela continua sendo a verdade sobre o
     // estado. A chave só evita que quem reenviou a MESMA intenção a encontre.

@@ -18,6 +18,18 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Pedido antigo de alteracao — VALIDADO LOCALMENTE, 20/09/2026
+
+AUDIT-CHANGE-REPLAY-01 reproduziu reenvio antigo alterando uma nova proposta.
+A correcao preserva outra versao para o resultado e relê por identificador.
+Reserva sem resultado, inclusive legado sem vinculo, e recusada sem reaplicar.
+1.409 testes do plugin passaram; prova JSON real em dois processos passou.
+32 portoes PASS e quatro mutacoes detectadas. Raiz Node 22: 4.467 PASS/174 FAIL/68 SKIP;
+sem novas falhas. A interface e o navegador nao foram repetidos neste checkpoint de backend.
+Cliente desta rota e CAS distribuido seguem pendentes.
+Checkpoint anterior publicado: `67d0f9c10e356665808f580d2addd6533f156580`.
+CI run 35522785506 falhou nos dois jobs sem etapas/logs; causa nao confirmada.
+
 ## Intencao de envio no navegador — VALIDADA LOCALMENTE, 20/09/2026
 
 `AUDIT-CLIENT-REPLAY-01` estende o recibo do servidor a edicao e acrescimo de

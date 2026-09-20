@@ -18,6 +18,7 @@ const pluginRequire = createRequire(new URL('../plugins/prompt-to-app/package.js
 const { Context } = await import(pathToFileURL(pluginRequire.resolve('@deepseek-ai/cordis')).href)
 const actor = { userId: 'replay-test-user', orgId: 'replay-test-org', tenantId: 'replay-test-tenant', role: 'owner' }
 const edit = { base_revision: 1, slices: [{ slice_id: 'initial', title: 'Título preservado' }], removed: [] }
+const changeKey = 'plan-change-restart-0001'; const changeReason = 'Destacar os serviços principais'
 const editKey = 'plan-edit-restart-0001'; const sliceKey = 'plan-slice-restart-0001'; const uncertainKey = 'plan-uncertain-0001'
 
 async function phase(root, mode) {
@@ -55,13 +56,16 @@ async function phase(root, mode) {
       const latest = await service.editPlan(actor, id, { ...edit, base_revision: 3, slices: [{ slice_id: 'initial', title: 'Revisão posterior' }] })
       const uncertain = { slice: async () => { await planner.slice(); throw new Error('Resposta externa perdida') } }
       await assert.rejects(service.addPlanSlice(actor, id, 'Adicionar endereço', uncertain, 'local-only', uncertainKey, 4), /Resposta externa perdida/u)
-      await writeFile(join(root, 'expected.json'), JSON.stringify({ id, edited, added, latest, approvals: repository.approvals().length }), { mode: 0o600 })
+      const changed = await service.requestPlanChange(actor, id, changeReason, changeKey)
+      const proposed = await service.proposePlan(actor, id, latest.slices)
+      await writeFile(join(root, 'expected.json'), JSON.stringify({ id, edited, added, latest: proposed, changed, approvals: repository.approvals().length }), { mode: 0o600 })
       assert.equal(await count(), 2)
     } else {
       const expected = JSON.parse(await readFile(join(root, 'expected.json'), 'utf8'))
       assert.deepEqual(await service.editPlan(actor, expected.id, edit, editKey), expected.edited)
       assert.deepEqual(await service.addPlanSlice(actor, expected.id, 'Adicionar contato', planner, 'local-only', sliceKey, 2), expected.added)
       await assert.rejects(service.addPlanSlice(actor, expected.id, 'Adicionar endereço', planner, 'local-only', uncertainKey, 4), { code: 'REPLAY' })
+      assert.deepEqual(await service.requestPlanChange(actor, expected.id, changeReason, changeKey), expected.changed)
       assert.deepEqual(await service.plan(actor, expected.id), expected.latest)
       assert.equal(repository.approvals().length, expected.approvals)
       assert.equal(await count(), 2, 'reenvio não pode consumir o modelo novamente')

@@ -210,3 +210,8 @@ CI do checkpoint d7de66c: run 35520291793, ambos jobs falharam sem etapas.
 ## 20/09 — reenvio de edicao e etapa no navegador
 
 AUDIT-CLIENT-REPLAY-01 validado localmente: IndexedDB confirma metadados antes do POST, conserva chave/revisao entre abas e limpa no logout. 9 mutacoes detectadas; 32 portoes PASS; 1.095 testes de interface; navegador 174 PASS/3 SKIP. Raiz segue com 174 falhas preexistentes. Outros envios, CAS distribuido, instalacao real e CI permanecem abertos. Evidencia: `audit/evidence/20260920/client-replay-verification.json`.
+
+
+## 20/09 — pedido antigo de alteracao
+
+AUDIT-CHANGE-REPLAY-01: duas regressoes demonstraram reenvio alterando proposta posterior. Resultado passa a ter versao preservada ligada ao recibo; reserva sem resultado falha sem reaplicar. 1.409 testes do plugin, quatro mutacoes, JSON real em dois processos e 32 portoes passaram. Raiz: 4.467 PASS/174 FAIL/68 SKIP, sem falhas novas. Recibos legados sem vinculo nao sao migrados por suposicao. Cliente dessa rota e CAS seguem pendentes. Evidencia: `audit/evidence/20260920/plan-change-replay-verification.json`.
