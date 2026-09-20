@@ -34,6 +34,16 @@ export interface DockerBuilderAdapterOptions {
   readonly closeArchive?: (handle: FileHandle) => Promise<void>
   /** @internal O relógio da reconferência do store (ver `STORE_REVERIFY_MS`). */
   readonly now?: () => number
+  /**
+   * POR QUE uma exportação falhou, para o registro de quem opera.
+   *
+   * O diário guarda só o código (`EXPORT_INVALID`), e o código cobria uma
+   * dúzia de causas diferentes. Medido em 20/09/2026: duas criações que
+   * passaram em tudo pararam aqui, e nada dizia em qual passo. O evento leva
+   * a ETAPA e, quando o exportador saiu com erro, o fim da saída de erro DELE
+   * — que é o nosso programa falando, e não o aplicativo nem um segredo.
+   */
+  readonly diagnostico?: (evento: Readonly<Record<string, string | number>>) => void
 }
 
 /**
@@ -305,14 +315,19 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
   async exportArtifact(buildRef: string, signal: AbortSignal): Promise<ExportedArtifact> {
     const resources = names(this.options.scopeId, buildRef)
     const release = await this.#exports.acquire(signal); let exporter: string | undefined; let exportVolumeCreated = false; let result: ExportedArtifact | undefined; let operationError: unknown; let archive: Awaited<ReturnType<typeof openManagedExportArchive>> | undefined; let archiveClosed = false
+    let etapa = 'publicado-antes'
     try {
       const existing = await readValidatedPublishedArtifact(this.options.exportRoot, buildRef)
       if (existing !== undefined) {
         await cleanupManagedExportResources(this.options.exportRoot, buildRef, signal); result = existing
       } else {
+        etapa = 'construcao-conhecida'
         const buildId = this.#buildIds.get(buildRef); if (buildId === undefined) throw new BuilderSupervisorError('BUILD_NOT_FOUND')
+        etapa = 'limpeza-anterior'
         await cleanupManagedExportResources(this.options.exportRoot, undefined, signal)
+        etapa = 'abrir-arquivo'
         archive = await openManagedExportArchive(this.options.exportRoot, buildRef)
+        etapa = 'exportador'
         const labels = baseLabels(this.options.installationId, this.options.scopeId, buildRef, buildId)
         await this.options.engine.createVolume(resources.exportVolume, { ...labels, 'dz23.resource': 'export' }, { type: 'tmpfs', device: 'tmpfs', o: `size=${Math.min(EXPORT_ARCHIVE_LIMIT, this.#limits.maxExportBytes)},uid=10001,gid=10001,mode=0700` }, signal)
         exportVolumeCreated = true
@@ -322,14 +337,23 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
         ]), signal)
         await this.options.engine.startContainer(exporter, signal)
         const completion = await this.options.engine.waitContainer(exporter, signal)
-        if (completion.StatusCode !== 0) throw new BuilderSupervisorError('EXPORT_INVALID')
+        if (completion.StatusCode !== 0) {
+          const saida = await this.options.engine.containerLogs(exporter, 64 * 1024, AbortSignal.timeout(5_000)).catch(() => undefined)
+          this.options.diagnostico?.({ evento: 'exportador-saiu-com-erro', status: completion.StatusCode, saida: saida === undefined ? '' : saida.stderr.toString('utf8').slice(-600) })
+          throw new BuilderSupervisorError('EXPORT_INVALID')
+        }
+        etapa = 'baixar'
         const downloaded = await this.options.engine.downloadArchive(exporter, '/export/.', archive.handle, Math.min(EXPORT_ARCHIVE_LIMIT, this.#limits.maxExportBytes), signal)
         const stat = await archive.handle.stat(); if (!stat.isFile() || stat.nlink !== 1 || stat.dev !== archive.dev || stat.ino !== archive.ino || stat.size !== downloaded.bytes) throw new BuilderSupervisorError('EXPORT_INVALID')
         await (this.options.closeArchive?.(archive.handle) ?? archive.handle.close()); archiveClosed = true
+        etapa = 'publicar'
         const published = await publishValidatedDockerArchive(this.options.exportRoot, buildRef, archive.path, signal, undefined, { dev: stat.dev, ino: stat.ino, size: stat.size, sha256: downloaded.sha256 })
         result = published
       }
-    } catch (error) { operationError = error }
+    } catch (error) {
+      operationError = error
+      this.options.diagnostico?.({ evento: 'exportacao-falhou', etapa, codigo: error instanceof BuilderSupervisorError ? error.code : error instanceof Error ? error.message.slice(0, 200) : 'desconhecido' })
+    }
     const cleanupErrors: unknown[] = []
     try {
       if (exporter !== undefined) {

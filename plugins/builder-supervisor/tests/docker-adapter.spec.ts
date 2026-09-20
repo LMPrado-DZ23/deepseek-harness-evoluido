@@ -361,6 +361,26 @@ describe('server-authoritative Docker builder adapter', () => {
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
+  it('diz em que etapa a exportacao falhou, e o que o exportador escreveu', async () => {
+    const engine = new FakeEngine(); engine.exportExitCode = 1; engine.logs = { stdout: Buffer.alloc(0), stderr: Buffer.from('Error: EXPORT_SOURCE_INVALID') }
+    const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-diag-')); const signal = new AbortController().signal; const eventos: Record<string, unknown>[] = []
+    try {
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, diagnostico: evento => { eventos.push({ ...evento }) } })
+      await adapter.prepare(buildRef, 'diag', artifact, signal)
+      await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
+      expect(eventos).toEqual([
+        { evento: 'exportador-saiu-com-erro', status: 1, saida: 'Error: EXPORT_SOURCE_INVALID' },
+        { evento: 'exportacao-falhou', etapa: 'exportador', codigo: 'EXPORT_INVALID' },
+      ])
+      eventos.length = 0; engine.exportExitCode = 0; engine.downloadPayload = Buffer.from('bad')
+      await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
+      expect(eventos).toEqual([{ evento: 'exportacao-falhou', etapa: 'publicar', codigo: 'EXPORT_INVALID' }])
+      eventos.length = 0
+      await expect(new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, diagnostico: evento => { eventos.push({ ...evento }) } }).exportArtifact(buildRef, signal)).rejects.toThrow('BUILD_NOT_FOUND')
+      expect(eventos).toEqual([{ evento: 'exportacao-falhou', etapa: 'construcao-conhecida', codigo: 'BUILD_NOT_FOUND' }])
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
   it('removes exporter resources even when the downloaded archive is invalid', async () => {
     const engine = new FakeEngine(); engine.downloadPayload = Buffer.from('not a tar'); const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-fail-')); const signal = new AbortController().signal
     try {

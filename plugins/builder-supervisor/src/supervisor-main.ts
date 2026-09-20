@@ -64,6 +64,7 @@ export function composeBuilderSupervisor(config: BuilderSupervisorResolvedConfig
     exportRoot: config.exportRoot,
     templateStoreVersion: config.templateStoreVersion,
     templateStoreSha256: config.templateStoreSha256,
+    diagnostico: evento => { process.stderr.write(`${JSON.stringify({ event: 'builder-export-diagnostic', ...evento })}\n`) },
   })
   const artifactIngress = new ArtifactIngressStore({
     spoolRoot: posix.join(config.journalRoot, 'artifact-ingress'),
