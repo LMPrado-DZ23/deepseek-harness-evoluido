@@ -139,11 +139,7 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
     },
     sessions: {
       isActive(input) {
-        const session = identity.sessionRecords().find(candidate => candidate.session_id === input.sessionId
-          && candidate.user_id === input.userId && candidate.org_id === input.orgId && candidate.tenant_id === input.tenantId)
-        const now = Date.now()
-        return session !== undefined && session.revoked_at === null
-          && Date.parse(session.expires_absolute_at) > now && Date.parse(session.expires_sliding_at) > now
+        return sessaoAtiva(identity.sessionRecords(), identity.personalSession(), input, Date.now())
       },
       canRead(input) {
         const authorization = ctx.studioTenancy.service.authorizationFor(input.userId, input.orgId, input.tenantId)
@@ -246,4 +242,41 @@ export function emailDoDono(
   if (registrado !== undefined) return registrado.email
   const pessoal = usuarios.length === 0 && actor.userId === 'user_local' && actor.orgId === 'org_local' && actor.tenantId === 'tenant_local'
   return pessoal ? EMAIL_DO_DONO_PESSOAL : undefined
+}
+
+type SessaoMinima = { readonly session_id: string, readonly user_id: string, readonly org_id: string, readonly tenant_id: string, readonly revoked_at: string | null, readonly expires_absolute_at: string, readonly expires_sliding_at: string }
+
+/**
+ * A sessão que pediu a prévia continua valendo?
+ *
+ * A troca do bilhete de admissão confere isto, e só olhava as sessões
+ * GRAVADAS. A sessão da instalação pessoal é sintética — não é gravada —, e
+ * a prévia do primeiro aplicativo aprovado respondia 'Prévia indisponível' na
+ * admissão (medido em 20/09/2026). A pessoal conta enquanto o modo pessoal
+ * existe; a identidade deixa de oferecê-la quando alguém se cadastra.
+ * @param registros - as sessões gravadas.
+ * @param pessoal - a sessão pessoal de agora, se o modo pessoal vale.
+ * @param input - quem pediu.
+ * @param input.sessionId - a sessão.
+ * @param input.userId - a pessoa.
+ * @param input.orgId - a organização.
+ * @param input.tenantId - o espaço.
+ * @param agora - o instante, em ms.
+ * @returns se vale.
+ */
+export function sessaoAtiva(
+  registros: readonly SessaoMinima[],
+  pessoal: SessaoMinima | undefined,
+  input: { readonly sessionId: string, readonly userId: string, readonly orgId: string, readonly tenantId: string },
+  agora: number,
+): boolean {
+  const casa = (candidata: SessaoMinima) => candidata.session_id === input.sessionId && candidata.user_id === input.userId
+    && candidata.org_id === input.orgId && candidata.tenant_id === input.tenantId
+  const gravada = registros.find(casa)
+  if (gravada !== undefined) {
+    return gravada.revoked_at === null && Date.parse(gravada.expires_absolute_at) > agora && Date.parse(gravada.expires_sliding_at) > agora
+  }
+  // A pessoal nasce com os prazos no próprio instante (ela é refeita a cada
+  // pedido); o que a faz valer é a identidade ainda oferecê-la.
+  return pessoal !== undefined && casa(pessoal) && pessoal.revoked_at === null
 }
