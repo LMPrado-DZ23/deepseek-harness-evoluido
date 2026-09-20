@@ -18,6 +18,22 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-19
 
+## A JORNADA PELA MISTRAL — 20/09/2026, madrugada
+
+Projeto `9c4bfbe9…` (contador de copos, perfil "Melhor qualidade", só a
+conexão `chave-mistral` ligada), conduzido PELA TELA:
+
+- tarefa criada; três perguntas respondidas; a síntese falhou com 422 (a
+  Mistral recusa `store`) → consertado o `compat` (LLM-CHAVE-02);
+- a conexão ficou fora da escolha depois de uma falha só → consertado
+  (ROTA-RETENTAR-01); a conversa ficou sem ação → botão "Tentar de novo"
+  (UX-SINTESE-01);
+- com os consertos instalados: "Tentar de novo" → a Mistral montou a
+  especificação → "Montar meu plano" → plano de 1 etapa, 5 conferências →
+  aprovado → "Iniciar criação" disponível.
+- PAROU em: o construtor não respondia (`PROBE_FAILED`): o gerente tinha
+  caído. Reiniciado com `frigg-gerente-reiniciar.sh`.
+
 ## IA POR CHAVE NO COMPUTADOR DO TITULAR — 19/09/2026, 20h15 (LLM-CHAVE-01)
 
 O titular mandou usar as chaves de API dele. O WSL2 não sai para a internet

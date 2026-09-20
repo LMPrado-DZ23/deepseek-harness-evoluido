@@ -15,6 +15,14 @@ describe('destinoPermitido', () => {
     expect(destinoPermitido('api.mistral.ai:443\r\nX: y', HOSTS_PERMITIDOS)).toBeUndefined()
     expect(destinoPermitido(undefined, HOSTS_PERMITIDOS)).toBeUndefined()
   })
+
+  it('a entrada com ponto aceita UM nível de subdomínio, e nada que só termine igual', () => {
+    expect(destinoPermitido('westus2.data.mcr.microsoft.com:443', HOSTS_PERMITIDOS)).toEqual({ host: 'westus2.data.mcr.microsoft.com', porta: 443 })
+    expect(destinoPermitido('data.mcr.microsoft.com:443', HOSTS_PERMITIDOS)).toBeUndefined()
+    expect(destinoPermitido('xdata.mcr.microsoft.com:443', HOSTS_PERMITIDOS)).toBeUndefined()
+    expect(destinoPermitido('a.b.data.mcr.microsoft.com:443', HOSTS_PERMITIDOS)).toBeUndefined()
+    expect(destinoPermitido('evil.com.data.mcr.microsoft.com.evil.com:443', HOSTS_PERMITIDOS)).toBeUndefined()
+  })
 })
 
 const PROXY = 28000 + Math.floor(Math.random() * 1000)

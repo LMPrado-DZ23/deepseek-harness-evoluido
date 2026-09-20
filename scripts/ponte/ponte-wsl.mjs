@@ -26,6 +26,11 @@ export const HOSTS_PERMITIDOS = new Set((process.env.FRIGG_PONTE_HOSTS ?? [
   'api.together.xyz', 'api.fireworks.ai', 'api.x.ai', 'api.sambanova.ai', 'integrate.api.nvidia.com',
   'generativelanguage.googleapis.com', 'api.openai.com', 'api.anthropic.com',
   'duckduckgo.com', 'html.duckduckgo.com', 'lite.duckduckgo.com',
+  // Para (re)construir a imagem do construtor: a base fixada por digest, o
+  // Node e o pnpm fixados por sha256 no Dockerfile. As camadas da MCR vêm de
+  // um host regional (`<regiao>.data.mcr.microsoft.com`): a entrada com ponto
+  // no começo aceita os subdomínios, e SÓ eles.
+  'mcr.microsoft.com', '.data.mcr.microsoft.com', 'nodejs.org', 'registry.npmjs.org',
 ].join(',')).split(',').map(h => h.trim().toLowerCase()).filter(Boolean))
 const TOKEN = process.env.FRIGG_PONTE_TOKEN ?? randomBytes(24).toString('hex')
 
@@ -39,8 +44,24 @@ export function destinoPermitido(alvo, permitidos) {
   const achado = /^([a-z0-9.-]+):(\d{1,5})$/iu.exec(alvo ?? '')
   if (achado === null) return undefined
   const host = achado[1].toLowerCase(); const porta = Number(achado[2])
-  if (porta !== 443 || !permitidos.has(host)) return undefined
+  if (porta !== 443 || !hostNaLista(host, permitidos)) return undefined
   return { host, porta }
+}
+
+/**
+ * O host está na lista? Uma entrada `.dominio` aceita qualquer subdomínio
+ * dele, e não o próprio domínio nem um nome que só TERMINE igual
+ * (`xdata.mcr.microsoft.com` não passa por `.data.mcr.microsoft.com`).
+ * @param {string} host - o host, em minúsculas.
+ * @param {ReadonlySet<string>} permitidos - a lista.
+ * @returns {boolean}
+ */
+export function hostNaLista(host, permitidos) {
+  if (permitidos.has(host)) return true
+  for (const entrada of permitidos) {
+    if (entrada.startsWith('.') && host.endsWith(entrada) && host.length > entrada.length && /^[a-z0-9-]+$/u.test(host.slice(0, -entrada.length))) return true
+  }
+  return false
 }
 
 let controle = null

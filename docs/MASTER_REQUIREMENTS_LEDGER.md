@@ -457,6 +457,7 @@ declarada.
 | LLM-CHAVE-02 | Cada rota por chave so manda o que o provedor aceita (compat medido) | Primeira criacao real pela rota chave-mistral, 19/09/2026: a rota caiu com '422 status code (no body)' e a conversa parou em 'Rota desligada' | v1.0 | BETA | dsh-home/profiles/studio/cordis.patch.yml (compat por rota), plugins/policy/tests/regras-do-agente-geral.spec.ts | MEDIDO pela ponte com uma sonda que manda, um por vez, cada campo que o pi-ai envia: Mistral recusa store (422), o papel developer (422) e reasoning_effort (400); Gemini recusa store e prompt_cache_key (400); Groq recusa prompt_cache_key (400). O pi-ai so reconhece esses provedores pelo nome ou endereco da rota, e os nomes chave-* nao batem, entao ele mandava o formato da OpenAI. Agora cada rota declara o que o provedor NAO aceita. Sabotagens: 2, pegas | execucao: nenhum campo e removido de rota que o aceita | O Gemini gratuito devolveu 429 (cota) depois de uns dez pedidos na sonda: ele fica como rota, mas o agente geral passa a usar o Groq | refazer a criacao pela Mistral |
 | ROTA-RETENTAR-01 | Uma rota que falhou menos vezes que o limite do circuito continua sendo tentada | Primeira criacao real pela Mistral, 19/09/2026: uma falha so tirou a unica conexao ligada da escolha para sempre | v1.0 | BETA | plugins/route-health/src/service.ts (select: retentavel, RETRY_BELOW_THRESHOLD), i18n/pt-BR.json, tests/service.spec.ts | MEDIDO no computador do titular: com so a Mistral ligada, UMA falha (422) a deixou DOWN com o circuito FECHADO (1 de 3). Fora de OK, ela nao era escolhida; com o circuito fechado, a meia-abertura nunca chegava; e a conversa respondia 'Rota desligada' a toda resposta, sem tentar nunca mais. Agora ela tem direito as tentativas que o limite promete; no limite o circuito abre e a espera vale; no perfil equilibrado a frase diz que saiu do computador. Sabotagens: 3, pegas | execucao: circuito aberto continua bloqueando; rota desligada continua fora | Com o circuito aberto e a de reserva desligada, a frase continua sendo 'Rota desligada', que descreve a de reserva e nao a que caiu | frase propria para 'a conexao ligada falhou; tentando de novo em instantes' |
 | UX-SINTESE-01 | Quando a IA falha depois da ultima resposta, a tela oferece 'Tentar de novo'; e a frase de privacidade mostra o NOME da conexao | Mesma jornada: a conversa ficou parada na terceira resposta, sem pergunta, sem plano e sem botao; a frase dizia 'chave-mistral' | v1.0 | BETA | apps/studio-web/src/sinteseParada.ts (novo) + spec, App.tsx, i18n/pt-BR.json, plugins/prompt-to-app/src/index.ts (nomeDaRotaEmUso, route_name na saude), http.ts, apps/studio-web/src/api.ts, tests/modelo-local.spec.ts | O servidor ja refazia a sintese quando recebia uma resposta sem pergunta aberta (18/09); faltava a tela oferecer. A decisao mora numa funcao exportada com teste, e nao no JSX. Sabotagens: 3, pegas | execucao: nenhuma resposta e pedida de novo | NAO coberto pelo e2e: o duble do servidor nao simula a falha da sintese | e2e com sintese que falha uma vez |
+| IMAGEM-CONSTRUTOR-01 | Refazer a imagem do construtor no WSL2 sem internet, conferida por digest, e protege-la da limpeza automatica do daemon | Jornada pela Mistral, 20/09/2026: o construtor parou com IMAGEM_AUSENTE | v1.0 | BETA | scripts/ponte/puxar-imagem.mjs (novo) + spec, scripts/ponte/ponte-wsl.mjs (entrada '.dominio' para os hosts regionais da MCR; nodejs.org, registry.npmjs.org, mcr.microsoft.com) + spec | MEDIDO no computador do titular: a imagem fixada (sha256:31eb96c5...) e a base dela sumiram do daemon, e o cache de build estava em 0 B — limpeza automatica do daemon compartilhado (a outra pilha continuou com as imagens em uso). O daemon nao sai para a internet e reinicia-lo com proxy mexeria na outra pilha. O roteiro busca a base pela ponte, confere o manifesto contra o digest do FROM e cada camada contra o manifesto, grava uma pasta OCI, e o docker build usa --build-context <FROM>=oci-layout://pasta:base; o Node e o pnpm continuam conferidos por sha256 no Dockerfile. Medido na nuvem: 887 MB puxados e conferidos em 9 s, e o FROM resolvido pela pasta. Um conteiner PARADO usando a imagem (ancora) impede a limpeza de apaga-la de novo. Sabotagens: 8, todas pegas (4 depois de extrair a conferencia para funcoes com teste) | execucao: camada ou manifesto adulterado nao fica no disco, nem pela metade; subdominio so de UM nivel | A imagem refeita tem OUTRO digest (datas de construcao): a fixacao anterior e guardada ao lado, e nao apagada. A ancora e uma convencao: uma limpeza que remova conteineres parados a derrota | medir a reconstrucao no computador do titular |
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -465,16 +466,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 233 |
+| `BETA` | 234 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 343.**
+**Total de requisitos rastreados: 344.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 307 |
+| v1.0 | 308 |
 | v1.x | 33 |
 | v2 | 3 |
