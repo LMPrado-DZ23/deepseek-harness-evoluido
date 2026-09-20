@@ -483,28 +483,30 @@ declarada.
 
 | AUDIT-PLAN-01 | Edicoes, aprovacao e respostas tardias do planejador preservam a revisao mais recente | Auditoria de concorrencia de 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, plugins/prompt-to-app/tests/service-intake-planner.spec.ts | Sete regressoes falham na base; 179 testes de servico e HTTP passam; cinco mutacoes detectadas | execucao: gravacoes serializadas por projeto e escopo; resposta do modelo confere identidade, revisao e estado antes de gravar; revisoes novas seguem o maximo existente | Trava por instancia, sem CAS entre processos; reenvio duravel tratado em AUDIT-REPLAY-01; modelo real nao exercitado | provar concorrencia distribuida e identidade duravel dos envios |
 
-| AUDIT-REPLAY-01 | Reenvios de edicao e etapa recuperam a revisao persistida, sem repetir alteracao concluida ou chamada de modelo incerta | Meta de usuario final, 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, src/http.ts, src/model.ts, src/creation-key.ts, apps/studio-web/src/App.tsx, src/plan/PlanEditor.tsx, scripts/prove-plan-replay.mjs | API, escopo, conflito, queda entre escritas, dois processos com JSON real; navegador descarta resposta depois da gravacao e reenvia a mesma chave | execucao: revisoes preservadas por identificador reservado; auditoria reconciliada com data original; rascunho mantido na falha; erro de leitura visivel; prova de reabertura ligada a CI | Chave do navegador em memoria, perdida ao fechar a pagina; serializacao por instancia, sem CAS distribuido; modelo controlado; chamada externa sem resultado persistido exige nova intencao explicita, nao retry automatico; downgrade exige backup consistente | validar CI e instalacao nas plataformas alvo |
+| AUDIT-REPLAY-01 | Reenvios de edicao e etapa recuperam a revisao persistida, sem repetir alteracao concluida ou chamada de modelo incerta | Meta de usuario final, 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, src/http.ts, src/model.ts, src/creation-key.ts, apps/studio-web/src/App.tsx, src/plan/PlanEditor.tsx, scripts/prove-plan-replay.mjs | API, escopo, conflito, queda entre escritas, dois processos com JSON real; navegador descarta resposta depois da gravacao e reenvia a mesma chave | execucao: revisoes preservadas por identificador reservado; auditoria reconciliada com data original; rascunho mantido na falha; erro de leitura visivel; prova de reabertura ligada a CI | Persistencia do cliente tratada em AUDIT-CLIENT-REPLAY-01; serializacao por instancia, sem CAS distribuido; modelo controlado; chamada externa sem resultado persistido exige nova intencao explicita, nao retry automatico; downgrade exige backup consistente | validar CI e instalacao nas plataformas alvo |
 
 
 | ABRIR-03 | Primeiro titular local preserva a identidade do trabalho pessoal ao registrar a conta | Continuidade do usuario final, 20/09/2026 | v1.0 | BETA | plugins/identity/src/service.ts, plugins/identity/tests/service.spec.ts, scripts/prove-personal-adoption.mjs | 188 testes de identidade e tenancy; seis mutacoes detectadas; backend JSON real em dois processos, projeto e arquivo preservados, escopo alheio recusado | execucao: codigo vinculado ao escopo pessoal; mesmo usuario, organizacao e tenant no cadastro; convite nao herda dados pessoais; mudanca de escopo invalida codigo; acesso anonimo encerrado | Primeiro cadastro local apenas; instalacoes ja cadastradas nao sao migradas; email capturado sem SMTP; conversas sinteticas ainda nao transferidas; validacao no PC pendente | provar cadastro real e continuidade das conversas, sem ampliar acesso |
 
 | ABRIR-03-R | Cadastro retoma a criacao do espaco interrompida antes de emitir sessao | Auditoria da continuidade, 20/09/2026 | v1.0 | BETA | plugins/identity/src/service.ts, src/model.ts, tests/service.spec.ts, scripts/prove-personal-adoption.mjs | 190 testes de identidade/tenancy; quatro mutacoes detectadas; JSON real com falha de escrita, recuperacao e nova reabertura em tres processos | execucao: marcador persistido antes do provisionamento; removido somente depois de concluir; logins completos nao repetem provisionamento; falha ao confirmar nao emite sessao | Email capturado, sem SMTP; binario antigo nao aceita registro pendente com campo novo; sem CAS distribuido; conversas pessoais ainda em memoria | validar no computador alvo e continuar continuidade do cliente |
 
+| AUDIT-CLIENT-REPLAY-01 | Edicao e etapa reapresentam a mesma intencao apos fechar a aba, sem guardar texto localmente | Continuidade de reenvios, 20/09/2026 | v1.0 | BETA | apps/studio-web/src/plan/pendingIntent.ts, src/App.tsx, src/session/currentSession.ts, src/session/signOut.ts, tests/journey.spec.ts, tests/signout.spec.ts | Navegador real: fechamento/reabertura, duas abas simultaneas, usuario/org/tenant separados, respostas antigas, corrupcao e logout; nove mutacoes detectadas | execucao: IndexedDB em transacao com durabilidade strict solicitada; hashes, chave e revisao apenas; nenhum POST sem reserva confirmada; erro visivel quando armazenamento falha | Mesmo perfil de navegador; rascunho nao persistido e precisa ser redigitado; outros envios ainda em memoria; limpar dados do site/logout perde recibos locais; sem prova de queda de energia, outros navegadores ou CAS distribuido | concluir verificacao final; ampliar demais envios |
+
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 255 |
+| `BETA` | 256 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 366.**
+**Total de requisitos rastreados: 367.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 329 |
+| v1.0 | 330 |
 | v1.x | 34 |
 | v2 | 3 |

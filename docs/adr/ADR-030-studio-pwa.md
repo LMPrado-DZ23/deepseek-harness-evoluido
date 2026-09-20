@@ -208,3 +208,28 @@ e exige um único `.js` sem `import(` — a mensagem de falha diz o que fazer
 então (manter o cache da versão anterior até o último cliente dela sair, ou
 parar de reivindicar clientes). Estado: `NOT_PRESENT` (a condição que tornaria
 o defeito alcançável não existe nesta build).
+
+## Adendo de 20/09/2026 — metadados de envio no aparelho
+
+A afirmacao historica de que nao se usa IndexedDB deixa de valer para edicao e
+acrescimo de etapa. `frigg.plan-intents.v1`, store `pending`, guarda somente:
+`slot` (hash de usuario/organizacao/tenant/projeto/tipo), `digest` (hash do slot
+e do material), `key` e `baseRevision`. Hashes sao metadados persistidos, nao
+uma alegacao de anonimato. Nenhum texto, arquivo, credencial, cookie ou resposta
+entra nesse banco. APIs continuam fora do cache da PWA.
+
+Reserva nativa em transacao readwrite com `durability: strict`; o POST espera
+a conclusao. Abas compartilham a reserva; respostas antigas so retiram recibo
+com a mesma chave E impressao. Corrupcao nao e reparada gerando nova chave,
+pois isso poderia repetir uma chamada com custo. Falha de armazenamento para
+o envio, com explicacao visivel. A confirmacao ja salva no servidor continua
+reconhecida se falhar a retirada do recibo local.
+
+Logout confirmado limpa so esse store; recusa de logout preserva seus dados.
+A limpeza continua best effort se o navegador recusa acesso, como as demais
+limpezas locais; o servidor segue sendo a autoridade de revogacao. Nao existe
+fila automatica de execucao nem rascunho persistido. Ao reabrir, a pessoa pode
+redigitar o mesmo pedido para recuperar a mesma intencao pendente. Alterar o
+texto inicia outra intencao. Limpar dados do site, sair da conta, usar outro
+perfil/aparelho ou remocao de dados pelo navegador perde esses metadados.
+Nenhuma prova de queda de energia ou de navegadores alem do Chromium foi feita.

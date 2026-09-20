@@ -1,0 +1,89 @@
+{
+  "date": "2026-09-20",
+  "requirement": "AUDIT-CLIENT-REPLAY-01",
+  "validated_source_tree": "4055c682b72bc3a68fe116ded60c408b598d11a3",
+  "gates": {
+    "passed": 32,
+    "failed": 0
+  },
+  "frontend": {
+    "passed": 1095
+  },
+  "browser": {
+    "startTime": "2026-09-20T16:15:29.890Z",
+    "duration": 419959.14400000003,
+    "expected": 174,
+    "skipped": 3,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "root_node22": {
+    "passed": 4461,
+    "failed": 174,
+    "skipped": 68,
+    "new_failure_names": []
+  },
+  "postgres": "NOT_EXECUTED: Docker unavailable",
+  "mutations": [
+    {
+      "mutation": "sem_persistencia",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "perder_revisao_original",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "omitir_usuario",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "omitir_organizacao",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "omitir_tenant",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "omitir_texto",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "ack_ignora_chave",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "ack_ignora_impressao",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "nao_limpar_logout",
+      "detected": true,
+      "buildPassed": true
+    }
+  ],
+  "sha256": {
+    "apps/studio-web/src/plan/pendingIntent.ts": "2f297e627d6571ffc6108f664ec286c1bff031d7121ac1aad27394f5ef526864",
+    "apps/studio-web/src/App.tsx": "5d6be86ce78dc10d195c6beb6e771460e5b21d6fe385aed9f4ef6cffaa148062",
+    "apps/studio-web/tests/journey.spec.ts": "e3c4d6033a1c4ffea2c7768ed6156ef42492784b14a479f6145f1f1abaf54aeb",
+    "apps/studio-web/tests/signout.spec.ts": "ba86c0ffad307a765a39ebdb23598de50fe71c76be7eb074e808b7fcdbc60586"
+  },
+  "limits": [
+    "Edit and add-slice only; other client intentions remain in memory",
+    "Same browser profile; user must retype exact text after closing",
+    "No raw prompt persistence, no automatic delivery queue",
+    "No distributed server CAS",
+    "No native installation, power loss or real model proof",
+    "DESKTOP-PRADO offline; PR not merged; CI not green"
+  ],
+  "workspace_note": "First gate round caught obsolete draft catalogs. Removed drafts, unchanged full gates passed. Browser verified from isolated index snapshot; canonical generated artifacts retained historical bundles."
+}

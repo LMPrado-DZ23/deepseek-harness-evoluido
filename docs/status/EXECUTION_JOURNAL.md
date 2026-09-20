@@ -162,3 +162,14 @@ provisionamento pendente agora acompanha o usuario ate concluir. Falha ao gravar
 a conclusao tambem impede sessao prematura. Matriculas completas nao repetem
 a etapa. 190 testes PASS, quatro mutacoes detectadas, prova JSON real em tres
 processos preservando trabalho e isolamento depois de falha de escrita.
+
+## 2026-09-20 — intencao de envio sobrevive a fechar a aba
+
+O teste novo reproduziu chave e revisao diferentes ao reabrir a aba depois de
+perder a resposta. IndexedDB agora conserva apenas hashes, chave e revisao para
+edicao/etapa. Transacao confirma antes do POST; nao ha texto nem fila automatica.
+Navegador prova reabertura, duas abas, escopos, outra intencao, ACK antigo,
+recibo corrompido, bloqueio do armazenamento e limpeza seletiva no logout.
+Nove mutacoes foram detectadas depois de compilar cada candidata. As fontes
+foram restauradas; 32 portoes PASS, interface 1.095 PASS, navegador 174 PASS/3 SKIP.
+Raiz: 4.461 PASS/174 FAIL/68 SKIP, sem falhas novas. Outros envios ainda usam memoria.

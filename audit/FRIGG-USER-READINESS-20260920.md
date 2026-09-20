@@ -205,3 +205,8 @@ Verificacao da recuperacao: 32 portoes e constituicao PASS; 190 testes focados,
 NOT_EXECUTED. A prova em tres processos tambem passou em Node 22.23.1.
 Evidencias: `audit/evidence/20260920/provision-recovery-verification.json`.
 CI do checkpoint d7de66c: run 35520291793, ambos jobs falharam sem etapas.
+
+
+## 20/09 — reenvio de edicao e etapa no navegador
+
+AUDIT-CLIENT-REPLAY-01 validado localmente: IndexedDB confirma metadados antes do POST, conserva chave/revisao entre abas e limpa no logout. 9 mutacoes detectadas; 32 portoes PASS; 1.095 testes de interface; navegador 174 PASS/3 SKIP. Raiz segue com 174 falhas preexistentes. Outros envios, CAS distribuido, instalacao real e CI permanecem abertos. Evidencia: `audit/evidence/20260920/client-replay-verification.json`.

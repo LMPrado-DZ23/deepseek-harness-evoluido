@@ -95,5 +95,10 @@
     "ligar": "Use {nome}",
     "linhaComoInstalar": "To show up here, install the tool (Claude Code, Gemini CLI, Qwen Code or Codex CLI), sign in with your account in the terminal and restart FRIGG. FRIGG does not keep your password or key: the tool talks to the provider.",
     "limitacao": "Through the command line the agent chats but does not use tools (search, write files, schedule). A project with the private profile only uses the local AI."
+  },
+  "envios": {
+    "indisponivel": "I could not preserve this submission on this device. The request was not sent. Check the plan and your browser's site storage permissions before trying again.",
+    "identidade": "I could not confirm your workspace. Refresh the page before sending. The request was not sent.",
+    "confirmacaoPendente": "The request was saved on the server, but this device could not save its confirmation. If you resend it, FRIGG will try to retrieve the same result."
   }
 }

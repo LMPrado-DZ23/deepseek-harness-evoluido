@@ -44,3 +44,8 @@ relatório. Não reduzir os achados a zero apenas por existirem alterações.
 | IB-08 | MEDIUM | Duas listas negadas de categoria que precisavam concordar entre si; categoria nova caía num `return` silencioso e gerava aplicativo com formulário e sem banco | `CATEGORY_REQUIRES_DATA_MODEL`, exaustiva: categoria nova não compila sem resposta |
 | IB-09 | MEDIUM | Dois `catch {}` no gerador de e-mail tratavam QUALQUER falha como lista vazia e a linha seguinte sobrescrevia o arquivo — histórico de envios apagado em silêncio, **dentro de todo aplicativo gerado com formulário** | `readCapture` distingue ausente de corrompido; 3 testes, 1 falsificação |
 | IB-10 | **HIGH** (era MEDIUM) | `plugins/builder-supervisor` | Começou como teste intermitente e terminou como defeito de segurança do produto: `(dev, ino)` não é identidade, é endereço, e o ext4 recicla inode. O supervisor apagava socket **de outro processo**. Medido: 150/150 fechamentos reciclaram o inode | **FECHADO** — `birthtimeNs` entrou no par de identidade nos quatro pontos que decidiam, inclusive no `owner.json`, onde a janela é de minutos e reinícios |
+
+
+## 20/09 — reenvio de edicao e etapa no navegador
+
+AUDIT-CLIENT-REPLAY-01 validado localmente: IndexedDB confirma metadados antes do POST, conserva chave/revisao entre abas e limpa no logout. 9 mutacoes detectadas; 32 portoes PASS; 1.095 testes de interface; navegador 174 PASS/3 SKIP. Raiz segue com 174 falhas preexistentes. Outros envios, CAS distribuido, instalacao real e CI permanecem abertos. Evidencia: `audit/evidence/20260920/client-replay-verification.json`.

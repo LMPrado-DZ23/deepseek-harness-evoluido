@@ -170,3 +170,17 @@ Honestidade sobre o alcance desta página:
   que este repositório se encontrava quando ele foi escrito. A **partida
   completa** depende de o Harness estar instalado e compilado na sua máquina, e
   é o passo que cada ambiente precisa fazer por si.
+
+## Quando um envio fica sem confirmacao
+
+Ao editar o plano ou acrescentar uma etapa, uma falha de rede pode acontecer
+quando o servidor ja guardou a mudanca. Confira o plano antes de tentar outra
+coisa. No mesmo perfil de navegador, reenviar o mesmo pedido pendente recupera
+a tentativa anterior, inclusive depois de fechar e reabrir a aba. O texto do
+rascunho nao fica salvo: se fechar a aba, sera preciso redigita-lo.
+
+Se o navegador nao conseguir preservar o envio, o FRIGG avisa e nao envia o
+pedido. Verifique as permissoes de armazenamento deste site. Alterar o texto
+inicia outra intencao; isso pode consumir modelo novamente. Sair da conta,
+limpar os dados do site ou usar outro navegador/aparelho perde os recibos
+locais. Essas garantias ainda nao se estendem aos demais tipos de envio.

@@ -19,7 +19,8 @@ import { browserEmergencyStopPort, EmergencyStop } from './EmergencyStop'
 import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointListValue, type RunReportValue } from './RunReport'
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
-import { currentSessionMode, currentSessionPrincipal } from './session/currentSession'
+import { currentSessionMode, currentSessionPrincipal, currentSessionScope } from './session/currentSession'
+import { confirmPlanIntent, preparePlanIntent, type PendingPlanIntent } from './plan/pendingIntent'
 import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
 import { TAREFAS_MUDARAM, WorkspaceShell } from './shell/WorkspaceShell'
 import { HomeScreen } from './home/HomeScreen'
@@ -84,6 +85,7 @@ const steps = [
 
 export function App() {
   const { preferencias: preferenciasTexto } = useCatalogos()
+  const enviosTexto = preferenciasTexto.envios
   const [brief, setBrief] = useState('')
   const [category, setCategory] = useState<Category>('landing-page')
   const [privacy, setPrivacy] = useState<PrivacyProfile>('privado-local')
@@ -327,8 +329,6 @@ export function App() {
   */
   const intencaoDaResposta = useRef<IntencaoDeCriacao | null>(null)
   const intencaoDaMudanca = useRef<IntencaoDeCriacao | null>(null)
-  const intencaoDaEdicao = useRef<IntencaoDeCriacao | null>(null)
-  const intencaoDaEtapa = useRef<IntencaoDeCriacao | null>(null)
   async function create() {
     if (!ready) { setError(t.idea.empty); return }
     await safely(async () => {
@@ -522,27 +522,35 @@ export function App() {
   /** E-03: manda UMA alteração e adota o plano que voltou, com a revisão nova. */
   async function editPlan(edit: PlanEditRequest) {
     if (projectId === null) return
-    const envio = intencaoPorImpressao(intencaoDaEdicao.current, JSON.stringify(['edicao-plano', projectId, edit]))
-    intencaoDaEdicao.current = envio
     return safelyWithResult(async () => {
-      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify({ ...edit, request_key: envio.chave }) })
-      intencaoDaEdicao.current = null
+      const { base_revision, ...material } = edit
+      const envio = await preservePlanIntent('edit', JSON.stringify(material), base_revision)
+      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify({ ...material, base_revision: envio.baseRevision, request_key: envio.key }) })
       setPlan(response.plan)
       await refreshDetalhes()
+      await acknowledgePlanIntent(envio)
     })
   }
   /** E-03: a pessoa descreve o que falta; o planejador escreve a etapa. */
   async function addPlanSlice(request: string) {
     if (projectId === null || plan === null) return
-    const base_revision = plan.revision ?? 1
-    const envio = intencaoPorImpressao(intencaoDaEtapa.current, JSON.stringify(['etapa-plano', projectId, request.trim(), base_revision]))
-    intencaoDaEtapa.current = envio
     return safelyWithResult(async () => {
-      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/slice`, { method: 'POST', body: JSON.stringify({ reason: request.trim(), base_revision, request_key: envio.chave }) })
-      intencaoDaEtapa.current = null
+      const envio = await preservePlanIntent('slice', request.trim(), plan.revision ?? 1)
+      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/slice`, { method: 'POST', body: JSON.stringify({ reason: request.trim(), base_revision: envio.baseRevision, request_key: envio.key }) })
       setPlan(response.plan)
       await refreshDetalhes()
+      await acknowledgePlanIntent(envio)
     })
+  }
+  async function preservePlanIntent(kind: 'edit' | 'slice', material: string, baseRevision: number): Promise<PendingPlanIntent> {
+    const scope = await currentSessionScope()
+    if (scope === null || projectId === null) throw new Error(enviosTexto.identidade)
+    try { return await preparePlanIntent({ scope, projectId, kind, material, baseRevision }) }
+    catch { throw new Error(enviosTexto.indisponivel) }
+  }
+  async function acknowledgePlanIntent(intent: PendingPlanIntent): Promise<void> {
+    try { await confirmPlanIntent(intent) }
+    catch { setError(enviosTexto.confirmacaoPendente) }
   }
   async function approvePlan() {
     if (projectId === null) return

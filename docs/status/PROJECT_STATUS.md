@@ -18,6 +18,23 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Intencao de envio no navegador — VALIDADA LOCALMENTE, 20/09/2026
+
+`AUDIT-CLIENT-REPLAY-01` estende o recibo do servidor a edicao e acrescimo de
+etapa no mesmo perfil de navegador. IndexedDB conserva somente hashes, chave
+e revisao; nao guarda texto, credencial nem resposta. A transacao termina antes
+do POST. O mesmo texto conserva a revisao original apos fechar a aba; texto
+corrigido inicia outra intencao. O escopo inclui usuario, organizacao e tenant.
+Confirmacao antiga nao apaga uma intencao nova. Corrupcao ou recusa de
+armazenamento impedem envio com erro visivel. Logout confirmado limpa apenas
+os metadados do FRIGG; nao remove bancos de outros aplicativos.
+Provas de navegador passaram para fechamento/reabertura, concorrencia entre
+abas, escopos separados, confirmacoes antigas e logout. Nove mutacoes foram detectadas; 32 portoes PASS, interface 1.095 PASS, navegador 174 PASS/3 SKIP/0 FAIL.
+Raiz Node 22: 4.461 PASS/174 FAIL/68 SKIP, sem novas falhas; PostgreSQL nao executado. Nao ha envio automatico nem armazenamento do rascunho;
+a pessoa redigita o pedido apos reabrir. Outros tipos de envio ainda usam
+memoria; outros aparelhos/perfis e CAS distribuido permanecem pendentes.
+Checkpoint anterior de recuperacao de cadastro: `cd7977bbbe81127e0c0c886139b415331e97b7b9`.
+
 ## Recuperacao do cadastro interrompido — 20/09/2026
 
 Checkpoint anterior no PR #1: `d7de66c09a8f2c341b88ec2a33593244e6f925c4`,
@@ -68,9 +85,9 @@ dos detalhes aparecem sem desfazer o reconhecimento de uma escrita concluída.
 operações concluídas não foram repetidas. Chamada de modelo sem resultado
 confirmado não é repetida automaticamente: a interface explica a incerteza e
 como iniciar outra intenção. O teste usa modelo controlado, sem provedor pago.
-A chave no navegador ainda vive na pagina; fechar/recarregar antes da
-confirmacao perde a intencao local. O recibo duravel do servidor so recupera
-a operacao se o cliente reapresentar a mesma chave. A proteção continua por
+Naquele checkpoint, a chave vivia na pagina e se perdia ao fechar.
+AUDIT-CLIENT-REPLAY-01 trata esse limite para edicao e etapa no mesmo perfil
+de navegador. O servidor ainda exige reapresentar a mesma chave. A proteção continua por
 instância; CAS distribuído e aceite da instalação
 real permanecem abertos. A meta geral continua **EXECUTING**.
 

@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, request as apiRequest, test } from '@playwright/test'
 import { INTAKE_ANSWERS, answerIntake } from './answering'
 import { esperarResultado } from './resultado'
+import { PLAN_INTENT_DATABASE } from '../src/plan/pendingIntent'
 
 test('recusa interface e API sem sessão', async () => {
   /*
@@ -1078,6 +1079,30 @@ test.describe('reenvio de edição após perda da resposta', () => {
   test.use({ serviceWorkers: 'block' })
 
   test('preserva a edição e reusa o recibo quando a resposta gravada se perde', async ({ context, page }) => {
+    const pendingRecords = () => page.evaluate(databaseName => new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+      const opening = indexedDB.open(databaseName, 1)
+      opening.onerror = () => reject(opening.error)
+      opening.onsuccess = () => {
+        const database = opening.result
+        const transaction = database.transaction('pending', 'readonly')
+        const read = transaction.objectStore('pending').getAll()
+        transaction.oncomplete = () => { database.close(); resolve(read.result as Array<Record<string, unknown>>) }
+        transaction.onabort = () => { database.close(); reject(transaction.error) }
+      }
+    }), PLAN_INTENT_DATABASE)
+    const replaceRecords = (records: Array<Record<string, unknown>>) => page.evaluate(({ databaseName, records }) => new Promise<void>((resolve, reject) => {
+      const opening = indexedDB.open(databaseName, 1)
+      opening.onerror = () => reject(opening.error)
+      opening.onsuccess = () => {
+        const database = opening.result
+        const transaction = database.transaction('pending', 'readwrite')
+        const store = transaction.objectStore('pending')
+        store.clear()
+        for (const record of records) store.put(record)
+        transaction.oncomplete = () => { database.close(); resolve() }
+        transaction.onabort = () => { database.close(); reject(transaction.error) }
+      }
+    }), { databaseName: PLAN_INTENT_DATABASE, records })
     const origin = 'http://studio.dz23.localhost:4179'
     await context.addCookies([
       { name: 'dz23_studio_session', value: 'e2e', url: origin },
@@ -1127,8 +1152,18 @@ test.describe('reenvio de edição após perda da resposta', () => {
     await expect(page.locator('.plan-list .task-card h2').first()).toHaveText('Minha edição preservada')
     const additions: Array<{ request_key: string }> = []
     const additionResults: Array<{ plan: { plan_id: string; revision: number } }> = []
-    await page.route('**/plan/slice', async route => {
+    let releaseSecondResponse: () => void = () => {}
+    const secondResponseGate = new Promise<void>(resolve => { releaseSecondResponse = resolve })
+    let releaseThirdResponse: () => void = () => {}
+    const thirdResponseGate = new Promise<void>(resolve => { releaseThirdResponse = resolve })
+    await context.route('**/plan/slice', async route => {
       additions.push(route.request().postDataJSON())
+      const attempt = additions.length
+      if (attempt === 3) {
+        // Simula outra intencao reservada enquanto duas respostas antigas estao em voo.
+        await replaceRecords([{ ...pendingAtFailure[0]!, key: 'f'.repeat(32) }])
+        releaseSecondResponse()
+      }
       const target = new URL(route.request().url()); const host = target.host
       target.hostname = '127.0.0.1'
       const headers: Record<string, string> = { ...route.request().headers(), host }
@@ -1137,23 +1172,86 @@ test.describe('reenvio de edição após perda da resposta', () => {
       const response = await route.fetch({ url: target.href, headers })
       expect(response.status()).toBe(200)
       additionResults.push(await response.json())
-      if (additions.length === 1) await route.abort('failed')
-      else await route.fulfill({ response })
+      if (attempt === 1) await route.abort('failed')
+      else {
+        if (attempt === 2) await secondResponseGate
+        if (attempt === 3) await thirdResponseGate
+        await route.fulfill({ response })
+      }
     })
-    const addition = page.getByLabel('Escreva o que falta, com suas palavras')
+    let addition = page.getByLabel('Escreva o que falta, com suas palavras')
     await addition.fill('Falta o endereço de atendimento')
     await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
     await expect.poll(() => additions.length).toBe(1)
     await expect(page.getByRole('button', { name: 'Acrescentar esta etapa' })).toBeEnabled()
     await expect(addition).toHaveValue('Falta o endereço de atendimento')
-    await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    const pendingAtFailure = await pendingRecords()
+    expect(pendingAtFailure).toHaveLength(1)
+    expect(Object.keys(pendingAtFailure[0]!).sort()).toEqual(['baseRevision', 'digest', 'key', 'slot'])
+    expect(JSON.stringify(pendingAtFailure)).not.toContain('Falta o endereço')
+    expect(JSON.stringify(pendingAtFailure)).not.toContain('org-e2e')
+    const reopenedUrl = page.url()
+    const principal = await page.evaluate(async () => (await (await fetch('/api/studio/identity/session')).json()).principal as Record<string, string>)
+    for (const field of ['userId', 'orgId', 'tenantId', 'material']) {
+      const scopedTab = await context.newPage()
+      await scopedTab.route('**/api/studio/identity/session', route => route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify({ mode: 'authenticated', principal: field === 'material' ? principal : { ...principal, [field]: 'other-scope' } }),
+      }))
+      let scopedBody: { request_key: string } | undefined
+      await scopedTab.route('**/plan/slice', async route => { scopedBody = route.request().postDataJSON(); await route.abort('failed') })
+      await scopedTab.goto(reopenedUrl)
+      await scopedTab.getByLabel('Escreva o que falta, com suas palavras').fill(field === 'material' ? 'Agora quero outra etapa diferente' : 'Falta o endereço de atendimento')
+      await scopedTab.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+      await expect.poll(() => scopedBody?.request_key).toBeTruthy()
+      expect(scopedBody!.request_key).not.toBe(additions[0]!.request_key)
+      expect(await pendingRecords()).toHaveLength(field === 'material' ? 1 : 2)
+      await scopedTab.close()
+      await replaceRecords(pendingAtFailure)
+    }
+    await page.close()
+    page = await context.newPage()
+    await page.goto(reopenedUrl)
     await expect(page.locator('.plan-list .task-card')).toHaveCount(3)
-    expect(additions).toHaveLength(2)
+    addition = page.getByLabel('Escreva o que falta, com suas palavras')
+    await addition.fill('Falta o endereço de atendimento')
+    await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    await expect.poll(() => additions.length).toBe(2)
+    const duplicateTab = await context.newPage()
+    await duplicateTab.goto(reopenedUrl)
+    await duplicateTab.getByLabel('Escreva o que falta, com suas palavras').fill('Falta o endereço de atendimento')
+    await duplicateTab.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    await expect(addition).toHaveValue('')
+    expect(await pendingRecords()).toEqual([{ ...pendingAtFailure[0]!, key: 'f'.repeat(32) }])
+    await replaceRecords([{ ...pendingAtFailure[0]!, digest: 'e'.repeat(64) }])
+    releaseThirdResponse()
+    await expect(duplicateTab.getByLabel('Escreva o que falta, com suas palavras')).toHaveValue('')
+    expect(await pendingRecords()).toEqual([{ ...pendingAtFailure[0]!, digest: 'e'.repeat(64) }])
+    await duplicateTab.close()
+    await expect(addition).toHaveValue('')
+    await expect(page.locator('.plan-list .task-card')).toHaveCount(3)
+    expect(additions).toHaveLength(3)
     expect(additions[0]!.request_key).toMatch(/^[a-zA-Z0-9_-]{16,128}$/u)
     expect(additions[1]).toEqual(additions[0])
+    expect(additions[2]).toEqual(additions[0])
     expect(additionResults[1]).toEqual(additionResults[0])
+    await replaceRecords([])
     await page.reload()
     await expect(page.locator('.plan-list .task-card')).toHaveCount(3)
+    // Corrupcao nao vira uma nova chave e uma segunda chamada com custo.
+    const sent = additions.length
+    for (const corruption of [{ digest: 'invalid' }, { key: 'short' }, { baseRevision: 0 }, { text: 'unexpected payload' }]) {
+      await replaceRecords([{ ...pendingAtFailure[0]!, ...corruption }])
+      await page.getByLabel('Escreva o que falta, com suas palavras').fill('Outra etapa para conferir os recibos')
+      await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+      await expect(page.getByText(/Não consegui preservar este envio no aparelho/u)).toBeVisible()
+      expect(additions).toHaveLength(sent)
+    }
+    await replaceRecords([])
+    await page.evaluate(() => { Object.defineProperty(window, 'indexedDB', { configurable: true, get() { throw new DOMException('site storage denied', 'SecurityError') } }) })
+    await page.getByLabel('Escreva o que falta, com suas palavras').fill('Mais uma etapa sem permissão de armazenamento')
+    await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    await expect(page.getByText(/Não consegui preservar este envio no aparelho/u)).toBeVisible()
+    expect(additions).toHaveLength(sent)
   })
 
 })
