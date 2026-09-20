@@ -1,0 +1,76 @@
+{
+  "date": "2026-09-20",
+  "requirement": "AUDIT-CREATE-CLIENT-01",
+  "browser_source_snapshot": "af890fff5cf15f9092909ef7db453f519431d916",
+  "source_sha256": {
+    "apps/studio-web/src/App.tsx": "e5bb807143426c87469a2a830edb34b02c586ba867d882c3150365530af93c08",
+    "apps/studio-web/src/plan/pendingIntent.ts": "46f6991048f2910fa01d68daa7e0c3190dcb243a1f1cc1f46e351144ad376564",
+    "apps/studio-web/tests/journey.spec.ts": "64ffa6ad435076128730d8a9525bdcf783ca71263217a2808cd3a854318903e0",
+    "apps/studio-web/tests/accessibility.spec.ts": "a121b72d123228e82122761b669ef7eb9d47c608068dd9c3cfe1c5052aad9329"
+  },
+  "frontend_passed": 1100,
+  "browser_final": {
+    "startTime": "2026-09-20T17:12:50.260Z",
+    "duration": 411887.988,
+    "expected": 175,
+    "skipped": 3,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "gates_passed": 32,
+  "mutations": [
+    {
+      "mutation": "new_key_after_reopen",
+      "kind": "browser",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "keep_confirmed_intent",
+      "kind": "browser",
+      "detected": true,
+      "buildPassed": true
+    },
+    {
+      "mutation": "accept_plan_as_creation",
+      "kind": "unit",
+      "detected": true,
+      "buildPassed": null
+    },
+    {
+      "mutation": "ignore_creation_slot",
+      "kind": "unit",
+      "detected": true,
+      "buildPassed": null
+    }
+  ],
+  "library_guard": {
+    "old_failure": "41 reads exceeded fixed <40 ceiling after more tasks were created",
+    "replacement": "exactly one request per export URL, independent of number of tasks",
+    "focused_passed": 4,
+    "loop_reintroduced_mutation_detected": true
+  },
+  "intermediate_browser_runs": [
+    {
+      "passed": 174,
+      "failed": 1,
+      "skipped": 3,
+      "failure": "fixed library read ceiling"
+    },
+    {
+      "passed": 174,
+      "failed": 1,
+      "skipped": 3,
+      "failure": "PWA guard found two bundles in directory reused after mutation"
+    }
+  ],
+  "final_environment": "New isolated snapshot compiled once; PWA guard unchanged",
+  "backend_validation": "See revision-recovery-verification.json; browser snapshot predates new revision backend",
+  "limits": [
+    "Same browser profile; retype same request/options; no raw prompt or automatic queue",
+    "Design and logo remain separate operations",
+    "Other conversation intentions remain in memory",
+    "Logout/site cleanup/old interface lose local replay guarantee",
+    "No native install or power-loss proof"
+  ]
+}

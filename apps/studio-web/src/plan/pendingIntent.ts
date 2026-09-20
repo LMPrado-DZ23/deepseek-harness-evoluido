@@ -4,12 +4,15 @@ export const PLAN_INTENT_DATABASE = 'frigg.plan-intents.v1'
 const STORE = 'pending'
 
 /** Somente metadados: nenhum texto, cookie, credencial ou corpo do pedido. */
-export interface PendingPlanIntent {
+export interface PendingIntent {
   readonly slot: string
   readonly digest: string
   readonly key: string
-  readonly baseRevision: number
+  readonly baseRevision: number | null
 }
+
+export interface PendingPlanIntent extends PendingIntent { readonly baseRevision: number }
+export interface PendingCreationIntent extends PendingIntent { readonly baseRevision: null }
 
 export interface PlanIntentInput {
   readonly scope: readonly [string, string, string]
@@ -19,14 +22,27 @@ export interface PlanIntentInput {
   readonly baseRevision: number
 }
 
-export function isPendingPlanIntent(value: unknown): value is PendingPlanIntent {
+export function isPendingIntent(value: unknown): value is PendingIntent {
   if (typeof value !== 'object' || value === null) return false
-  const record = value as Partial<PendingPlanIntent>
+  const record = value as Partial<PendingIntent>
   return Object.keys(record).sort().join(',') === 'baseRevision,digest,key,slot'
     && typeof record.slot === 'string' && /^[a-f0-9]{64}$/u.test(record.slot)
     && typeof record.digest === 'string' && /^[a-f0-9]{64}$/u.test(record.digest)
     && typeof record.key === 'string' && /^[a-zA-Z0-9_-]{16,128}$/u.test(record.key)
-    && typeof record.baseRevision === 'number' && Number.isSafeInteger(record.baseRevision) && record.baseRevision > 0
+    && (record.baseRevision === null || (typeof record.baseRevision === 'number' && Number.isSafeInteger(record.baseRevision) && record.baseRevision > 0))
+}
+
+export function isPendingPlanIntent(value: unknown): value is PendingPlanIntent {
+  return isPendingIntent(value) && value.baseRevision !== null
+}
+
+/** Criacao nao tem revisao de plano; null distingue esses metadados. */
+export function resolvePendingCreationIntent(previous: unknown, slot: string, fingerprint: string, generate: () => string = novaChave): PendingCreationIntent {
+  if (previous !== undefined && (!isPendingIntent(previous) || previous.slot !== slot || previous.baseRevision !== null)) {
+    throw new Error('PLAN_INTENT_STORAGE_CORRUPTED')
+  }
+  if (previous !== undefined && previous.digest === fingerprint) return previous as PendingCreationIntent
+  return { slot, digest: fingerprint, key: generate(), baseRevision: null }
 }
 
 /** Mesma intencao conserva a revisao antiga; texto corrigido e outra intencao. */
@@ -84,7 +100,18 @@ async function transact<T>(factory: IDBFactory, action: (store: IDBObjectStore, 
 
 /** Reabrir a pagina conserva chave e revisao originais para o mesmo pedido. */
 export async function preparePlanIntent(input: PlanIntentInput, factory: IDBFactory = window.indexedDB): Promise<PendingPlanIntent> {
-  if (!Number.isSafeInteger(input.baseRevision) || input.baseRevision < 1 || input.scope.some(value => value === '') || input.projectId === '') {
+  const intent = await prepareIntent(input, factory)
+  if (!isPendingPlanIntent(intent)) throw new Error('PLAN_INTENT_STORAGE_CORRUPTED')
+  return intent
+}
+
+/** Reserva a criacao no escopo da pessoa, antes de existir identificador de projeto. */
+export async function prepareCreationIntent(scope: readonly [string, string, string], material: string, factory: IDBFactory = window.indexedDB): Promise<PendingIntent> {
+  return prepareIntent({ scope, projectId: '@new-project', kind: 'create', material, baseRevision: null }, factory)
+}
+
+async function prepareIntent(input: PlanIntentInput | { scope: readonly [string, string, string]; projectId: string; kind: 'create'; material: string; baseRevision: null }, factory: IDBFactory): Promise<PendingIntent> {
+  if ((input.baseRevision !== null && (!Number.isSafeInteger(input.baseRevision) || input.baseRevision < 1)) || input.scope.some(value => value === '') || input.projectId === '') {
     throw new Error('PLAN_INTENT_INPUT_INVALID')
   }
   const slot = await digest(JSON.stringify([input.scope, input.projectId, input.kind]))
@@ -94,7 +121,8 @@ export async function preparePlanIntent(input: PlanIntentInput, factory: IDBFact
     read.onsuccess = () => {
       const previous: unknown = read.result
       try {
-        const intent = resolvePendingPlanIntent(previous, slot, fingerprint, input.baseRevision)
+        const intent = input.baseRevision === null ? resolvePendingCreationIntent(previous, slot, fingerprint)
+          : resolvePendingPlanIntent(previous, slot, fingerprint, input.baseRevision)
         if (intent !== previous) store.put(intent)
         done(intent)
       } catch {
@@ -106,12 +134,12 @@ export async function preparePlanIntent(input: PlanIntentInput, factory: IDBFact
 }
 
 /** Uma resposta antiga nunca apaga uma intencao mais nova, criada em outra aba. */
-export async function confirmPlanIntent(intent: PendingPlanIntent, factory: IDBFactory = window.indexedDB): Promise<void> {
+export async function confirmPlanIntent(intent: PendingIntent, factory: IDBFactory = window.indexedDB): Promise<void> {
   return transact(factory, (store, done) => {
     const read = store.get(intent.slot)
     read.onsuccess = () => {
       const current: unknown = read.result
-      if (current !== undefined && !isPendingPlanIntent(current)) { store.transaction.abort(); return }
+      if (current !== undefined && !isPendingIntent(current)) { store.transaction.abort(); return }
       if (current?.key === intent.key && current.digest === intent.digest) store.delete(intent.slot)
       done(undefined)
     }

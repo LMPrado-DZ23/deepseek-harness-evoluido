@@ -233,3 +233,25 @@ redigitar o mesmo pedido para recuperar a mesma intencao pendente. Alterar o
 texto inicia outra intencao. Limpar dados do site, sair da conta, usar outro
 perfil/aparelho ou remocao de dados pelo navegador perde esses metadados.
 Nenhuma prova de queda de energia ou de navegadores alem do Chromium foi feita.
+
+
+### 20/09 — criacao compartilha o armazenamento de intencoes
+
+A criacao usa o mesmo IndexedDB e a mesma transacao; slot inclui escopo,
+marcador de projeto ainda inexistente e tipo create. baseRevision null indica
+que nao ha plano. Recibos de plano continuam exigindo inteiro positivo.
+Nao se guardam texto, tokens ou resposta. O ACK remove a intencao depois de
+receber a tarefa e atualizar seu endereco; design/logo continuam posteriores
+e nao atomicos. Interfaces anteriores ignoram esse novo tipo de intencao.
+
+
+### 20/09 — transicao de revisao recuperavel
+
+O projeto recebe pending_revision antes de gravar a nova especificacao. O
+marcador conserva identificador, estado de origem, autor e instante da decisao.
+So sai depois de confirmar estado SPEC_READY e trilha com identidade
+deterministica. Reenvio concluido devolve a especificacao antiga com estado
+atual sem retroceder progresso. Legado incompleto sem marcador/trilha recusa.
+Especificacao, plano e transicoes compartilham mutex por projeto nesta
+instancia; nao se declara CAS distribuido. Binario antigo nao le o marcador
+pendente: concluir a operacao ou restaurar backup consistente antes de voltar.

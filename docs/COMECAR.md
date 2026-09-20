@@ -190,3 +190,10 @@ Se uma resposta do questionario ficar sem resultado confirmado, o FRIGG nao
 repete automaticamente a chamada do modelo. Confira a conversa antes de
 escrever uma nova resposta: uma nova tentativa pode gerar novo consumo.
 O mesmo cuidado vale para resposta digitada, que pode ser interpretada pelo modelo.
+
+
+Se a resposta de criar uma tarefa se perder, voce pode reabrir no mesmo perfil
+de navegador e repetir o mesmo pedido e opcoes para recuperar a tarefa.
+O texto nao fica salvo no aparelho; e preciso preenche-lo novamente. Depois
+da confirmacao, criar outro pedido igual inicia outra tarefa. Sair da conta,
+limpar os dados do site ou voltar a uma interface antiga perde essa garantia.

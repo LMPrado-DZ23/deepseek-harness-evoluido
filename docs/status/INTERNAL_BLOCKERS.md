@@ -59,3 +59,13 @@ AUDIT-CHANGE-REPLAY-01: duas regressoes demonstraram reenvio alterando proposta 
 ## 20/09 — consumo incerto no questionario
 
 AUDIT-INTAKE-REPLAY-01: sete regressoes cobrem resultado externo perdido, falha de escrita e recibo legado sem result_id. Questionario, mudanca e etapa recusam repeticao incerta. 1.418 testes do plugin, cinco mutacoes, JSON reaberto e 32 portoes passaram. Raiz: 4.476 PASS/174 FAIL/68 SKIP, sem novas falhas. Sintese posterior, agrupamento das inferencias e persistencia do cliente continuam pendentes. Evidencia: `audit/evidence/20260920/intake-replay-verification.json`.
+
+
+## 20/09 — recuperacao da revisao
+
+AUDIT-REVISION-RECOVERY-01: marcador duravel permite retomar estado e trilha depois de salvar especificacao. Serializacao protege contra outra revisao, arquivamento e desfazer. Historico parcial avanca a maior versao. 1.429 testes, oito mutacoes, JSON real e 32 portoes passaram. Raiz: 4.487 PASS/174 FAIL/68 SKIP, sem falhas novas. Cliente da revisao, CAS e instalacao real permanecem pendentes. Evidencia: `audit/evidence/20260920/revision-recovery-verification.json`.
+
+
+## 20/09 — criacao persistente no navegador
+
+AUDIT-CREATE-CLIENT-01: mesma intencao recupera a tarefa apos fechar a aba; bloqueio de armazenamento impede POST; confirmacao permite nova tarefa. Interface 1.100 PASS; navegador 175 PASS/3 SKIP/0 FAIL; quatro mutacoes e 32 portoes PASS. Guarda da Biblioteca passa a contar por URL e detectou o laco reintroduzido. PWA preservou guarda de bundle unico e passou em copia nova. Design/logo, demais envios e instalacao real seguem pendentes. Evidencia: `audit/evidence/20260920/creation-client-verification.json`.

@@ -197,3 +197,30 @@ a politica de incerteza no questionario, mudanca e etapa. A correcao cobre
 tambem esse formato; cinco mutacoes validas foram detectadas. A tentativa
 inicial da quinta mutacao atingiu outra funcao e foi excluida, depois refeita
 no alvo correto. A prova JSON inclui recibo legado sem identificador.
+
+
+## 2026-09-20 — criacao recuperavel no cliente
+
+O navegador demonstrou nova chave depois de fechar a aba com resposta perdida.
+A criacao passa a usar a mesma transacao de metadados, antes do POST. Recibo
+de criacao usa revisao null e nao pode ser confundido com recibo de plano.
+Um teste que lia strings do antigo useRef foi substituido pela jornada real
+de envio, reabertura, recuperacao e nova tarefa depois da confirmacao.
+Interface 1.100 PASS; navegador 175 PASS/3 SKIP/0 FAIL em copia nova; quatro
+mutacoes e 32 portoes PASS. Design/logo continuam como passos separados.
+Primeira rodada acusou teto fixo de leituras na Biblioteca; passou a exigir
+uma leitura por endereco. Reintroduzir o laco fez a nova guarda reprovar.
+Segunda rodada acusou dois bundles no diretorio reutilizado apos mutacao.
+Copia nova compilada uma vez passou na guarda PWA sem altera-la.
+
+
+## 2026-09-20 — revisao interrompida
+
+Reproduzidos estado antigo apos salvar especificacao, trilha ausente apos
+transicao e numero de versao menor que o atual em historico parcial. Marcador
+no projeto antecede a especificacao; estado, trilha deterministica e limpeza
+sao retomados na ordem. Outra mutacao nao ultrapassa a escrita pendente.
+Oito mutacoes detectadas: remover mutex sobreviveu ao teste inicial; uma
+barreira na primeira escrita tornou a corrida deterministica e detectou a
+mutacao. 1.429 testes, 32 portoes e JSON real com tres pontos de falha passaram.
+Raiz: 4.487 PASS/174 FAIL/68 SKIP, sem falhas novas. Cliente ainda em memoria.

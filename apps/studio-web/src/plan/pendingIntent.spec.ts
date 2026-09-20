@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPendingPlanIntent, resolvePendingPlanIntent } from './pendingIntent'
+import { isPendingIntent, isPendingPlanIntent, resolvePendingPlanIntent, resolvePendingCreationIntent } from './pendingIntent'
 
 const receipt = { slot: 'a'.repeat(64), digest: 'b'.repeat(64), key: 'c'.repeat(32), baseRevision: 3 }
 
@@ -27,5 +27,26 @@ describe('metadados de envio persistidos no aparelho', () => {
     { slot: receipt.slot, digest: receipt.digest, key: receipt.key },
   ])('recusa recibo malformado sem criar outra intenção: %#', value => {
     expect(isPendingPlanIntent(value)).toBe(false)
+  })
+})
+
+
+describe('criacao duravel sem revisao de plano', () => {
+  const creation = { ...receipt, baseRevision: null }
+  it('recupera a mesma chave para o mesmo pedido', () => {
+    expect(resolvePendingCreationIntent(creation, creation.slot, creation.digest)).toBe(creation)
+    expect(isPendingIntent(creation)).toBe(true)
+    expect(isPendingPlanIntent(creation)).toBe(false)
+  })
+  it('mudanca de pedido inicia outra intencao', () => {
+    expect(resolvePendingCreationIntent(creation, creation.slot, 'f'.repeat(64), () => 'g'.repeat(32)))
+      .toEqual({ ...creation, digest: 'f'.repeat(64), key: 'g'.repeat(32) })
+  })
+  it('nao confunde recibo de criacao com revisao de plano', () => {
+    expect(() => resolvePendingCreationIntent(receipt, receipt.slot, receipt.digest)).toThrow('PLAN_INTENT_STORAGE_CORRUPTED')
+    expect(() => resolvePendingPlanIntent(creation, creation.slot, creation.digest, 1)).toThrow('PLAN_INTENT_STORAGE_CORRUPTED')
+  })
+  it.each([{ ...creation, slot: 'f'.repeat(64) }, { ...creation, text: 'privado' }, { ...creation, key: 'curta' }])('recusa metadados invalidos: %#', value => {
+    expect(() => resolvePendingCreationIntent(value, creation.slot, creation.digest)).toThrow('PLAN_INTENT_STORAGE_CORRUPTED')
   })
 })

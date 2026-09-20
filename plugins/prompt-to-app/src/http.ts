@@ -620,7 +620,7 @@ async function atender(
         return json(response, 200, { design: await config.service.attachLogo(actor, projectId, logo) })
       }
       if (request.method === 'POST' && matched.suffix === '/plan') {
-        const project = config.service.project(actor, projectId)
+        const project = config.service.projectForMutation(actor, projectId)
         const spec = await config.service.latestSpec(actor, projectId)
         const previous = await optionalAsync(async () => config.service.plan(actor, projectId))
         // O inventário só é buscado quando há mudança a planejar: ler o disco

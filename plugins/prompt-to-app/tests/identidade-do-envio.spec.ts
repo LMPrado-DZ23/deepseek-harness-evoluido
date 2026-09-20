@@ -184,6 +184,154 @@ describe('perguntar com identidade de envio', () => {
 })
 
 describe('pedir alteração com identidade de envio', () => {
+  it('serializa outro pedido enquanto a primeira escrita duravel esta suspensa', async () => {
+    const { service, repository } = fixture()
+    const putProject = repository.putProject
+    let release!: () => void
+    let entered!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    let pendingWrites = 0
+    repository.putProject = async value => {
+      if (value.pending_revision !== undefined && value.state === 'VERIFIED_PROTOTYPE') {
+        pendingWrites++
+        if (pendingWrites === 1) { entered(); await held }
+      }
+      await putProject(value)
+    }
+    const first = service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    await started
+    const second = service.reviseProject(bruno, 'proj-1', 'adicionar um telefone', 'another-revision-0001')
+    const settled = Promise.allSettled([first, second])
+    await new Promise<void>(resolve => { setImmediate(resolve) })
+    const writesWhileHeld = pendingWrites
+    release()
+    const results = await settled
+    expect(writesWhileHeld).toBe(1)
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(repository.specRows).toHaveLength(2)
+  })
+
+  it('a revisao avanca a maior versao mesmo quando faltam registros antigos', async () => {
+    const { service, repository } = fixture()
+    repository.specRows = [{ ...repository.specRows[0]!, version: 7 }]
+    const revised = await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(revised.spec.version).toBe(8)
+    expect((await service.latestSpec(ana, 'proj-1')).spec_id).toBe(revised.spec.spec_id)
+  })
+
+  it('duas intencoes concorrentes nao sobrescrevem a revisao uma da outra', async () => {
+    const { service, repository } = fixture()
+    const results = await Promise.allSettled([
+      service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE),
+      service.reviseProject(ana, 'proj-1', 'adicionar um telefone', 'another-revision-0001'),
+    ])
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(repository.specRows).toHaveLength(2)
+    expect(repository.approvalRows).toHaveLength(1)
+    expect(repository.projectRows[0]!.pending_revision).toBeUndefined()
+  })
+
+  it('recupera reserva anterior a especificacao sem criar outra revisao', async () => {
+    const { service, repository } = fixture()
+    const putSpec = repository.putSpec
+    repository.putSpec = async () => { throw new Error('especificacao indisponivel') }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('especificacao indisponivel')
+    expect(repository.projectRows[0]!.pending_revision).toBeDefined()
+    repository.putSpec = putSpec
+    const replay = await new PromptToAppService({ repository }).reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(replay.project.state).toBe('SPEC_READY')
+    expect(replay.project.pending_revision).toBeUndefined()
+    expect(repository.specRows).toHaveLength(2)
+    expect(replay.spec.spec_id).toBe(repository.keyRows[0]!.result_id)
+  })
+
+  it('falha ao limpar marcador conserva trilha unica e data original no reenvio', async () => {
+    const { service, repository } = fixture()
+    const putProject = repository.putProject
+    repository.putProject = async value => {
+      if (value.state === 'SPEC_READY' && value.pending_revision === undefined) throw new Error('confirmacao indisponivel')
+      await putProject(value)
+    }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('confirmacao indisponivel')
+    expect(repository.approvalRows).toHaveLength(1)
+    expect(repository.projectRows[0]!.pending_revision).toBeDefined()
+    repository.putProject = putProject
+    const replay = await new PromptToAppService({ repository }).reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(replay.project.pending_revision).toBeUndefined()
+    expect(repository.approvalRows).toHaveLength(1)
+    expect(repository.approvalRows[0]).toMatchObject({ approved_at: AGORA, from_state: 'VERIFIED_PROTOTYPE', to_state: 'SPEC_READY' })
+  })
+
+  it('revisao pendente impede outra escrita e arquivamento ate concluir', async () => {
+    const { service, repository } = fixture('BUILD_FAILED')
+    const putApproval = repository.putApproval
+    repository.putApproval = async () => { throw new Error('trilha indisponivel') }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('trilha indisponivel')
+    repository.putApproval = putApproval
+    const before = structuredClone(repository.projectRows)
+    await expect(service.saveSpec(ana, 'proj-1', SPEC, 'intake')).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.transition(ana, 'proj-1', 'PLAN_PROPOSED')).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.archive(ana, 'proj-1')).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.undoToCheckpoint(ana, 'proj-1', 'old-run')).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.reviseProject(bruno, 'proj-1', 'outra revisao', 'other-revision-0001')).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(repository.projectRows).toEqual(before)
+    await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(repository.projectRows[0]!.pending_revision).toBeUndefined()
+  })
+
+  it('reenvio concluido nao desfaz progresso posterior nem duplica trilha', async () => {
+    const { service, repository } = fixture()
+    const original = await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    await service.proposePlan(ana, 'proj-1', [{ slice_id: 's1', title: 'Inicio', description: 'Pagina', acceptance_criteria: ['Abre'], planned_files: ['index.html'] }])
+    const before = structuredClone(repository.projectRows)
+    const approvals = repository.approvalRows.length
+    const replay = await new PromptToAppService({ repository }).reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(replay.spec).toEqual(original.spec)
+    expect(replay.project.state).toBe('PLAN_PROPOSED')
+    expect(repository.projectRows).toEqual(before)
+    expect(repository.approvalRows).toHaveLength(approvals)
+  })
+
+  it('revisao legada sem marcador nem trilha nao presume conclusao', async () => {
+    const { service, repository } = fixture()
+    await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    repository.approvalRows = []
+    const before = structuredClone(repository.projectRows)
+    await expect(new PromptToAppService({ repository }).reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(repository.projectRows).toEqual(before)
+  })
+
+  it('retoma a transicao depois de gravar especificacao e perder a escrita do projeto', async () => {
+    const { service, repository } = fixture()
+    const putProject = repository.putProject
+    repository.putProject = async value => {
+      if (value.state === 'SPEC_READY') throw new Error('queda depois da especificacao')
+      await putProject(value)
+    }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('queda depois da especificacao')
+    repository.putProject = putProject
+    const restarted = new PromptToAppService({ repository })
+    const replay = await restarted.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(replay.project.state).toBe('SPEC_READY')
+    expect(repository.specRows).toHaveLength(2)
+    expect(repository.approvalRows.filter(row => row.subject_id === `revise:${replay.spec.spec_id}`)).toHaveLength(1)
+  })
+
+  it('recupera a trilha depois de gravar a transicao sem duplicar especificacao', async () => {
+    const { service, repository } = fixture()
+    const putApproval = repository.putApproval
+    repository.putApproval = async () => { throw new Error('queda depois da transicao') }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('queda depois da transicao')
+    repository.putApproval = putApproval
+    const restarted = new PromptToAppService({ repository })
+    const replay = await restarted.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(repository.specRows).toHaveLength(2)
+    expect(repository.approvalRows.filter(row => row.subject_id === `revise:${replay.spec.spec_id}`)).toHaveLength(1)
+    await restarted.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(repository.approvalRows.filter(row => row.subject_id === `revise:${replay.spec.spec_id}`)).toHaveLength(1)
+  })
+
   it('o mesmo pedido duas vezes deixa UMA revisão, e devolve a mesma', async () => {
     const { service, repository } = fixture()
     const primeira = await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)

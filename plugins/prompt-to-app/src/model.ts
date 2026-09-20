@@ -47,6 +47,11 @@ export const studioProjectSchema = z.object({
    * recente", que é exatamente o que valia antes.
    */
   current_run_id: z.string().min(1).nullable().optional(),
+  /** Intencao de transicao conservada ate estado e trilha estarem confirmados. */
+  pending_revision: z.object({
+    spec_id: z.string().min(1), from_state: projectStateSchema,
+    requested_by: z.string().min(1), requested_at: timestamp,
+  }).strict().optional(),
   created_at: timestamp,
   updated_at: timestamp,
   archived_at: timestamp.nullable(),

@@ -18,6 +18,27 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Recuperacao da revisao — VALIDADA LOCALMENTE, 20/09/2026
+
+AUDIT-REVISION-RECOVERY-01 reproduziu especificacao salva com estado antigo,
+trilha ausente e numeração errada em historico parcial. Marcador no projeto
+permanece ate estado e auditoria confirmarem; outras mudancas aguardam.
+1.429 testes do plugin, oito mutacoes, JSON real em dois processos e
+32 portoes passaram. Raiz: 4.487 PASS/174 FAIL/68 SKIP, sem falhas novas.
+Legados sem marcador/trilha nao sao recuperados por suposicao. Downgrade
+com marcador pendente exige concluir recuperacao ou backup consistente.
+Chave de revisao no cliente e orientacao de retomada ainda pendentes.
+
+## Criacao persistente no navegador — VALIDADA LOCALMENTE, 20/09/2026
+
+AUDIT-CREATE-CLIENT-01 reproduziu chave nova apos fechar a aba com resposta
+perdida. Criacao agora reserva metadados antes de POST, recupera a tarefa e
+limpa a intencao confirmada. Interface: 1.100 PASS; navegador em copia nova:
+175 PASS/3 SKIP/0 FAIL; quatro mutacoes e 32 portoes PASS. Pedido deve ser repetido no mesmo perfil;
+configuracao visual/logo sao passos separados e ainda nao atomicos.
+Checkpoint anterior: `87db22312a88bfdb4d542c8dfc2739d874cfd1e9`.
+DESKTOP-PRADO rechecado em 20/09 16:44 UTC: offline.
+
 ## Questionario e consumo incerto — VALIDADO LOCALMENTE, 20/09/2026
 
 AUDIT-INTAKE-REPLAY-01 reproduziu quatro cenarios de chamada repetida depois de

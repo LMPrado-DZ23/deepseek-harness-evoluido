@@ -1255,3 +1255,73 @@ test.describe('reenvio de edição após perda da resposta', () => {
   })
 
 })
+
+test.describe('criacao recuperavel depois de fechar a aba', () => {
+  test.use({ serviceWorkers: 'block' })
+  test('reenvia a criacao com a mesma chave e recupera uma unica tarefa', async ({ context, page }) => {
+    const origin = 'http://studio.dz23.localhost:4179'
+    await context.addCookies([
+      { name: 'dz23_studio_session', value: 'e2e', url: origin },
+      { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+    ])
+    await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+    const keys: string[] = []
+    const ids: string[] = []
+    await context.route('**/api/studio/apps/projects', async route => {
+      if (route.request().method() !== 'POST') { await route.continue(); return }
+      const body = route.request().postDataJSON() as { request_key: string }
+      keys.push(body.request_key)
+      const url = new URL(route.request().url()); url.hostname = '127.0.0.1'
+      const response = await route.fetch({ url: url.href, headers: { ...route.request().headers(), host: 'studio.dz23.localhost:4179' } })
+      expect(response.status()).toBeLessThan(300)
+      const saved = await response.json() as { project: { project_id: string } }
+      ids.push(saved.project.project_id)
+      if (ids.length === 1) await route.abort('failed')
+      else await route.fulfill({ response })
+    })
+    await page.goto('/studio/')
+    await page.getByRole('button', { name: 'Página de apresentação' }).click()
+    await page.getByRole('button', { name: 'Continuar' }).click()
+    await expect.poll(() => ids.length).toBe(1)
+    await expect(page.getByRole('button', { name: 'Continuar' })).toBeEnabled()
+    const records = (target: typeof page) => target.evaluate(databaseName => new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+      const opening = indexedDB.open(databaseName, 1)
+      opening.onerror = () => reject(opening.error)
+      opening.onsuccess = () => {
+        const db = opening.result
+        const tx = db.transaction('pending', 'readonly')
+        const read = tx.objectStore('pending').getAll()
+        tx.oncomplete = () => { db.close(); resolve(read.result as Array<Record<string, unknown>>) }
+        tx.onabort = () => { db.close(); reject(tx.error) }
+      }
+    }), PLAN_INTENT_DATABASE)
+    const pending = await records(page)
+    expect(pending).toHaveLength(1)
+    expect(Object.keys(pending[0]!).sort()).toEqual(['baseRevision', 'digest', 'key', 'slot'])
+    expect(pending[0]).toMatchObject({ baseRevision: null, key: keys[0] })
+    const denied = await context.newPage()
+    await denied.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { get: () => { throw new Error('storage denied') } }) })
+    await denied.goto('/studio/')
+    await denied.getByRole('button', { name: 'Página de apresentação' }).click()
+    await denied.getByRole('button', { name: 'Continuar' }).click()
+    await expect(denied.getByText(/Não consegui preservar este envio/u)).toBeVisible()
+    expect(keys).toHaveLength(1)
+    await denied.close()
+    await page.close()
+    const reopened = await context.newPage()
+    await reopened.goto('/studio/')
+    await reopened.getByRole('button', { name: 'Página de apresentação' }).click()
+    await reopened.getByRole('button', { name: 'Continuar' }).click()
+    await expect.poll(() => ids.length).toBe(2)
+    expect(keys[1]).toBe(keys[0])
+    expect(ids[1]).toBe(ids[0])
+    await expect(reopened.getByLabel('Conversa desta tarefa')).toBeVisible()
+    await expect.poll(() => records(reopened)).toEqual([])
+    await reopened.goto('/studio/')
+    await reopened.getByRole('button', { name: 'Página de apresentação' }).click()
+    await reopened.getByRole('button', { name: 'Continuar' }).click()
+    await expect.poll(() => ids.length).toBe(3)
+    expect(keys[2]).not.toBe(keys[0])
+    expect(ids[2]).not.toBe(ids[0])
+  })
+})

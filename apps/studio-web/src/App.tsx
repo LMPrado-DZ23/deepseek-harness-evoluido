@@ -7,7 +7,7 @@ import t from './i18n/pt-BR.json'
 import { categoryGuess, type CategoryGuess } from './categorySuggestion'
 import type { RunStepRecord } from './buildSteps'
 import { projectNameFromBrief } from './projectName'
-import { impressaoDoEnvioLocal, intencaoDeEnvio, intencaoPorImpressao, type IntencaoDeCriacao } from './creationIntent'
+import { impressaoDoEnvioLocal, intencaoPorImpressao, type IntencaoDeCriacao } from './creationIntent'
 
 import { sinteseParada } from './sinteseParada'
 import { HEADLINE_CAPABILITY, capabilityLines, capabilityName, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
@@ -20,7 +20,7 @@ import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointL
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
 import { currentSessionMode, currentSessionPrincipal, currentSessionScope } from './session/currentSession'
-import { confirmPlanIntent, preparePlanIntent, type PendingPlanIntent } from './plan/pendingIntent'
+import { confirmPlanIntent, preparePlanIntent, prepareCreationIntent, type PendingIntent, type PendingPlanIntent } from './plan/pendingIntent'
 import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
 import { TAREFAS_MUDARAM, WorkspaceShell } from './shell/WorkspaceShell'
 import { HomeScreen } from './home/HomeScreen'
@@ -295,16 +295,6 @@ export function App() {
       return false
     }
   }
-  /**
-   * A intenção do envio em curso.
-   *
-   * Vive num `ref` e não no estado: ela não desenha nada, e guardá-la no estado
-   * redesenharia a tela a cada tentativa sem nenhum ganho. Ela SOBREVIVE à
-   * falha de propósito — é isso que faz o reenvio depois de um tempo esgotado
-   * chegar com a mesma chave e receber a mesma tarefa, em vez de criar a
-   * segunda.
-   */
-  const intencao = useRef<IntencaoDeCriacao | null>(null)
   /*
     A intenção dos envios DENTRO da tarefa — perguntar e pedir alteração.
 
@@ -333,15 +323,17 @@ export function App() {
     if (!ready) { setError(t.idea.empty); return }
     await safely(async () => {
       const pedido = { name: projectNameFromBrief(brief), original_brief: brief.trim(), category, privacy }
-      const envio = intencaoDeEnvio(intencao.current, pedido)
-      intencao.current = envio
+      const scope = await currentSessionScope()
+      if (scope === null) throw new Error(enviosTexto.identidade)
+      let envio: PendingIntent
+      try { envio = await prepareCreationIntent(scope, JSON.stringify(pedido)) }
+      catch { throw new Error(enviosTexto.indisponivel) }
       const created = await api<{ project: { project_id: string; state: ProjectUiState }; next: Question }>('/projects', {
-        method: 'POST', body: JSON.stringify({ ...pedido, request_key: envio.chave }),
+        method: 'POST', body: JSON.stringify({ ...pedido, request_key: envio.key }),
       })
       // A tarefa existe: a intenção terminou. A próxima é outra, e leva chave
       // nova — senão o segundo aplicativo da pessoa seria recusado por conflito
       // com o primeiro.
-      intencao.current = null
       setProjectId(created.project.project_id); rememberProject(created.project.project_id); setProjectState(created.project.state); setQuestion(created.next)
       /*
         ENVIAR ABRE A CONVERSA. Não há passo intermediário e não há wizard: a
@@ -358,6 +350,7 @@ export function App() {
         },
         current_run: null, next: created.next,
       })
+      await acknowledgePlanIntent(envio)
       setRascunho(''); setPainel(null)
       // A lateral precisa saber que nasceu uma tarefa: o endereço muda por
       // `replaceState` e a casca não remonta.
@@ -548,7 +541,7 @@ export function App() {
     try { return await preparePlanIntent({ scope, projectId, kind, material, baseRevision }) }
     catch { throw new Error(enviosTexto.indisponivel) }
   }
-  async function acknowledgePlanIntent(intent: PendingPlanIntent): Promise<void> {
+  async function acknowledgePlanIntent(intent: PendingIntent): Promise<void> {
     try { await confirmPlanIntent(intent) }
     catch { setError(enviosTexto.confirmacaoPendente) }
   }

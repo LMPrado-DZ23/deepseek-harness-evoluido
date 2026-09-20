@@ -1059,3 +1059,23 @@ describe('recibos das rotas de edição e etapa', () => {
     expect((await f.request(path, { method: 'POST', body: JSON.stringify({ ...body, request_key: 'invalid' }) })).status).toBe(400)
   })
 })
+
+
+it('revisao pendente recusa planejamento antes de chamar o modelo', async () => {
+  const f = await fixture()
+  const id = await tarefaComResultado(f)
+  const putApproval = f.repository.putApproval
+  f.repository.putApproval = async value => {
+    if (value.subject_id.startsWith('revise:')) throw new Error('trilha indisponivel')
+    await putApproval(value)
+  }
+  const body = JSON.stringify({ request: 'Destacar o botão principal', request_key: 'revision-http-recover-0001' })
+  expect((await f.request(`/projects/${id}/revise`, { method: 'POST', body })).status).toBe(500)
+  vi.mocked(f.model.complete).mockClear()
+  expect((await f.request(`/projects/${id}/plan`, { method: 'POST', body: '{}' })).status).toBe(409)
+  expect(f.model.complete).not.toHaveBeenCalled()
+  f.repository.putApproval = putApproval
+  expect((await f.request(`/projects/${id}/revise`, { method: 'POST', body })).status).toBe(200)
+  expect((await f.request(`/projects/${id}/plan`, { method: 'POST', body: '{}' })).status).toBe(201)
+  expect(f.model.complete).toHaveBeenCalledTimes(1)
+})

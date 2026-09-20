@@ -24,6 +24,8 @@ Atualização da auditoria de 20/09/2026 (base `997fa20`):
 | AUDIT-CLIENT-REPLAY-01 | P1 | Conservar chave e revisao de edicao/etapa apos fechar a aba | AUDIT-REPLAY-01 | REVIEW — navegador, escopos e concorrencia passaram; nove mutacoes detectadas, 32 portoes PASS |
 | AUDIT-CHANGE-REPLAY-01 | P1 | Reenviar pedido de alteracao sem atingir proposta posterior | AUDIT-REPLAY-01 | REVIEW — defeito reproduzido, JSON em dois processos, 32 portoes e quatro mutacoes; instalacao pendente |
 | AUDIT-INTAKE-REPLAY-01 | P1 | Nao repetir modelo em resposta incerta do questionario | AUDIT-REPLAY-01 | REVIEW — sete regressoes, cinco mutacoes, JSON em dois processos e 32 portoes; instalacao pendente |
+| AUDIT-CREATE-CLIENT-01 | P1 | Criacao recupera mesma tarefa depois de fechar a aba | AUDIT-CLIENT-REPLAY-01 | REVIEW — 1.100 testes de interface, 175 de navegador, quatro mutacoes e 32 portoes; instalacao pendente |
+| AUDIT-REVISION-RECOVERY-01 | P1 | Retomar revisao entre especificacao, estado e trilha | AUDIT-REPLAY-01 | REVIEW — JSON em dois processos, oito mutacoes e 32 portoes; cliente ainda pendente |
 | ABRIR-03-R | P1 | Recuperar cadastro interrompido sem emitir sessao antes de criar o espaco | ABRIR-03 | REVIEW — prova JSON em tres processos e quatro mutacoes; PC real pendente |
 | AUDIT-ENTRY-01 | P1 | Abrir o FRIGG pelo launcher e manter a admissão | — | REVIEW — runtime real e nove destinos; criação ainda bloqueada |
 | AUDIT-MOBILE-01 | P2 | Manter campo e envio acessíveis em telas móveis estreitas | — | REVIEW — 8 testes Chromium; aparelhos reais pendentes |

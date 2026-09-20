@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { impressaoDoEnvioLocal, impressaoLocal, intencaoDeEnvio, intencaoPorImpressao, novaChave } from './creationIntent'
 
@@ -32,14 +31,8 @@ describe('a identidade da intenção de envio', () => {
     for (let vez = 0; vez < 20; vez += 1) expect(novaChave()).toMatch(/^[A-Za-z0-9_-]{16,128}$/u)
   })
 
-  it('a tela MANDA a chave, e a esquece quando a tarefa existe', () => {
-    // Guardar a intenção depois do sucesso faria o segundo aplicativo da pessoa
-    // ser recusado por conflito com o primeiro.
-    const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
-    expect(app).toContain('request_key: envio.chave')
-    expect(app).toContain('intencao.current = envio')
-    expect(app).toContain('intencao.current = null')
-  })
+  // Envio e limpeza apos sucesso sao exercitados no navegador em journey.spec.ts.
+
 })
 
 describe('a intenção de um envio DENTRO da tarefa', () => {

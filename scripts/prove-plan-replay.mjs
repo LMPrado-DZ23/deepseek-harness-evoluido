@@ -80,7 +80,34 @@ async function phase(root, mode) {
         await assert.rejects(service.answerIntakeTurn(actor, intakeId, { ...intakeInput, recommended: false, digitada: 'Clientes locais' }, produceIntake, intakeWriteKey), /Disco indisponível/u)
       } finally { repository.putTurn = originalPutTurn }
       const intakeCompleted = await service.answerIntakeTurn(actor, intakeId, intakeInput, produceIntake, intakeKey)
-      await writeFile(join(root, 'expected.json'), JSON.stringify({ id, edited, added, latest: proposed, changed, intakeId, intakeCompleted, approvals: repository.approvals().length }), { mode: 0o600 })
+      const revisionRecoveries = []
+      for (const fault of ['state', 'audit', 'clear']) {
+        const revisionProject = await service.createProject(actor, { name: `Revisão ${fault}`, original_brief: 'Página para apresentar serviços.', category: 'landing-page', privacy: 'local-only' })
+        const revisionId = revisionProject.project_id
+        await service.saveSpec(actor, revisionId, (await service.latestSpec(actor, id)).app_spec, 'intake')
+        const historic = await service.latestSpec(actor, revisionId)
+        await repository.putSpec({ ...historic, version: 7 }) // Historico parcial importado, sem versões 1 a 6.
+        // Estado terminal sem geração real: esta prova verifica persistência, não qualidade de modelo.
+        await repository.putProject({ ...service.project(actor, revisionId), state: 'VERIFIED_PROTOTYPE' })
+        const key = `revision-restart-${fault}-0001`
+        const putProject = repository.putProject.bind(repository)
+        const putApproval = repository.putApproval.bind(repository)
+        repository.putProject = async value => {
+          if (value.project_id === revisionId && value.state === 'SPEC_READY' && ((fault === 'state' && value.pending_revision !== undefined) || (fault === 'clear' && value.pending_revision === undefined))) throw new Error(`interrupted-${fault}`)
+          return putProject(value)
+        }
+        repository.putApproval = async value => {
+          if (fault === 'audit' && value.project_id === revisionId && value.subject_id.startsWith('revise:')) throw new Error('interrupted-audit')
+          return putApproval(value)
+        }
+        try {
+          await assert.rejects(service.reviseProject(actor, revisionId, 'Destacar o botão principal', key), new RegExp(`interrupted-${fault}`, 'u'))
+        } finally { repository.putProject = putProject; repository.putApproval = putApproval }
+        const pending = service.project(actor, revisionId).pending_revision
+        assert.ok(pending)
+        revisionRecoveries.push({ id: revisionId, key, pending })
+      }
+      await writeFile(join(root, 'expected.json'), JSON.stringify({ id, edited, added, latest: proposed, changed, intakeId, intakeCompleted, revisionRecoveries, approvals: repository.approvals().length }), { mode: 0o600 })
       assert.equal(await count(), 5)
     } else {
       const expected = JSON.parse(await readFile(join(root, 'expected.json'), 'utf8'))
@@ -95,6 +122,20 @@ async function phase(root, mode) {
       await assert.rejects(service.answerIntakeTurn(actor, expected.intakeId, { ...intakeInput, recommended: false, digitada: 'Clientes locais' }, produceIntake, intakeWriteKey), { code: 'REPLAY' })
       assert.equal((await service.intakeTurns(actor, expected.intakeId)).length, 1)
       assert.equal(await count(), 5, 'reenvio não pode consumir o modelo novamente')
+      for (const recovery of expected.revisionRecoveries) {
+        const replay = await service.reviseProject(actor, recovery.id, 'Destacar o botão principal', recovery.key)
+        assert.equal(replay.spec.spec_id, recovery.pending.spec_id)
+        assert.equal(replay.spec.version, 8)
+        assert.equal(replay.project.state, 'SPEC_READY')
+        assert.equal(replay.project.pending_revision, undefined)
+        assert.equal((await service.specs(actor, recovery.id)).length, 2)
+        const approvals = repository.approvals().filter(row => row.project_id === recovery.id && row.subject_id === `revise:${recovery.pending.spec_id}`)
+        assert.equal(approvals.length, 1)
+        assert.equal(approvals[0].approved_at, recovery.pending.requested_at)
+        assert.equal(approvals[0].from_state, recovery.pending.from_state)
+        await service.reviseProject(actor, recovery.id, 'Destacar o botão principal', recovery.key)
+        assert.equal(repository.approvals().filter(row => row.project_id === recovery.id && row.subject_id === `revise:${recovery.pending.spec_id}`).length, 1)
+      }
     }
     return { phase: mode, status: 'PASS', modelCalls: await count() }
   } finally {

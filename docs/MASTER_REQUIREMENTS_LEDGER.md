@@ -496,21 +496,25 @@ declarada.
 
 | AUDIT-INTAKE-REPLAY-01 | Questionario nao repete consumo de modelo sem resultado confirmado | Auditoria de reenvios, 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, tests/identidade-do-envio.spec.ts, scripts/prove-plan-replay.mjs | Quatro regressoes reproduzidas com resposta recomendada/digitada e falhas de provedor/gravação; 1.418 testes do plugin | execucao: reserva sem turno fica incerta; resultado concluido recuperado; nova intencao explicita permitida; falta de recibos impede chamada | Nao resolve sintese posterior ao turno nem agrupamento de respostas inferidas; cliente ainda em memoria; keyless legado sem garantia; sem CAS distribuido e sem provedor real | validar instalacao real; ampliar demais reenvios |
 
+| AUDIT-CREATE-CLIENT-01 | Criacao de tarefa preserva a intencao ao fechar a aba apos perder resposta | Auditoria de reenvios, 20/09/2026 | v1.0 | BETA | apps/studio-web/src/App.tsx, src/plan/pendingIntent.ts, tests/journey.spec.ts | Navegador reproduziu chave diferente; correcao recupera mesma tarefa; bloqueio do armazenamento impede POST | execucao: hashes e chave no mesmo IndexedDB, escopo por pessoa/org/tenant; criacao sem revisao usa null; confirmacao limpa intencao | Mesmo perfil, pedido precisa ser repetido; design/logo sao passos separados; nenhuma fila automatica; demais envios ainda em memoria | validar instalacao real; persistir demais tipos de envio |
+
+| AUDIT-REVISION-RECOVERY-01 | Revisao retoma especificacao, estado e trilha sem repetir ou desfazer progresso posterior | Auditoria de recuperacao, 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, src/model.ts, src/http.ts, tests/identidade-do-envio.spec.ts, tests/http.spec.ts, scripts/prove-plan-replay.mjs | Tres regressoes reproduzidas; 1.429 testes; oito mutacoes; tres pontos de falha reabertos em JSON real; 32 portoes PASS | execucao: marcador duravel antes da especificacao, auditoria deterministica e limpeza por ultimo; serializacao de estado/especificacao; maior versao + 1; planejamento pendente recusado antes do modelo | Uma instancia, sem CAS; binario antigo recusa marcador pendente; legado incompleto sem trilha recusa sem inferir; chave de revisao ainda em memoria no cliente; sem modelo/PC real | persistir intencao de revisao no cliente e orientar retomada na tela |
+
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 258 |
+| `BETA` | 260 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 369.**
+**Total de requisitos rastreados: 371.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 332 |
+| v1.0 | 334 |
 | v1.x | 34 |
 | v2 | 3 |

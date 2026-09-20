@@ -97,7 +97,7 @@
     "limitacao": "Pela linha de comando o agente conversa, mas não usa ferramentas (pesquisar, escrever arquivo, agendar). Um projeto no perfil privado usa só a IA local."
   },
   "envios": {
-    "indisponivel": "Não consegui preservar este envio no aparelho. O pedido não foi enviado. Verifique o plano e as permissões de armazenamento do navegador antes de tentar novamente.",
+    "indisponivel": "Não consegui preservar este envio no aparelho. O pedido não foi enviado. Confira a conversa e as permissões de armazenamento do navegador antes de tentar novamente.",
     "identidade": "Não consegui confirmar seu espaço de trabalho. Atualize a página antes de enviar. O pedido não foi enviado.",
     "confirmacaoPendente": "O pedido foi salvo no servidor, mas este aparelho não conseguiu guardar a confirmação. Se você reenviar, o FRIGG tentará recuperar o mesmo resultado."
   }

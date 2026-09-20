@@ -97,7 +97,7 @@
     "limitacao": "Through the command line the agent chats but does not use tools (search, write files, schedule). A project with the private profile only uses the local AI."
   },
   "envios": {
-    "indisponivel": "I could not preserve this submission on this device. The request was not sent. Check the plan and your browser's site storage permissions before trying again.",
+    "indisponivel": "I could not preserve this submission on this device. The request was not sent. Check the conversation and your browser's site storage permissions before trying again.",
     "identidade": "I could not confirm your workspace. Refresh the page before sending. The request was not sent.",
     "confirmacaoPendente": "The request was saved on the server, but this device could not save its confirmation. If you resend it, FRIGG will try to retrieve the same result."
   }
