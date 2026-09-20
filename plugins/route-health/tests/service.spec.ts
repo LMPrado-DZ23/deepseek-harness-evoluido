@@ -560,6 +560,42 @@ describe('M-05: liga e desliga por rota', () => {
     })
   })
 
+  it('uma rota que falhou menos vezes que o limite do circuito continua sendo tentada', async () => {
+    let agora = new Date('2026-09-03T00:00:00.000Z')
+    const repository = new MemoryRepository()
+    const subject = new StudioRouteHealthService(repository, {
+      routes: ['ollama', 'omniroute', 'deepseek-official'],
+      localRoute: 'ollama', fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash',
+      now: () => agora, createId: () => `e-${Math.random()}`,
+    })
+    await subject.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    await subject.setRouteEnabled(scope, 'ollama', false)
+    await subject.setRouteEnabled(scope, 'deepseek-official', false)
+    const falhar = () => collect(subject.streamWithFallback(scope, { ...options }, () => chunks(error('422')), () => chunks()))
+    await falhar()
+    expect(subject.list(scope).find(r => r.route === 'omniroute')?.state).not.toBe('OK')
+    await expect(subject.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: 'omniroute', reasonCode: 'RETRY_BELOW_THRESHOLD' })
+    await falhar(); await falhar()
+    // No limite, o circuito abre: agora a espera vale, e nada e tentado.
+    await expect(subject.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: undefined, reasonCode: 'DISABLED' })
+    agora = new Date(agora.getTime() + DEFAULT_ROUTE_CIRCUIT.cooldownMs + 1)
+    await expect(subject.chooseRoute(scope, 'T2')).resolves.toMatchObject({ route: 'omniroute', reasonCode: 'HALF_OPEN' })
+  })
+
+  it('no perfil equilibrado, tentar de novo uma rota externa diz que saiu do computador', async () => {
+    const repository = new MemoryRepository()
+    const subject = new StudioRouteHealthService(repository, {
+      routes: ['ollama', 'omniroute', 'deepseek-official'],
+      localRoute: 'ollama', fallbackRoute: 'deepseek-official', fallbackModel: 'deepseek-v4-flash',
+      now: () => new Date('2026-09-03T00:00:00.000Z'), createId: () => `e-${Math.random()}`,
+    })
+    await subject.initialize(scope, new Set(['ollama', 'omniroute', 'deepseek-official']))
+    await subject.setRouteEnabled(scope, 'ollama', false)
+    await subject.setRouteEnabled(scope, 'deepseek-official', false)
+    await collect(subject.streamWithFallback(scope, { ...options }, () => chunks(error('x')), () => chunks()))
+    await expect(subject.chooseRoute(scope, 'T2', { privacy: 'equilibrado' })).resolves.toMatchObject({ route: 'omniroute', reasonCode: 'BALANCED_EXTERNAL' })
+  })
+
   it('desliga uma rota que ainda nao tinha registro, sem inventar saude para ela', async () => {
     const h = service()
     await h.service.initialize(scope, new Set(['ollama', 'rota-extra']))

@@ -178,7 +178,11 @@
     "continueBusy": "Enviando sua resposta…",
     "recommendBusy": "Buscando uma recomendação…",
     "confirmBusy": "Confirmando…",
-    "rejectBusy": "Retirando os dados…"
+    "rejectBusy": "Retirando os dados…",
+    "sinteseParadaTitulo": "Suas respostas estão guardadas",
+    "sinteseParadaDetalhe": "A inteligência artificial não conseguiu montar o resumo do aplicativo agora. Nada se perdeu: tente de novo.",
+    "sinteseParadaBotao": "Tentar de novo",
+    "sinteseParadaBotaoOcupado": "Montando o resumo…"
   },
   "plan": {
     "title": "Confira o plano",

@@ -142,6 +142,12 @@ export interface StudioAppsHealth {
   /** O mesmo motivo em código estável, para a tela traduzir sem casar texto. */
   readonly route_reason_code: string
   /**
+   * O NOME da rota em uso, para a pessoa ("Mistral (chave)"), e não o
+   * identificador interno (`chave-mistral`) que a tela mostrava na frase de
+   * privacidade. `null` junto com `route`.
+   */
+  readonly route_name?: string | null
+  /**
    * A rota da IA local, quando o perfil `privado-local` consegue usá-la.
    *
    * `null` diz que esse perfil está BLOQUEADO agora - a tela precisa disso para

@@ -22,6 +22,7 @@
     "balancedLocal": "Perfil equilibrado: a IA local está em uso e nada sai deste computador.",
     "balancedExternal": "Perfil equilibrado: a IA local não está disponível; usando a rota externa configurada.",
     "ligadaPelaPessoa": "Ligada pela pessoa nas Preferências.",
-    "desligadaPelaPessoa": "Desligada pela pessoa nas Preferências."
+    "desligadaPelaPessoa": "Desligada pela pessoa nas Preferências.",
+    "retryBelowThreshold": "A conexão falhou há pouco, mas ainda tem direito a tentar de novo antes de ser deixada de lado."
   }
 }

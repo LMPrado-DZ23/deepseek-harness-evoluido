@@ -283,6 +283,23 @@ export class StudioRouteHealthService {
             await this.startProbe(probe);
             return { route: probe.route, explicit: false, reason: HALF_OPEN_REASON, reasonCode: 'HALF_OPEN' };
         }
+        /*
+          Uma rota que falhou MENOS vezes do que o limite do circuito ainda tem
+          direito a tentar: é isso que o limite quer dizer. Antes, uma falha só
+          bastava para ela sair da escolha para sempre — ela não estava `OK`, o
+          circuito não abria (1 de 3), então a meia-abertura nunca chegava.
+          Medido em 19/09/2026 no computador do titular: a única conexão ligada
+          (Mistral) falhou uma vez, e a conversa passou a responder "Rota desligada"
+          a toda resposta, sem nunca mais tentar.
+        */
+        const retentavel = known.find(record => record.state !== 'NOT_CONFIGURED' && this.circuit(scope, record.route) === 'CLOSED');
+        if (retentavel !== undefined) {
+            if (profile === 'equilibrado' && retentavel.route !== this.config.localRoute) {
+                await this.auditSwitch(scope, this.config.localRoute, retentavel.route, BALANCED_EXTERNAL_REASON, false);
+                return { route: retentavel.route, explicit: false, reason: BALANCED_EXTERNAL_REASON, reasonCode: 'BALANCED_EXTERNAL' };
+            }
+            return { route: retentavel.route, explicit: false, reason: t('reasons.retryBelowThreshold'), reasonCode: 'RETRY_BELOW_THRESHOLD' };
+        }
         if (!this.enabled(scope, this.config.fallbackRoute)) {
             const reason = DISABLED_REASON;
             await this.auditSwitch(scope, this.config.fallbackRoute, 'blocked', reason, false);

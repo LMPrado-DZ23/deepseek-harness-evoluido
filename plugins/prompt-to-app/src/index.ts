@@ -143,6 +143,17 @@ export function modelosPorRota(
 }
 
 /**
+ * O nome que a pessoa lê para a rota em uso.
+ * @param rota - a rota escolhida, ou `null`.
+ * @param provedores - as rotas que o runtime conhece, com o nome de cada uma.
+ * @returns o nome; o identificador quando a rota não tem nome; `null` sem rota.
+ */
+export function nomeDaRotaEmUso(rota: string | null, provedores: readonly { readonly id: string, readonly name: string }[]): string | null {
+  if (rota === null) return null
+  return provedores.find(provedor => provedor.id === rota)?.name ?? rota
+}
+
+/**
  * Os modelos das rotas por chave, lidos do runtime.
  *
  * Uma rota que não responde a listagem fica sem modelo — e por isso fora das
@@ -572,6 +583,7 @@ export async function apply(ctx: Context, config: PromptToAppPluginConfig = {}):
       // opera o Studio traduz o código em efeito e próximo passo, em vez de
       // mostrar "meia-abertura" e "teto de escopo" para quem não programa.
       route_reason_code: selected.reasonCode,
+      route_name: nomeDaRotaEmUso(route, ctx.llm.listProviders()),
       local_route: localSelected.route ?? null, builder: builderHealth.state, disk,
     }
   }

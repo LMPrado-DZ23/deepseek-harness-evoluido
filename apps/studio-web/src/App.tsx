@@ -9,6 +9,7 @@ import type { RunStepRecord } from './buildSteps'
 import { projectNameFromBrief } from './projectName'
 import { impressaoDoEnvioLocal, intencaoDeEnvio, intencaoPorImpressao, type IntencaoDeCriacao } from './creationIntent'
 
+import { sinteseParada } from './sinteseParada'
 import { HEADLINE_CAPABILITY, capabilityLines, capabilityName, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
 import { apiFailureMessage, apiFailureText, type ApiCallKind } from './pwa/apiFailure'
 import { GENERATION_REJECTED_STATE, postGeneration, startGeneration } from './pwa/generation'
@@ -817,6 +818,7 @@ export function App() {
   */
   const acoesDoEstado = <>
     {projectState === 'DRAFT' && question !== null ? <AcoesDaPergunta question={question} submit={submitAnswer} /> : null}
+    {sinteseParada(projectState, question, detalhes?.turns) ? <Action title={t.questions.sinteseParadaTitulo} detail={t.questions.sinteseParadaDetalhe} button={t.questions.sinteseParadaBotao} busyButton={t.questions.sinteseParadaBotaoOcupado} action={() => submitAnswer(false, undefined, '')} /> : null}
     {projectState === 'SPEC_READY' ? <Action title={t.plan.title} detail={t.progress.planDetail} button={t.plan.prepare} busyButton={t.plan.prepareBusy} action={preparePlan} /> : null}
     {/*
       Qual das duas ações aparece é decidido pelo STATUS DO PLANO, e não por um
@@ -915,7 +917,7 @@ export function App() {
         conteudoDoPainel={conteudoDoPainel} acoesDoEstado={acoesDoEstado} />
       : <main className="dz-canvas-home">
         <section className="dz-home-conteudo">
-          <HomeScreen integracoes={integracoes} brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryBasis={categoryBasis} chooseCategory={chooseCategory} create={create}
+          <HomeScreen integracoes={integracoes} brief={brief} setBrief={updateBrief} privacy={privacy} setPrivacy={setPrivacy} route={health.route_name ?? route ?? health.route} localRoute={health.local_route} routeReason={health.route_reason_code ?? null} ready={ready} chooseSuggestion={chooseSuggestion} category={category} categoryBasis={categoryBasis} chooseCategory={chooseCategory} create={create}
             designPreset={designPreset} setDesignPreset={setDesignPreset} brandColor={brandColor} setBrandColor={setBrandColor}
             font={font} setFont={setFont} radius={radius} setRadius={setRadius} density={density} setDensity={setDensity}
             tone={tone} setTone={setTone} logo={logo} setLogo={setLogo} showDesignAdvanced={showDesignAdvanced} setShowDesignAdvanced={setShowDesignAdvanced}

@@ -6,7 +6,7 @@
  * ninguém tinha medido ainda. O servidor nunca devolve `UNKNOWN`: ele é da
  * tela, e some na primeira leitura.
  */
-export type HealthState = { state: 'OK' | 'ATTENTION' | 'UNKNOWN'; route: string | null; route_reason?: string | null; route_reason_code?: string | null; local_route?: string | null; builder: 'OK' | 'BLOCKED_EXTERNAL'; disk: 'OK' | 'ATTENTION'; capabilities?: CapabilityReport[] }
+export type HealthState = { state: 'OK' | 'ATTENTION' | 'UNKNOWN'; route: string | null; route_reason?: string | null; route_reason_code?: string | null; route_name?: string | null; local_route?: string | null; builder: 'OK' | 'BLOCKED_EXTERNAL'; disk: 'OK' | 'ATTENTION'; capabilities?: CapabilityReport[] }
 import type { CapabilityReport } from './presentation'
 import textos from './i18n/tarefa.pt-BR.json'
 

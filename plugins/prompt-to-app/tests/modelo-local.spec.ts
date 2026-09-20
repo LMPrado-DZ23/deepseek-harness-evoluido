@@ -69,3 +69,13 @@ describe('modelosDasRotasPorChave', () => {
     expect(pedidas).toEqual(['chave-a', 'chave-quebrada'])
   })
 })
+
+describe('nomeDaRotaEmUso', () => {
+  it('a pessoa lê o nome, e não o identificador', async () => {
+    const { nomeDaRotaEmUso } = await import('../src/index.ts')
+    const provedores = [{ id: 'chave-mistral', name: 'Mistral (chave)' }]
+    expect(nomeDaRotaEmUso('chave-mistral', provedores)).toBe('Mistral (chave)')
+    expect(nomeDaRotaEmUso('outra', provedores)).toBe('outra')
+    expect(nomeDaRotaEmUso(null, provedores)).toBeNull()
+  })
+})

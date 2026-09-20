@@ -80,7 +80,7 @@ export interface RouteHealthRepository {
  * `reasonCode` é o mesmo fato num código estável, para a tela de quem NÃO opera
  * traduzir em efeito e próximo passo, sem depender de casar texto.
  */
-export type RouteReasonCode = 'PRIVATE_LOCAL' | 'LOCAL_BLOCKED' | 'EXPLICIT' | 'SAFE_READ_LOCAL' | 'FIRST_HEALTHY' | 'DIRECT_FALLBACK' | 'BUDGET_LOCAL' | 'BUDGET_BLOCKED' | 'HALF_OPEN' | 'ALL_OPEN' | 'DISABLED' | 'BALANCED_LOCAL' | 'BALANCED_EXTERNAL';
+export type RouteReasonCode = 'PRIVATE_LOCAL' | 'LOCAL_BLOCKED' | 'EXPLICIT' | 'SAFE_READ_LOCAL' | 'FIRST_HEALTHY' | 'DIRECT_FALLBACK' | 'BUDGET_LOCAL' | 'BUDGET_BLOCKED' | 'HALF_OPEN' | 'ALL_OPEN' | 'DISABLED' | 'BALANCED_LOCAL' | 'BALANCED_EXTERNAL' | 'RETRY_BELOW_THRESHOLD';
 export interface RouteSelection {
     readonly route: string | undefined;
     readonly explicit: boolean;
