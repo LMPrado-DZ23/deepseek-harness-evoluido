@@ -195,6 +195,9 @@ const model: PromptModelPort = {
       sensitive_data: { detected: [], confirmed_by_user: false }, accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true },
       language: 'pt-BR', acceptance_criteria: ['Mostrar o texto “Fale conosco”.', 'A navegação deve ser simples.'],
     } }
+    if (purpose === 'plan' && prompt.includes('"slice":')) return { route: 'ollama-local', model: 'fixture', value: {
+      slice: { slice_id: 'extra-contact', title: 'Endereço de atendimento', description: 'Mostrar endereço', acceptance_criteria: ['Endereço visível'], planned_files: ['src/Endereco.tsx'] },
+    } }
     if (purpose === 'plan') return { route: 'ollama-local', model: 'fixture', value: { slices: [
       { slice_id: 'layout', title: 'Estrutura da página', description: 'Criar a apresentação principal.', acceptance_criteria: ['A página mostra o serviço.'], planned_files: ['content/app.json'] },
       { slice_id: 'contact', title: 'Contato e conferência', description: 'Criar o contato e verificar o conteúdo.', acceptance_criteria: ['O contato fica visível.'], planned_files: ['src/GeneratedApp.tsx'] },

@@ -274,8 +274,11 @@ export class StudioIdentityService {
       await Promise.all(this.#repository.magicCodes()
         .filter(previous => previous.email === normalized && previous.consumed_at === null)
         .map(previous => this.#repository.putMagicCode({ ...previous, consumed_at: now.toISOString() })))
-      const orgId = existing?.org_id ?? grant?.orgId ?? this.#defaultOrgId
-      const tenantId = existing?.tenant_id ?? grant?.tenantId ?? this.#defaultTenantId
+      // O primeiro titular local assume o escopo já usado pelo trabalho pessoal.
+      // Convites e instalações de servidor mantêm a autoridade que já tinham.
+      const personal = existing === undefined && grant === undefined ? this.personalPrincipal(this.#bindHost) : undefined
+      const orgId = existing?.org_id ?? grant?.orgId ?? personal?.orgId ?? this.#defaultOrgId
+      const tenantId = existing?.tenant_id ?? grant?.tenantId ?? personal?.tenantId ?? this.#defaultTenantId
       const record: MagicCodeRecord = {
         magic_code_id: this.#createId(),
         email: normalized,
@@ -380,8 +383,18 @@ export class StudioIdentityService {
       throw new IdentityError('invalid', t('auth.codeInvalidOrExpired'))
     }
     const source: IdentityUserProvisioningSource = validGrant ? 'invitation' : 'bootstrap'
+    const personal = existing === undefined && source === 'bootstrap' ? this.personalPrincipal(this.#bindHost) : undefined
+    if (existing === undefined && source === 'bootstrap') {
+      const orgId = personal?.orgId ?? this.#defaultOrgId
+      const tenantId = personal?.tenantId ?? this.#defaultTenantId
+      // Um código emitido em outro modo/escopo não transfere dados ao mudar a configuração.
+      if (candidate.org_id !== orgId || candidate.tenant_id !== tenantId) {
+        await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', t('auth.codeInvalidOrExpired'))
+        throw new IdentityError('invalid', t('auth.codeInvalidOrExpired'))
+      }
+    }
     const user: IdentityUser = existing ?? {
-      user_id: this.#createId(),
+      user_id: personal?.userId ?? this.#createId(),
       email: normalized,
       display_name: normalized.split('@')[0]!,
       bootstrap_owner: source === 'bootstrap',

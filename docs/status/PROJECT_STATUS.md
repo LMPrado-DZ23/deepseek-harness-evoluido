@@ -18,6 +18,47 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Verificacao mais recente — reenvios e primeiro cadastro
+
+32 portoes PASS; interface 1.075 PASS; navegador em copia limpa 174 PASS/3 SKIP/0 FAIL.
+Raiz Node 22: 4.459 PASS/174 FAIL/68 SKIP, sem novas falhas frente a rodada
+anterior; PostgreSQL NOT_EXECUTED. Provas JSON de reenvio e cadastro passaram
+em dois processos. Evidencias e limites em `audit/evidence/20260920/replay-adoption-verification.json`.
+A rodada anterior da PWA falhou com bundles antigos no workspace; a mesma
+guarda passou na copia isolada com fontes conferidas.
+
+## Continuidade no primeiro cadastro — 20/09/2026
+
+`ABRIR-03` preserva `user_local`, `org_local` e `tenant_local` para o primeiro
+cadastro verificado no modo pessoal. Convites nao adotam esse trabalho. Mudanca
+de modo/escopo depois da emissao invalida o codigo e registra a recusa.
+188 testes de identidade/permissoes e seis mutacoes passaram. A prova
+`pnpm prove:personal-adoption` cria projeto e arquivo no JSON real, registra a
+conta e reabre tudo em outro processo: acesso preservado, outro tenant recusado
+e acesso anonimo desativado. Email capturado localmente, sem SMTP real.
+Instalacoes ja cadastradas nao sao migradas. Conversas pessoais ainda usam
+vinculos em memoria: a continuidade delas permanece aberta. Esta entrega nao
+certifica o cadastro na maquina do usuario nem encerra a meta geral.
+
+## Reenvios de edição e etapa — 20/09/2026
+
+`AUDIT-REPLAY-01` implementa identidade de envio nas duas rotas que faltavam.
+Edições e etapas criam revisões preservadas, recuperáveis pelo recibo original,
+mesmo depois de outras edições. A recuperação revalida autorização e escopo;
+repara a trilha se houver queda depois da gravação, mantendo a data da edição.
+O navegador mantém texto e chave quando a resposta se perde; falhas na leitura
+dos detalhes aparecem sem desfazer o reconhecimento de uma escrita concluída.
+
+`pnpm prove:plan-replay` reabre os domínios JSON reais em outro processo. As
+operações concluídas não foram repetidas. Chamada de modelo sem resultado
+confirmado não é repetida automaticamente: a interface explica a incerteza e
+como iniciar outra intenção. O teste usa modelo controlado, sem provedor pago.
+A chave no navegador ainda vive na pagina; fechar/recarregar antes da
+confirmacao perde a intencao local. O recibo duravel do servidor so recupera
+a operacao se o cliente reapresentar a mesma chave. A proteção continua por
+instância; CAS distribuído e aceite da instalação
+real permanecem abertos. A meta geral continua **EXECUTING**.
+
 ## Proteção do plano — 20/09/2026
 
 `AUDIT-PLAN-01`: sete regressões reproduziram perda concorrente, chamada de
@@ -26,8 +67,8 @@ edições. Serialização das gravações e conferência da revisão depois da r
 do modelo corrigem esses casos numa instância do serviço. Novas propostas usam
 a maior revisão existente mais um. 179 testes de serviço/HTTP passaram; cinco
 mutações foram detectadas. Typecheck e build do pacote passaram.
-A proteção não é CAS entre processos nem idempotência durável de `plan/edit`
-e `plan/slice`. A meta do produto continua aberta.
+A proteção não é CAS entre processos. A pendência de reenvio durável deste
+checkpoint foi tratada em `AUDIT-REPLAY-01`, acima. A meta continua aberta.
 
 ## Retomada da meta de usuário final — 20/09/2026
 

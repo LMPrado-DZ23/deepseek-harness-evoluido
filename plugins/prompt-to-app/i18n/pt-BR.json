@@ -80,6 +80,8 @@
     "formDatabaseRequired": "Para criar cadastro e lista, diga quais informações precisam ser guardadas.",
     "formReferenceRequiresCrud": "Este cadastro depende de outro cadastro obrigatório. Essa ligação será liberada junto com o painel completo na próxima etapa.",
     "formEntryFileRequired": "O plano precisa incluir a tela principal de cadastro e lista.",
+    "planSliceUncertain": "A tentativa anterior não tem resultado confirmado. Para evitar uma nova cobrança, ela não será repetida automaticamente. Confira o plano. Se a etapa ainda faltar, reescreva o pedido para iniciar outra tentativa, que pode gerar novo consumo.",
+    "planReceiptUnavailable": "O armazenamento de recibos não está disponível. O pedido não foi executado; confira a instalação antes de tentar novamente.",
     "planEditUnavailable": "Este plano já foi aprovado ou substituído: não dá para editá-lo agora.",
     "planEditStale": "O plano mudou enquanto você editava. Recarregue para ver a versão atual e refaça a alteração.",
     "planEditUnknownSlice": "Esta parte não faz parte do plano: {slice}",

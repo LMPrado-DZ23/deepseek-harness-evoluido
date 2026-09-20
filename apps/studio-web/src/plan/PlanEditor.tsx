@@ -15,7 +15,7 @@ import { PendingButton } from '../PendingButton'
 export interface PlanEditorProps {
   readonly plan: PlanView
   /** Manda a alteração e devolve o plano gravado. A tela adota o que voltou. */
-  submit(edit: PlanEditRequest): Promise<void>
+  submit(edit: PlanEditRequest): Promise<void | boolean>
   approve(): Promise<void>
   reason: string
   setReason(value: string): void
@@ -27,7 +27,7 @@ export interface PlanEditorProps {
    * ainda não tem a rota: sem ele o bloco não aparece, em vez de aparecer um
    * botão que responde 404 na cara de quem não programa.
    */
-  addSlice?(request: string): Promise<void>
+  addSlice?(request: string): Promise<void | boolean>
   /**
    * O que o Studio consultou para montar este plano.
    *
@@ -119,13 +119,12 @@ export function PlanEditor({ plan, submit, approve, reason, setReason, requestCh
     const request = sliceEditRequest(plan, sliceId, draft)
     // Nada mudou: fechar sem mandar. Um pedido que não muda nada gastaria uma
     // revisão e faria a outra aba receber "o plano mudou" por engano.
-    if (request !== undefined) await submit(request)
+    if (request !== undefined && await submit(request) === false) return
     setEditing(null)
   }
   async function send(request: PlanEditRequest | undefined) {
     if (request === undefined) return
-    setEditing(null)
-    await submit(request)
+    if (await submit(request) !== false) setEditing(null)
   }
 
   return <>
@@ -183,7 +182,7 @@ export function PlanEditor({ plan, submit, approve, reason, setReason, requestCh
       <p className="context-note">{t.plan.addNote}</p>
       <PendingButton className="secondary" label={t.plan.addAction} busyLabel={t.plan.addBusy}
         disabled={addition.trim().length < 3}
-        action={async () => { await addSlice(addition.trim()); setAddition('') }} />
+        action={async () => { if (await addSlice(addition.trim()) !== false) setAddition('') }} />
     </section>}
     <section className="task-card">
       <h2>{t.plan.change}</h2>

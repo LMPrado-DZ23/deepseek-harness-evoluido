@@ -122,3 +122,34 @@ fizeram os testes falharem; fontes restaurados. Typecheck e build passaram.
 é controlado nos testes. Reenvio durável das duas rotas não foi declarado pronto.
 CI do commit anterior f554fb3 falhou sem etapas e sem runner atribuído
 (run 35515702641); causa específica segue sem confirmação.
+
+## 2026-09-20 — AUDIT-REPLAY-01, reenvios duráveis do plano
+
+**Ação.** Cinco regressões iniciais reproduziram os reenvios sem recibo.
+As revisões passaram a ter identificadores próprios e a reserva existente
+passou a apontar para o resultado preservado. As rotas e a tela enviam a chave.
+
+**Resultado.** A prova `scripts/prove-plan-replay.mjs` escreve e reabre os
+mesmos domínios JSON do Harness em processos separados, usando o repositório
+do produto. Recupera versões antigas sem alterar a atual, sem nova chamada de
+modelo e sem duplicar a trilha. O modelo desta prova é controlado.
+O navegador reproduziu descarte do rascunho após resposta perdida e silêncio
+sobre leitura mal sucedida; ambos foram corrigidos. A auditoria também ganhou
+prova de preservação da data da edição após aprovação posterior.
+
+**Limites.** Uma instância escritora; sem garantia entre vários processos
+concorrentes. Uma chamada externa cujo resultado não foi persistido fica
+incerta e não é repetida automaticamente. Nova tentativa exige nova intenção.
+Novos valores do enum de recibos são compatíveis com leitura dos registros
+antigos, mas um binário anterior não os entende: rollback exige restaurar o
+backup consistente anterior de todo o armazenamento, não apagar recibos.
+
+## 2026-09-20 — primeiro cadastro preserva trabalho pessoal (ABRIR-03)
+
+Prova inicial no JSON real reproduziu troca de usuario, org e tenant. O primeiro
+cadastro local agora conserva os tres; convite mantem seu proprio escopo.
+Codigo emitido antes de mudar o modo nao transfere autoridade. 188 testes
+passaram; seis mutacoes foram detectadas. Projeto e arquivo continuaram
+acessiveis apos cadastro e reabertura em outro processo, sem acesso ao tenant
+alheio. SMTP capturado, sem entrega externa. Vinculos das conversas sinteticas
+continuam em memoria; esta parte da continuidade segue aberta.

@@ -1073,3 +1073,87 @@ test('troca o idioma da interface, e a escolha sobrevive ao recarregamento sem m
   await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 })
 })
+
+test.describe('reenvio de edição após perda da resposta', () => {
+  test.use({ serviceWorkers: 'block' })
+
+  test('preserva a edição e reusa o recibo quando a resposta gravada se perde', async ({ context, page }) => {
+    const origin = 'http://studio.dz23.localhost:4179'
+    await context.addCookies([
+      { name: 'dz23_studio_session', value: 'e2e', url: origin },
+      { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+    ])
+    await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+    await page.goto('/studio/')
+    await page.getByRole('button', { name: 'Página de apresentação' }).click()
+    await page.getByRole('button', { name: 'Continuar' }).click()
+    await answerIntake(page, INTAKE_ANSWERS)
+    await page.getByRole('button', { name: 'Montar meu plano' }).click()
+    const card = page.locator('.plan-list .task-card').first()
+    await card.getByRole('button', { name: 'Editar esta parte' }).click()
+    await page.getByLabel('Nome desta parte').fill('Minha edição preservada')
+    const bodies: Array<{ request_key: string; base_revision: number }> = []
+    const results: Array<{ plan: { plan_id: string; revision: number } }> = []
+    await page.route('**/plan/edit', async route => {
+      bodies.push(route.request().postDataJSON())
+      const target = new URL(route.request().url())
+      const host = target.host
+      target.hostname = '127.0.0.1'
+      const response = await route.fetch({ url: target.href, headers: { ...route.request().headers(), host } })
+      expect(response.status()).toBe(200)
+      results.push(await response.json())
+      if (bodies.length === 1) await route.abort('failed')
+      else await route.fulfill({ response })
+    })
+    await page.getByRole('button', { name: 'Guardar minha alteração' }).click()
+    await expect.poll(() => bodies.length).toBe(1)
+    await expect(page.getByRole('button', { name: 'Guardar minha alteração' })).toBeEnabled()
+    await expect(page.getByLabel('Nome desta parte')).toHaveValue('Minha edição preservada')
+    await page.screenshot({ path: test.info().outputPath('plan-retry.png'), fullPage: true })
+    const projectId = new URL(page.url()).searchParams.get('projeto')!
+    const detailsRoute = `**/projects/${projectId}`
+    await page.route(detailsRoute, route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Não foi possível atualizar os detalhes da tarefa.' }) }))
+    await page.getByRole('button', { name: 'Guardar minha alteração' }).click()
+    await expect(card.locator('h2')).toHaveText('Minha edição preservada')
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]!.request_key).toMatch(/^[a-zA-Z0-9_-]{16,128}$/u)
+    expect(bodies[1]).toEqual(bodies[0])
+    expect(results[1]!.plan.plan_id).toBe(results[0]!.plan.plan_id)
+    expect(results[1]!.plan.revision).toBe(results[0]!.plan.revision)
+    await expect(page.getByText('Não foi possível atualizar os detalhes da tarefa.', { exact: true })).toBeVisible()
+    await expect(page.getByLabel('Nome desta parte')).toHaveCount(0)
+    await page.unroute(detailsRoute)
+    await page.reload()
+    await expect(page.locator('.plan-list .task-card h2').first()).toHaveText('Minha edição preservada')
+    const additions: Array<{ request_key: string }> = []
+    const additionResults: Array<{ plan: { plan_id: string; revision: number } }> = []
+    await page.route('**/plan/slice', async route => {
+      additions.push(route.request().postDataJSON())
+      const target = new URL(route.request().url()); const host = target.host
+      target.hostname = '127.0.0.1'
+      const headers: Record<string, string> = { ...route.request().headers(), host }
+      // Aguarda a rota concluir antes de descartar sua resposta, sem o polling do cliente.
+      delete headers['x-dz23-espera']
+      const response = await route.fetch({ url: target.href, headers })
+      expect(response.status()).toBe(200)
+      additionResults.push(await response.json())
+      if (additions.length === 1) await route.abort('failed')
+      else await route.fulfill({ response })
+    })
+    const addition = page.getByLabel('Escreva o que falta, com suas palavras')
+    await addition.fill('Falta o endereço de atendimento')
+    await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    await expect.poll(() => additions.length).toBe(1)
+    await expect(page.getByRole('button', { name: 'Acrescentar esta etapa' })).toBeEnabled()
+    await expect(addition).toHaveValue('Falta o endereço de atendimento')
+    await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    await expect(page.locator('.plan-list .task-card')).toHaveCount(3)
+    expect(additions).toHaveLength(2)
+    expect(additions[0]!.request_key).toMatch(/^[a-zA-Z0-9_-]{16,128}$/u)
+    expect(additions[1]).toEqual(additions[0])
+    expect(additionResults[1]).toEqual(additionResults[0])
+    await page.reload()
+    await expect(page.locator('.plan-list .task-card')).toHaveCount(3)
+  })
+
+})

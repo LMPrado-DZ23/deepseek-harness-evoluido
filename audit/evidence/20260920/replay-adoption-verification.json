@@ -1,0 +1,166 @@
+{
+  "date": "2026-09-20",
+  "canonicalBase": "997fa20d897a95061db6da17981c0713dce5f8a3",
+  "previousCheckpoint": "6d5fa732650baaf43c28d6a6c9e1755cda0b3571",
+  "status": "BETA_NOT_RELEASE_READY",
+  "runtimeProofNode": "22.23.1",
+  "replay": {
+    "proof": "PLAN_DURABLE_REPLAY",
+    "status": "PASS",
+    "storage": "Harness JSON + DomainPromptToAppRepository",
+    "separateProcesses": true,
+    "results": [
+      {
+        "phase": "write",
+        "status": "PASS",
+        "modelCalls": 2
+      },
+      {
+        "phase": "replay",
+        "status": "PASS",
+        "modelCalls": 2
+      }
+    ]
+  },
+  "personalAdoption": {
+    "proof": "PERSONAL_ADOPTION",
+    "status": "PASS",
+    "separateProcesses": true,
+    "storage": "Harness JSON domains",
+    "emailTransport": "captured locally, not SMTP",
+    "results": [
+      {
+        "phase": "write",
+        "status": "PASS",
+        "projectsPreserved": 1,
+        "filesPreserved": 1,
+        "foreignScopeDenied": true,
+        "anonymousAccessDisabled": true
+      },
+      {
+        "phase": "reopen",
+        "status": "PASS",
+        "projectsPreserved": 1,
+        "filesPreserved": 1,
+        "foreignScopeDenied": true,
+        "anonymousAccessDisabled": true
+      }
+    ]
+  },
+  "mutations": {
+    "replay": [
+      {
+        "mutation": "ignorar_recibo",
+        "detected": true
+      },
+      {
+        "mutation": "sobrescrever_revisoes",
+        "detected": true
+      },
+      {
+        "mutation": "repetir_custo_incerto",
+        "detected": true
+      },
+      {
+        "mutation": "nao_reparar_auditoria",
+        "detected": true
+      },
+      {
+        "mutation": "descartar_identificador_reservado",
+        "detected": true
+      },
+      {
+        "mutation": "data_da_aprovacao_na_edicao",
+        "detected": true
+      },
+      {
+        "mutation": "schema_sem_novos_recibos",
+        "detected": true
+      }
+    ],
+    "personalAdoption": [
+      {
+        "mutation": "trocar_dono",
+        "detected": true
+      },
+      {
+        "mutation": "trocar_org",
+        "detected": true
+      },
+      {
+        "mutation": "trocar_tenant",
+        "detected": true
+      },
+      {
+        "mutation": "ignorar_org_do_codigo",
+        "detected": true
+      },
+      {
+        "mutation": "ignorar_tenant_do_codigo",
+        "detected": true
+      },
+      {
+        "mutation": "convite_toma_dono",
+        "detected": true
+      }
+    ]
+  },
+  "unit": {
+    "identityAndTenancy": 188,
+    "web": 1075
+  },
+  "root": {
+    "passed": 4459,
+    "failed": 174,
+    "skipped": 68,
+    "newFailureNamesComparedWithPreviousRound": [],
+    "status": "FAIL"
+  },
+  "gates": {
+    "count": 32,
+    "status": "PASS",
+    "constitution": "PASS"
+  },
+  "postgres": {
+    "status": "NOT_EXECUTED",
+    "reason": "Docker executable and PostgreSQL server unavailable"
+  },
+  "limits": [
+    "Client request keys remain in React refs and do not survive page closure/reload.",
+    "Receipts survive sequential service process restart; no distributed CAS guarantee.",
+    "Controlled model and captured email transport; no paid provider or real SMTP exercised.",
+    "Projects/files adopt the first local owner; personal conversation bindings remain in memory.",
+    "Already registered installations are not migrated.",
+    "Real PC offline; no Windows/macOS/native-mobile/reboot certification.",
+    "CI has failed before steps; PR not merged; no release."
+  ],
+  "sourceSha256": {
+    "plugins/prompt-to-app/src/service.ts": "09dbbcc00dcd1f5211d0908b579411c83be1de2e04de801dc395bad0e09049ee",
+    "plugins/prompt-to-app/src/http.ts": "261a8ef4c8700fd9e24368eb305c8e930c1d1681b142b73c44430ced8d8bd3f0",
+    "plugins/prompt-to-app/src/model.ts": "94b52d4a06fc1b8afd2324ec91d2444a5d38263d2e3ab392e05b63f2c4fff469",
+    "plugins/identity/src/service.ts": "7cf9875ba878a6249f788a3bb91657aa41872316cd09b2d0d33a0fc2c8bb1358",
+    "apps/studio-web/src/App.tsx": "31900b5c54995509b2945ed85a9009f4499cf0a6d412bdede4ba9bdacccf00a7",
+    "apps/studio-web/src/plan/PlanEditor.tsx": "8cae6d67ede77f67c944a96bdc9a5983e6c219d34a0138221138045ad1cd28a3",
+    "apps/studio-web/tests/journey.spec.ts": "6794ac4312e20ddd5094c28c69cece4ff958adf1d559a76dff3eedd67b3a80ee",
+    "apps/studio-web/tests/server.ts": "873c4a462d045861a8f341cd805e07e63936511d2d6f6556b86c70127867e7d9",
+    "scripts/prove-plan-replay.mjs": "83df579355855684683396e29a2284f15d2185fa06563162435b0fad27e93caf",
+    "scripts/prove-personal-adoption.mjs": "bd7a62c16e17b1218dff35a175065eda514dd970729353a39e26cc1dc8e93ec4"
+  },
+  "browser": {
+    "status": "PASS",
+    "startTime": "2026-09-20T15:30:31.936Z",
+    "duration": 421398.768,
+    "expected": 174,
+    "skipped": 3,
+    "unexpected": 0,
+    "flaky": 0,
+    "environment": "isolated copy of staged source; existing dependencies linked, Vite built anew",
+    "earlierWorkspaceRun": {
+      "passed": 173,
+      "failed": 1,
+      "skipped": 3,
+      "failure": "PWA single-bundle assertion encountered four historical bundles; clean isolated build passed the unchanged assertion"
+    },
+    "screenshot": "plan-retry.png"
+  }
+}

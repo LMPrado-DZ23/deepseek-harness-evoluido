@@ -284,8 +284,14 @@ export function App() {
   // que ninguém pediu — e a pessoa só descobriria no fim.
   const ready = useMemo(() => brief.trim().length >= 10 && categoryBasis !== 'none', [brief, categoryBasis])
   async function safely(action: () => Promise<void>, call: ApiCallKind = 'mutation') {
+    await safelyWithResult(action, call)
+  }
+  async function safelyWithResult(action: () => Promise<void>, call: ApiCallKind = 'mutation'): Promise<boolean> {
     setError('')
-    try { await action() } catch (cause) { setError(apiFailureText(cause, navigator.onLine, call, t.health.attention)) }
+    try { await action(); return true } catch (cause) {
+      setError(apiFailureText(cause, navigator.onLine, call, t.health.attention))
+      return false
+    }
   }
   /**
    * A intenção do envio em curso.
@@ -321,6 +327,8 @@ export function App() {
   */
   const intencaoDaResposta = useRef<IntencaoDeCriacao | null>(null)
   const intencaoDaMudanca = useRef<IntencaoDeCriacao | null>(null)
+  const intencaoDaEdicao = useRef<IntencaoDeCriacao | null>(null)
+  const intencaoDaEtapa = useRef<IntencaoDeCriacao | null>(null)
   async function create() {
     if (!ready) { setError(t.idea.empty); return }
     await safely(async () => {
@@ -417,7 +425,9 @@ export function App() {
       setProjectState(lido.project.state)
       setPlan(lido.plan ?? null)
       setQuestion(lido.next ?? null)
-    } catch { /* A falha de leitura aparece na próxima ação explícita; a conversa fica como estava. */ }
+    } catch (cause) {
+      setError(apiFailureText(cause, navigator.onLine, 'read', t.health.attention))
+    }
   }
   /**
    * Pede uma alteração depois de um resultado — na MESMA tarefa.
@@ -512,17 +522,24 @@ export function App() {
   /** E-03: manda UMA alteração e adota o plano que voltou, com a revisão nova. */
   async function editPlan(edit: PlanEditRequest) {
     if (projectId === null) return
-    await safely(async () => {
-      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify(edit) })
+    const envio = intencaoPorImpressao(intencaoDaEdicao.current, JSON.stringify(['edicao-plano', projectId, edit]))
+    intencaoDaEdicao.current = envio
+    return safelyWithResult(async () => {
+      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify({ ...edit, request_key: envio.chave }) })
+      intencaoDaEdicao.current = null
       setPlan(response.plan)
       await refreshDetalhes()
     })
   }
   /** E-03: a pessoa descreve o que falta; o planejador escreve a etapa. */
   async function addPlanSlice(request: string) {
-    if (projectId === null) return
-    await safely(async () => {
-      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/slice`, { method: 'POST', body: JSON.stringify({ reason: request }) })
+    if (projectId === null || plan === null) return
+    const base_revision = plan.revision ?? 1
+    const envio = intencaoPorImpressao(intencaoDaEtapa.current, JSON.stringify(['etapa-plano', projectId, request.trim(), base_revision]))
+    intencaoDaEtapa.current = envio
+    return safelyWithResult(async () => {
+      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/slice`, { method: 'POST', body: JSON.stringify({ reason: request.trim(), base_revision, request_key: envio.chave }) })
+      intencaoDaEtapa.current = null
       setPlan(response.plan)
       await refreshDetalhes()
     })

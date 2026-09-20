@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { studioCreationKeySchema } from '../src/model.js'
 import type { AppSpecV1 } from '../src/appspec.js'
 import type {
   StudioApproval, StudioAppSpecRecord, StudioCreationKey, StudioDesignSpecRecord,
@@ -40,7 +41,7 @@ class MemoryRepository implements PromptToAppRepository {
   putSpec = async (value: StudioAppSpecRecord) => { this.specRows = [...this.specRows, value] }
   putTurn = async (value: StudioIntakeTurn) => { this.turnRows = [...this.turnRows, value] }
   putApproval = async (value: StudioApproval) => { this.approvalRows = [...this.approvalRows, value] }
-  putCreationKey = async (value: StudioCreationKey) => { this.keyRows = [...this.keyRows, value] }
+  putCreationKey = async (value: StudioCreationKey) => { studioCreationKeySchema.parse(value); this.keyRows = [...this.keyRows, value] }
   putDesign = async () => {}
   putPlan = async (value: StudioPlan) => {
     this.planRowsInternos = [...this.planRowsInternos.filter(row => row.plan_id !== value.plan_id), value]
@@ -462,4 +463,80 @@ describe('levar consigo o que o espaço guardou', () => {
     expect(levado.projects).toEqual([])
     expect(levado.org_id).toBe('org-z')
   })
+})
+
+describe('edição e etapa com recibo durável', () => {
+  const edit = { base_revision: 1, slices: [{ slice_id: 's1', title: 'Título revisado' }], removed: [] }
+  async function ready() {
+    const f = fixture('SPEC_READY')
+    await f.service.proposePlan(ana, 'proj-1', [{ slice_id: 's1', title: 'Início', description: 'Página inicial', acceptance_criteria: ['A página abre'], planned_files: ['src/GeneratedApp.tsx'] }])
+    return f
+  }
+  function restart(repository: MemoryRepository) {
+    return new PromptToAppService({ repository, now: () => new Date(AGORA) })
+  }
+  it('recupera a edição após reinício, mesmo depois de outra edição', async () => {
+    const { service, repository } = await ready()
+    const first = await service.editPlan(ana, 'proj-1', edit, CHAVE)
+    const latest = await service.editPlan(ana, 'proj-1', { ...edit, base_revision: 2, slices: [{ slice_id: 's1', title: 'Outra revisão' }] })
+    const count = repository.approvalRows.length
+    const recovered = restart(repository)
+    expect(await recovered.editPlan(ana, 'proj-1', edit, CHAVE)).toEqual(first)
+    expect(await recovered.plan(ana, 'proj-1')).toEqual(latest)
+    expect(repository.approvalRows).toHaveLength(count)
+  })
+  it('uma chave não aceita outro conteúdo nem outro ator ou inquilino', async () => {
+    const { service } = await ready()
+    await service.editPlan(ana, 'proj-1', edit, CHAVE)
+    await expect(service.editPlan(ana, 'proj-1', { ...edit, removed: ['s1'] }, CHAVE)).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.editPlan(bruno, 'proj-1', edit, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    await expect(service.editPlan(deOutroEspaco, 'proj-1', edit, CHAVE)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(service.editPlan({ ...ana, role: 'viewer' }, 'proj-1', edit, CHAVE)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+  it('reenvios concorrentes e reinício não chamam o modelo duas vezes', async () => {
+    const { service, repository } = await ready()
+    let calls = 0
+    const planner = { slice: async () => { calls++; return { slice: { slice_id: 's2', title: 'Contato', description: 'Dados de contato', acceptance_criteria: ['Contato visível'], planned_files: ['src/Contato.tsx'] } } } }
+    const [first, second] = await Promise.all([1, 2].map(() => service.addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)))
+    expect(second).toEqual(first)
+    expect(await restart(repository).addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)).toEqual(first)
+    expect(calls).toBe(1)
+  })
+  it('não repete automaticamente chamada de modelo cujo resultado ficou incerto', async () => {
+    const { service, repository } = await ready()
+    let calls = 0
+    const planner = { slice: async (): Promise<never> => { calls++; throw new Error('resposta perdida') } }
+    await expect(service.addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)).rejects.toThrow('resposta perdida')
+    await expect(restart(repository).addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(calls).toBe(1)
+  })
+  it('reconcilia auditoria se o processo cair depois de gravar o plano', async () => {
+    const { service, repository } = await ready()
+    const save = repository.putApproval
+    repository.putApproval = async () => { throw new Error('queda depois do plano') }
+    await expect(service.editPlan(ana, 'proj-1', edit, CHAVE)).rejects.toThrow('queda depois do plano')
+    repository.putApproval = save
+    const recovered = restart(repository)
+    const result = await recovered.editPlan(ana, 'proj-1', edit, CHAVE)
+    expect(result.revision).toBe(2)
+    expect(repository.approvalRows.filter(row => row.subject === 'plan')).toHaveLength(1)
+    await recovered.editPlan(ana, 'proj-1', edit, CHAVE)
+    expect(repository.approvalRows.filter(row => row.subject === 'plan')).toHaveLength(1)
+  })
+  it('a reconciliação mantém a data da edição mesmo após aprovação posterior', async () => {
+    const { repository } = await ready()
+    const editTime = '2026-09-17T13:00:00.000Z'
+    const editor = new PromptToAppService({ repository, now: () => new Date(editTime) })
+    const save = repository.putApproval
+    repository.putApproval = async () => { throw new Error('queda na trilha') }
+    await expect(editor.editPlan(ana, 'proj-1', edit, CHAVE)).rejects.toThrow('queda na trilha')
+    repository.putApproval = save
+    const later = new PromptToAppService({ repository, now: () => new Date('2026-09-17T14:00:00.000Z') })
+    await later.approvePlan(ana, 'proj-1')
+    const replayed = await later.editPlan(ana, 'proj-1', edit, CHAVE)
+    expect(replayed.status).toBe('APPROVED')
+    const audit = repository.approvalRows.find(row => row.approval_id.startsWith('plan-edit-'))
+    expect(audit?.approved_at).toBe(editTime)
+  })
+
 })

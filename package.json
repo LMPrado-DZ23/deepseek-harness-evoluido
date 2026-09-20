@@ -39,6 +39,8 @@
     "prove:edge": "node scripts/prove-edge.mjs",
     "prove:loopback": "node scripts/prove-loopback-binding.mjs --self-test",
     "prove:fase3-agents": "node scripts/prove-fase3-agents.mjs",
+    "prove:plan-replay": "node scripts/prove-plan-replay.mjs",
+    "prove:personal-adoption": "node scripts/prove-personal-adoption.mjs",
     "prove:agent-restart": "node scripts/prove-agent-restart-runtime.mjs",
     "preflight:fase3": "node scripts/preflight-fase3.mjs",
     "prove:postgres-runtime": "node scripts/prove-postgres-runtime.mjs",

@@ -945,3 +945,44 @@ describe('a porta pessoal fecha quando existe gente', () => {
     expect(h.service.isPersonalMode('127.0.0.1')).toBe(false)
   })
 })
+
+describe('adotar o espaço pessoal no primeiro registro local', () => {
+  it('mantém os identificadores que já são donos do trabalho pessoal', async () => {
+    const h = makeHarness()
+    h.service.setBindHost('127.0.0.1')
+    const personal = h.service.personalSession()!
+    const issued = await login(h)
+    expect(issued.session).toMatchObject({ user_id: personal.user_id, org_id: personal.org_id, tenant_id: personal.tenant_id })
+    expect(h.repository.users()[0]).toMatchObject({ user_id: 'user_local', bootstrap_owner: true, email: 'owner@example.com' })
+    expect(h.service.personalSession()).toBeUndefined()
+  })
+  it('vincula o código ao espaço pessoal e não o usa depois de expor o servidor', async () => {
+    const h = makeHarness()
+    h.service.setBindHost('127.0.0.1')
+    await h.service.requestMagicCode('owner@example.com')
+    expect(h.repository.magicCodes()[0]).toMatchObject({ org_id: 'org_local', tenant_id: 'tenant_local' })
+    h.service.setBindHost('0.0.0.0')
+    await expect(h.service.verifyMagicCode('owner@example.com', '123456', device)).rejects.toMatchObject({ code: 'invalid' })
+    expect(h.repository.users()).toHaveLength(0)
+  })
+  it('um convite de outro espaço não se torna dono do trabalho pessoal', async () => {
+    const h = makeHarness()
+    h.service.setBindHost('127.0.0.1')
+    h.service.setEnrollmentResolver(() => ({ orgId: 'org-invited', tenantId: 'tenant-invited', role: 'builder' }))
+    const issued = await login(h)
+    expect(issued.session).toMatchObject({ org_id: 'org-invited', tenant_id: 'tenant-invited' })
+    expect(issued.session.user_id).not.toBe('user_local')
+    expect(h.repository.users()[0]?.bootstrap_owner).toBe(false)
+  })
+  it.each(['org_id', 'tenant_id'] as const)('recusa código com %s de outro espaço e registra a recusa', async field => {
+    const h = makeHarness()
+    h.service.setBindHost('127.0.0.1')
+    await h.service.requestMagicCode('owner@example.com')
+    const code = h.repository.magicCodes()[0]!
+    await h.repository.putMagicCode({ ...code, [field]: 'outro-escopo' })
+    await expect(h.service.verifyMagicCode('owner@example.com', '123456', device)).rejects.toMatchObject({ code: 'invalid' })
+    expect(h.repository.users()).toHaveLength(0)
+    expect(h.repository.sessions()).toHaveLength(0)
+    expect(h.repository.audits().at(-1)).toMatchObject({ event_type: 'login_failed', outcome: 'failure' })
+  })
+})

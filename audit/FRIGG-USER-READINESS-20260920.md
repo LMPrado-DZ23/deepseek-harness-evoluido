@@ -117,3 +117,70 @@ no Chromium (28,3 s). Usam o servidor de teste e não certificam modelo real.
 A rodada focada também passou com Node 22.23.1 (179 testes). Os 32 portões
 e a constituição passaram após as correções. Evidência estruturada em
 [evidência do plano](evidence/20260920/plan-verification.json).
+
+## Continuação: reenvio durável e preservação do rascunho
+
+`AUDIT-REPLAY-01` resolve a pendência de `plan/edit` e `plan/slice` citada no
+checkpoint anterior. As duas rotas aceitam chave de intenção; o cliente mantém
+a mesma chave na repetição do mesmo pedido. Cada edição ou etapa produz um
+registro de revisão preservado, cujo identificador vem da reserva durável.
+Reenviar recupera essa revisão, mesmo após edições posteriores. O escopo e a
+autorização são reconferidos. A trilha de edição tem identidade determinística,
+permitindo reparar uma queda entre gravação e auditoria sem duplicar a trilha;
+a data permanece a da edição, mesmo após aprovação posterior.
+
+A tela agora distingue sucesso de falha: o editor e o texto de etapa não são
+limpos quando a resposta se perde. A falha de atualização dos detalhes aparece
+na interface; o resultado de uma escrita já confirmada continua reconhecido.
+
+`pnpm prove:plan-replay` usa o backend JSON e os domínios do Harness, com o
+repositório do produto, em dois processos independentes. O segundo recupera
+edição e etapa sem mudar a revisão atual nem aumentar o contador do modelo.
+Uma tentativa com resposta incerta permanece recusada ao reabrir. Modelo
+controlado nesta prova; nenhum provedor real nem cobrança foi exercitado.
+
+Sem CAS distribuído: dois processos concorrentes não são certificados por
+esta prova de reinício sequencial. Chamadas externas sem resultado confirmado
+não são repetidas automaticamente. A mensagem pede que a pessoa confira o
+plano e formule nova intenção caso a etapa continue ausente.
+
+Compatibilidade: registros antigos continuam aceitos; novos recibos usam dois
+valores adicionais do enum existente, sem destruir ou migrar registros antigos.
+Um binário anterior não reconhece esses valores. **Rollback exige backup
+consistente de todo o armazenamento anterior ao uso**, não exclusão avulsa dos
+recibos. Nenhum armazenamento de produção foi alterado nesta sessão.
+
+## Primeiro cadastro: projetos e arquivos pessoais
+
+`ABRIR-03` conserva os identificadores do principal pessoal no primeiro cadastro
+local verificado. Nao move tabelas nem arquivos. Convite conserva seu proprio
+escopo; codigo de outro modo/escopo e recusado e auditado. 188 testes e seis
+mutacoes sustentam as guardas. `prove:personal-adoption` usa JSON real e dois
+processos, servicos reais de identidade/tenancy/projetos e resolucao real da
+pasta do assistente; os adaptadores de tabela montados pela prova persistem nos
+dominios do Harness. OTP verificado pelo servico, email capturado em memoria.
+Nao e prova de SMTP, navegador autenticado real ou reinicio do computador.
+Nao migra instalacoes ja cadastradas; vinculos de conversas pessoais ainda
+nao sao transferidos. A meta geral permanece aberta.
+
+Limite adicional medido na revisao: a chave de envio da interface permanece em
+`useRef`; fechar/recarregar a pagina antes da confirmacao perde essa identidade.
+O servidor recupera recibos entre processos quando recebe a mesma chave; isto
+nao prova uma caixa de saida duravel no navegador. Essa parte de V7-C continua
+pendente, assim como CAS para escritores simultaneos em processos distintos.
+
+## Verificacao conjunta de reenvios e primeiro cadastro
+
+32 portoes e constituicao PASS; interface 1.075 PASS; identidade/tenancy 188
+PASS; 13 mutacoes detectadas (sete reenvio, seis cadastro). Ambas as provas
+JSON em dois processos passaram em Node 22.23.1 e 24.19.0.
+Navegador completo em copia isolada: 174 PASS, 3 SKIP, zero falhas. A rodada
+anterior no workspace teve 173 PASS/1 FAIL/3 SKIP porque a guarda da PWA viu
+quatro bundles historicos. Fontes executaveis conferidas byte a byte; build
+novo na copia isolada e a mesma guarda, sem afrouxamento, passaram. Causa de
+reaparecimento dos artefatos no workspace nao identificada; nao e certificado
+que qualquer pasta de build esteja limpa.
+Raiz em Node 22: 4.459 PASS/174 FAIL/68 SKIP, mesmos nomes de falha da rodada
+anterior. PostgreSQL novamente NOT_EXECUTED, sem Docker/servidor. Nenhuma
+protecao de runtime, sistema de arquivos ou proxy foi desligada.
+Evidencia consolidada: `audit/evidence/20260920/replay-adoption-verification.json`.

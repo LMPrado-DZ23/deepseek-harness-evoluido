@@ -1031,3 +1031,31 @@ describe('a espera LONGA: o pedido que espera o modelo não depende do navegador
     expect((await f.request(`/projects/${projectId}/operation?id=inventado`)).status).toBe(404)
   })
 })
+
+describe('recibos das rotas de edição e etapa', () => {
+  it.each(['edit', 'slice'] as const)('%s recupera o resultado e recusa chave com outro conteúdo ou escopo', async kind => {
+    const f = await fixture()
+    const actor: PromptToAppActor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
+    const project = await f.service.createProject(actor, { name: 'Site', original_brief: 'Quero apresentar serviços.', category: 'landing-page', privacy: 'local-only' })
+    await f.service.saveSpec(actor, project.project_id, validSpec, 'intake')
+    await f.service.proposePlan(actor, project.project_id, [{ slice_id: 's1', title: 'Início', description: 'Página inicial', acceptance_criteria: ['Página visível'], planned_files: ['src/GeneratedApp.tsx'] }])
+    vi.mocked(f.model.complete).mockResolvedValue({ route: 'fixture', model: 'fixture', value: { slice: { slice_id: 's2', title: 'Contato', description: 'Dados de contato', acceptance_criteria: ['Contato visível'], planned_files: ['src/Contato.tsx'] } } })
+    const body = kind === 'edit'
+      ? { base_revision: 1, slices: [{ slice_id: 's1', title: 'Título escolhido' }], request_key: 'request-plan-http-0001' }
+      : { base_revision: 1, reason: 'Acrescentar contato', request_key: 'request-plan-http-0001' }
+    const path = `/projects/${project.project_id}/plan/${kind}`
+    const send = () => f.request(path, { method: 'POST', body: JSON.stringify(body) })
+    const responses = await Promise.all([send(), send()])
+    expect(responses.map(response => response.status)).toEqual([200, 200])
+    const [first, replay] = await Promise.all(responses.map(response => response.json()))
+    expect(replay).toEqual(first)
+    expect(first.plan.revision).toBe(2)
+    expect(f.model.complete).toHaveBeenCalledTimes(kind === 'slice' ? 1 : 0)
+    const conflict = await f.request(path, { method: 'POST', body: JSON.stringify({ ...body, base_revision: 2 }) })
+    expect(conflict.status).toBe(409)
+    const other = await f.requestAs('another-org', path, { method: 'POST', body: JSON.stringify(body) })
+    expect(other.status).toBe(404)
+    expect(await other.text()).not.toContain(first.plan.plan_id)
+    expect((await f.request(path, { method: 'POST', body: JSON.stringify({ ...body, request_key: 'invalid' }) })).status).toBe(400)
+  })
+})

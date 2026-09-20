@@ -24,6 +24,8 @@ import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBl
 import { PERGUNTA_QUESTION_ID, MAX_PERGUNTA, MIN_PERGUNTA, perguntaNormalizada, respostaEmTexto, respostaSobreATarefa } from './pergunta.js'
 import { t } from './i18n.js'
 
+type PlanSlicePlanner = { slice(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, existing: readonly { readonly title: string; readonly planned_files: readonly string[] }[], request: string, category: StudioProjectCategory): Promise<{ readonly slice: StudioPlanSlice }> }
+
 export interface PromptToAppActor {
   readonly userId: string
   readonly orgId: string
@@ -290,6 +292,7 @@ export class PromptToAppService {
     requestKey: string | undefined,
     executar: (idReservado: string | undefined) => Promise<{ readonly id: string, readonly valor: T }>,
     reler: (resultId: string) => Promise<T | undefined>,
+    retryMissingResult = true,
   ): Promise<T> {
     if (requestKey === undefined || this.#repository.creationKeys === undefined || this.#repository.putCreationKey === undefined) {
       return (await executar(undefined)).valor
@@ -308,6 +311,7 @@ export class PromptToAppService {
         // pode virar atalho para ler o que é de outra pessoa.
         const existente = await reler(desfecho.resultId)
         if (existente !== undefined) return existente
+        if (!retryMissingResult) throw new PromptToAppError('REPLAY', t('errors.planSliceUncertain'))
         // A reserva ficou e o efeito não: o processo caiu entre as duas
         // escritas. Termina com o MESMO identificador.
         return (await executar(desfecho.resultId)).valor
@@ -754,6 +758,32 @@ export class PromptToAppService {
     return value
   }
 
+  #requirePlanReceipts(requestKey: string | undefined): void {
+    if (requestKey !== undefined && (this.#repository.creationKeys === undefined || this.#repository.putCreationKey === undefined)) {
+      throw new PromptToAppError('INVALID', t('errors.planReceiptUnavailable'))
+    }
+  }
+
+  async #replayPlan(actor: PromptToAppActor, projectId: string, planId: string): Promise<StudioPlan | undefined> {
+    this.project(actor, projectId)
+    const rows = this.#planStore === undefined ? this.#repository.plans()
+      : await listPlans(this.#planStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    const plan = rows.find(row => row.plan_id === planId && row.project_id === projectId && this.#sameScope(actor, row))
+    if (plan !== undefined) await this.#recordPlanEdit(actor, plan)
+    return plan
+  }
+
+  /** Identidade determinística permite reparar queda entre plano e trilha sem duplicar a trilha. */
+  async #recordPlanEdit(actor: PromptToAppActor, plan: StudioPlan): Promise<void> {
+    const id = `plan-edit-${createHash('sha256').update(JSON.stringify([plan.org_id, plan.tenant_id, plan.plan_id])).digest('hex')}`
+    if (this.#repository.approvals().some(row => row.approval_id === id && this.#sameScope(actor, row))) return
+    await this.#repository.putApproval({
+      approval_id: id, project_id: plan.project_id, org_id: plan.org_id, tenant_id: plan.tenant_id,
+      subject: 'plan', subject_id: `${plan.plan_id}:r${String(planRevision(plan))}`, approved_by: actor.userId,
+      approved_at: plan.created_at, tier: 'T1', strong_identity: false, from_state: null, to_state: null,
+    })
+  }
+
   /** Grava o plano onde a autoridade de armazenamento manda. */
   async #putPlan(value: StudioPlan): Promise<void> {
     if (this.#planStore === undefined) await this.#repository.putPlan(value)
@@ -827,7 +857,16 @@ export class PromptToAppService {
    * @param edit - as mudanças, já validadas pelo schema.
    * @returns o plano gravado, uma revisão à frente.
    */
-  async editPlan(actor: PromptToAppActor, projectId: string, edit: PlanEdit): Promise<StudioPlan> {
+  async editPlan(actor: PromptToAppActor, projectId: string, edit: PlanEdit, requestKey?: string): Promise<StudioPlan> {
+    this.#authorize(actor, 'project.write'); this.project(actor, projectId)
+    this.#requirePlanReceipts(requestKey)
+    return this.#comChaveDeEnvio(actor, projectId, 'edicao-plano', JSON.stringify(edit), requestKey,
+      async id => { const value = await this.#editPlan(actor, projectId, edit, id); return { id: value.plan_id, valor: value } },
+      id => this.#replayPlan(actor, projectId, id),
+    )
+  }
+
+  async #editPlan(actor: PromptToAppActor, projectId: string, edit: PlanEdit, resultId?: string): Promise<StudioPlan> {
     return this.#withPlanWrite(actor, projectId, async () => {
       this.#authorize(actor, 'project.write')
       const value = await this.plan(actor, projectId)
@@ -842,6 +881,7 @@ export class PromptToAppService {
           : error.code === 'NOT_FOUND' ? 'NOT_FOUND' as const : 'INVALID' as const
         throw new PromptToAppError(code, error.message)
       }
+      updated = { ...updated, plan_id: resultId ?? this.#createId(), created_at: updated.updated_at }
       await this.#putPlan(updated)
       // O REGISTRO da edição. Não é uma aprovação — aprovar continua sendo um ato
       // separado, feito depois de ver o resultado da própria edição —, e sim a
@@ -855,7 +895,7 @@ export class PromptToAppService {
       //
       // T1 porque editar um plano ainda PROPOSTO não constrói nada nem toca
       // dado sensível. O que constrói é aprovar, e essa aprovação já é gravada.
-      await this.#approval(actor, projectId, 'plan', `${updated.plan_id}:r${String(planRevision(updated))}`, 'T1', false)
+      await this.#recordPlanEdit(actor, updated)
       return updated
     })
   }
@@ -878,12 +918,26 @@ export class PromptToAppService {
    * @param privacy - o perfil de rota do projeto.
    * @returns o plano com a etapa nova no fim.
    */
-  async addPlanSlice(
+  async addPlanSlice(actor: PromptToAppActor, projectId: string, request: string, planner: PlanSlicePlanner, privacy: RoutePrivacy, requestKey?: string, baseRevision?: number): Promise<StudioPlan> {
+    this.#authorize(actor, 'project.write'); this.project(actor, projectId)
+    const text = request.trim()
+    if (text.length < 3 || text.length > 2_000) throw new PromptToAppError('INVALID', t('errors.sliceUnusable'))
+    this.#requirePlanReceipts(requestKey)
+    return this.#comChaveDeEnvio(actor, projectId, 'etapa-plano', JSON.stringify([text, baseRevision ?? null]), requestKey,
+      async id => { const value = await this.#addPlanSlice(actor, projectId, text, planner, privacy, id, baseRevision); return { id: value.plan_id, valor: value } },
+      id => this.#replayPlan(actor, projectId, id),
+      false, // Após perda do resultado, não repetir automaticamente custo externo incerto.
+    )
+  }
+
+  async #addPlanSlice(
     actor: PromptToAppActor,
     projectId: string,
     request: string,
-    planner: { slice(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, existing: readonly { readonly title: string; readonly planned_files: readonly string[] }[], request: string, category: StudioProjectCategory): Promise<{ readonly slice: StudioPlanSlice }> },
+    planner: PlanSlicePlanner,
     privacy: RoutePrivacy,
+    resultId?: string,
+    baseRevision?: number,
   ): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
     const text = request.trim()
@@ -892,6 +946,7 @@ export class PromptToAppService {
     if (text.length < 3 || text.length > 2_000) throw new PromptToAppError('INVALID', t('errors.sliceUnusable'))
     const project = this.project(actor, projectId)
     const plan = await this.plan(actor, projectId)
+    if (baseRevision !== undefined && planRevision(plan) !== baseRevision) throw new PromptToAppError('REPLAY', t('errors.planEditStale'))
     if (plan.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planEditUnavailable'))
     const spec = (await this.latestSpec(actor, projectId)).app_spec
     const { slice } = await planner.slice(
@@ -910,8 +965,9 @@ export class PromptToAppService {
         if (!(error instanceof PlanEditError)) throw error
         throw new PromptToAppError(error.code === 'UNAVAILABLE' ? 'REPLAY' : 'INVALID', error.message)
       }
+      updated = { ...updated, plan_id: resultId ?? this.#createId(), created_at: updated.updated_at }
       await this.#putPlan(updated)
-      await this.#approval(actor, projectId, 'plan', `${updated.plan_id}:r${String(planRevision(updated))}`, 'T1', false)
+      await this.#recordPlanEdit(actor, updated)
       return updated
     })
   }
