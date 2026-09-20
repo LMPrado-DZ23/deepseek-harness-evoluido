@@ -57,3 +57,17 @@ describe('os textos que a verificação procura', () => {
     expect(prompts[0]).toContain('"Contador de Copos","Meta de 8 Copos"')
   })
 })
+
+describe('a conferência de ENTIDADE aceita o nome dentro de um rótulo', () => {
+  it('o teste gerado procura o nome como expressão literal, sensível a maiúsculas', async () => {
+    const { generatedPlaywright, escaparRegex } = await import('../src/acceptance.ts')
+    expect(escaparRegex('Contagem (x) de Água.')).toBe('Contagem \\(x\\) de Água\\.')
+    const fonte = generatedPlaywright([{ id: 'entity-0', label: 'entity:Contagem de Água', title: 't', kind: 'entity', expected: 'Contagem de Água', status: 'PENDING' }])
+    expect(fonte).toContain(`page.getByText(new RegExp("Contagem de Água",'u')).first()`)
+    expect(fonte).not.toContain(`getByText("Contagem de Água",{exact:true})`)
+  })
+  it('o diagnóstico devolve o nome, e não a expressão', async () => {
+    const { textosQueFaltaram } = await import('../src/acceptance.ts')
+    expect(textosQueFaltaram("    Locator: getByText('/Contagem de Água/u').first()\n    Locator: getByText('/Meta \\(8\\)/u').first()")).toEqual(['Contagem de Água', 'Meta (8)'])
+  })
+})

@@ -149,7 +149,8 @@ function extractLiteral(criterion: string): string | undefined {
   return match[1]?.trim() || undefined
 }
 
-function generatedPlaywright(checks: readonly AcceptanceCheck[]): string {
+/** A suíte Playwright que o construtor roda, gerada das conferências. */
+export function generatedPlaywright(checks: readonly AcceptanceCheck[]): string {
   const authRequired = checks.some(check => check.kind === 'auth' || check.kind === 'crud' || check.flow?.submit_requires_auth === true || check.flow?.list_requires_auth === true)
   const tests = checks.filter(check => check.status === 'PENDING').map(check => renderCheck(check, authRequired)).join('\n')
   return `import { expect, test } from '@playwright/test'\nimport { readFile, writeFile } from 'node:fs/promises'\nimport { resolve } from 'node:path'\nconst reportPath=resolve(process.cwd(),'evidence/appspec-report.json')\nasync function record(id:string,status:'PASSED'|'FAILED'){const report=JSON.parse(await readFile(reportPath,'utf8'));report.checks=report.checks.map((check:{id:string})=>check.id===id?{...check,status}:check);await writeFile(reportPath,JSON.stringify(report,null,2)+'\\n')}\nasync function checked(id:string,assertion:()=>Promise<void>){try{await assertion();await record(id,'PASSED')}catch(error){await record(id,'FAILED');throw error}}\n${authRequired ? LOGIN_HELPER : ''}\n${SCREENSHOT_TEST}\n${tests}\n`
@@ -201,8 +202,17 @@ function renderCheck(check: AcceptanceCheck, authRequired: boolean): string {
   if(check.kind==='scheduling') return `test(${label},async()=>checked(${id},async()=>{const { openDatabase }=await import('../../src/db/client');const { migrateScheduling }=await import('../../src/db/scheduling-migration');const { SchedulingRepository }=await import('../../src/server/scheduling/repository');const database=openDatabase();try{migrateScheduling(database);const repository=new SchedulingRepository(database);repository.create({date:'2099-09-04',slot:${JSON.stringify(check.expected)},createdBy:'member'});expect(repository.list({userId:'other',role:'member'})).toEqual([]);const created=repository.list({userId:'owner',role:'owner'})[0]!;expect(created.state).toBe('pending');try{repository.create({date:'2099-09-04',slot:${JSON.stringify(check.expected)},createdBy:'other'});throw new Error('EXPECTED_SLOT_CONFLICT')}catch(error){expect(error).toMatchObject({code:'SLOT_ALREADY_RESERVED'})}repository.transition(String(created.id),'confirmed',{userId:'owner',role:'owner'});expect(repository.list({userId:'member',role:'member'})[0]).toMatchObject({state:'confirmed'});repository.transition(String(created.id),'cancelled',{userId:'member',role:'member'});expect(repository.create({date:'2099-09-04',slot:${JSON.stringify(check.expected)},createdBy:'other'})).toBeUndefined()}finally{database.close()}}))`
   if(check.kind==='dashboard') return renderDashboard(check)
   if(check.kind==='saas') return `test(${label},async()=>checked(${id},async()=>{const { DatabaseSync }=await import('node:sqlite');const { migrateSaas }=await import('../../src/db/saas-migrations');const { SaasRecordNotFoundError,SaasRepository }=await import('../../src/server/saas/repository');const database=new DatabaseSync(':memory:');try{database.exec("PRAGMA foreign_keys=ON;CREATE TABLE auth_users(id TEXT PRIMARY KEY);INSERT INTO auth_users VALUES('owner'),('a'),('b')");migrateSaas(database);const repository=new SaasRepository(database);const row=repository.create('acceptance',{name:'B'},{userId:'b',role:'member'});expect(()=>repository.get(row.id,{userId:'a',role:'member'})).toThrow(SaasRecordNotFoundError);expect(repository.get(row.id,{userId:'owner',role:'owner'}).id).toBe(row.id)}finally{database.close()}}))`
+  // O NOME de uma entidade aparece dentro de um rótulo com valor ("Contagem de
+  // Água: 3 copos"), e isso a apresenta. Exigir o texto EXATO reprovou três
+  // tentativas de um aplicativo correto (medido em 20/09/2026, Mistral). A
+  // conferência continua sensível a maiúsculas e acentos; só deixa de exigir
+  // que o nome esteja SOZINHO no elemento.
+  if(check.kind==='entity') return `test(${label},async({page})=>checked(${id},async()=>{${enter}await expect(page.getByText(new RegExp(${JSON.stringify(escaparRegex(check.expected ?? ''))},'u')).first()).toBeVisible()}))`
   return `test(${label},async({page})=>checked(${id},async()=>{${enter}await expect(page.getByText(${JSON.stringify(check.expected)},{exact:true}).first()).toBeVisible()}))`
 }
+
+/** Um texto como expressão regular LITERAL: nenhum caractere vira operador. */
+export function escaparRegex(texto: string): string { return texto.replace(/[.*+?^${}()|[\]\\/]/gu, '\\$&') }
 
 function fieldEntries(flow: FlowCheck, marker: string): string[] { return flow.fields.map(field=>{const locator=`form.locator(${JSON.stringify(`[name="${field.name}"]`)})`;if(field.type==='boolean')return `await ${locator}.check()`;if(field.type==='selection')return `await ${locator}.selectOption(${JSON.stringify(field.options?.[0]??'')})`;if(field.type==='reference')return `await ${locator}.selectOption({index:1})`;const value=field.name===flow.marker_field?(field.type==='email'?`${marker}@example.test`:field.type==='phone'?'11987654321':marker):field.type==='number'?'42':field.type==='date'?'2026-09-03':field.type==='email'?`test-${marker}@example.test`:field.type==='phone'?'11987654321':`Value-${field.name}`;return `await ${locator}.fill(${JSON.stringify(value)})`}) }
 function markerValue(flow: FlowCheck, marker: string): string { const field=flow.fields.find(value=>value.name===flow.marker_field)!; return field.type==='email'?`${marker}@example.test`:field.type==='phone'?'11987654321':field.type==='number'?'42':field.type==='date'?'2026-09-03':field.type==='selection'?field.options?.[0]??'':field.type==='boolean'?tGeneratedApp('common.yes'):marker }
@@ -241,5 +251,9 @@ export function textosExigidos(checks: readonly AcceptanceCheck[]): readonly str
 export function textosQueFaltaram(saida: string): readonly string[] {
   const limpa = saida.replace(/\u001b\[[0-9;]*m/gu, '')
   const achados = [...limpa.matchAll(/Locator: getByText\('((?:[^'\\]|\\.)*)'/gu)].map(achado => achado[1]!.replace(/\\'/gu, "'"))
+    // A conferência de entidade procura por expressão, e o Playwright a
+    // imprime entre aspas (`getByText('/Contagem de Água/u')`, medido em
+    // 20/09/2026): volta o texto, sem as barras e sem o escape.
+    .map(texto => { const expressao = /^\/(.*)\/u$/su.exec(texto); return expressao === null ? texto : expressao[1]!.replace(/\\(.)/gu, '$1') })
   return [...new Set(achados)]
 }
