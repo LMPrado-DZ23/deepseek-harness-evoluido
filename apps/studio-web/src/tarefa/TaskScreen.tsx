@@ -77,6 +77,21 @@ export type PainelAberto =
   | { readonly tipo: 'uso' }
 
 /**
+ * Leva a pessoa ao FIM da tarefa: o último lance, as ações e o compositor.
+ *
+ * Rolar só a conversa não basta desde que a coluna também rola (tela baixa):
+ * a coluna ficava no meio, e a linha da parada de emergência aparecia pela
+ * metade, cortada pelo compositor preso embaixo. Medido no Chrome do titular.
+ * @param marca - o item vazio no fim da conversa.
+ */
+export function rolarAteOFim(marca: HTMLElement | null): void {
+  if (marca === null) return
+  marca.scrollIntoView({ block: 'end' })
+  const coluna = marca.closest('.dz-tarefa-conversa')
+  if (coluna !== null) coluna.scrollTop = coluna.scrollHeight
+}
+
+/**
  * A pergunta de admissão ainda sem resposta, se houver.
  * @param detalhes - o corpo da tarefa.
  * @returns o nome da pergunta aberta, ou `null`.
@@ -128,7 +143,7 @@ export function TaskScreen(props: TaskScreenProps) {
     cada render roubaria a rolagem de quem subiu para reler o plano enquanto a
     tentativa corre, que é justamente quando alguém sobe.
   */
-  useEffect(() => { fim.current?.scrollIntoView({ block: 'end' }) }, [lances.length])
+  useEffect(() => { rolarAteOFim(fim.current) }, [lances.length])
 
   async function enviar(evento: React.FormEvent) {
     evento.preventDefault()

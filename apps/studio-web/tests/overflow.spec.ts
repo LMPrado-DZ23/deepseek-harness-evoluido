@@ -81,18 +81,50 @@ test('numa tela baixa a conversa continua legível', async ({ context, page }) =
   expect(compositor.base, 'o compositor saiu da tela').toBeLessThanOrEqual(compositor.tela)
   expect(compositor.topo).toBeGreaterThan(0)
   // O botão de parar continua ao alcance, na versão de uma linha.
-  // Rolando com a RODA do mouse, como a pessoa faz — rolar por código passaria
-  // mesmo numa coluna que não rola.
+  // Ao abrir, a pessoa está no FIM da tarefa: o botão de parar aparece
+  // inteiro — estar na tela não basta, o compositor preso embaixo pode estar
+  // POR CIMA dele.
   const parar = page.locator('.emergency-stop-compacto .emergency-danger')
-  const caixa = (await page.locator('.dz-compositor-inferior').boundingBox())!
-  await page.mouse.move(caixa.x + caixa.width / 2, caixa.y + 10)
-  await page.mouse.wheel(0, 2_000)
-  await expect(parar).toBeInViewport()
-  // Estar na tela não basta: o compositor preso embaixo pode estar POR CIMA.
-  await expect.poll(() => parar.evaluate(botao => {
+  const livre = () => parar.evaluate(botao => {
     const caixa = botao.getBoundingClientRect()
     const noPonto = document.elementFromPoint(caixa.left + caixa.width / 2, caixa.top + caixa.height / 2)
     return noPonto !== null && botao.contains(noPonto)
-  })).toBe(true)
+  })
+  await expect.poll(livre).toBe(true)
+  // E a coluna rola com a RODA do mouse, como a pessoa faz — rolar por código
+  // passaria mesmo numa coluna que não rola.
+  const coluna = page.locator('.dz-tarefa-conversa')
+  const antes = await coluna.evaluate(elemento => elemento.scrollTop)
+  expect(antes, 'nesta altura a coluna precisa rolar').toBeGreaterThan(0)
+  const caixa = (await page.locator('.dz-compositor-inferior').boundingBox())!
+  await page.mouse.move(caixa.x + caixa.width / 2, caixa.y + 10)
+  await page.mouse.wheel(0, -2_000)
+  await expect.poll(() => coluna.evaluate(elemento => elemento.scrollTop)).toBeLessThan(antes)
+  // Rolado para cima, o compositor continua preso embaixo e livre.
+  const livreNaTela = (seletor: string) => page.locator(seletor).first().evaluate(elemento => {
+    const caixa = elemento.getBoundingClientRect()
+    if (caixa.bottom > window.innerHeight || caixa.top < 0) return false
+    const noPonto = document.elementFromPoint(caixa.left + caixa.width / 2, caixa.top + caixa.height / 2)
+    return noPonto !== null && elemento.contains(noPonto)
+  })
+  await expect.poll(() => livreNaTela('#dz-continuar')).toBe(true)
+  // A oferta de instalar, quando aparece, não cobre o botão de enviar.
+  await page.evaluate(() => {
+    const evento = new Event('beforeinstallprompt', { cancelable: true })
+    Object.assign(evento, { prompt: async () => undefined, userChoice: Promise.resolve({ outcome: 'dismissed' }) })
+    window.dispatchEvent(evento)
+  })
+  await expect(page.locator('.pwa-install')).toBeVisible()
+  await expect.poll(() => livreNaTela('.dz-compositor-inferior .dz-enviar-redondo')).toBe(true)
+  // Nem encosta no compositor: no Chrome do titular, com o compositor mais
+  // alto, ela caía exatamente em cima do botão de enviar.
+  const sobrepoe = await page.evaluate(() => {
+    const compositor = document.querySelector('.dz-compositor-inferior')!.getBoundingClientRect()
+    return [...document.querySelectorAll('.pwa-install, .pwa-install-dismiss')].some(oferta => {
+      const caixa = oferta.getBoundingClientRect()
+      return caixa.left < compositor.right && caixa.right > compositor.left && caixa.top < compositor.bottom && caixa.bottom > compositor.top
+    })
+  })
+  expect(sobrepoe, 'a oferta de instalar ficou por cima do compositor').toBe(false)
 })
 })

@@ -189,6 +189,13 @@ test('a oferta de instalação pode ser dispensada, e continua dispensada neste 
   })
   await oferecer()
   await expect(page.locator('.pwa-install')).toBeVisible()
+  // A oferta não pode cobrir o botão de enviar (medido no Chrome do titular).
+  const enviar = page.locator('.dz-enviar-redondo').first()
+  await expect.poll(() => enviar.evaluate(botao => {
+    const caixa = botao.getBoundingClientRect()
+    const noPonto = document.elementFromPoint(caixa.left + caixa.width / 2, caixa.top + caixa.height / 2)
+    return noPonto !== null && botao.contains(noPonto)
+  })).toBe(true)
   await page.getByRole('button', { name: 'Não oferecer mais a instalação neste aparelho' }).click()
   await expect(page.locator('.pwa-install')).toBeHidden()
   await expect(page.locator('.pwa-install-dismiss')).toBeHidden()
