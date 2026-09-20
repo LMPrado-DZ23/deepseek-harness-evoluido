@@ -1,3 +1,4 @@
+import { EXPORTACAO_PRONTA } from '../src/export-script.ts'
 import { createHash } from 'node:crypto'
 import type { FileHandle } from 'node:fs/promises'
 import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
@@ -381,6 +382,35 @@ describe('server-authoritative Docker builder adapter', () => {
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 
+  it('baixa a exportacao com o exportador VIVO: o tmpfs some quando ele sai', async () => {
+    const engine = new FakeEngine(); engine.exporterExitsBeforeReady = true; engine.downloadPayload = exportTar()
+    const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-vivo-')); const signal = new AbortController().signal; const eventos: Record<string, unknown>[] = []
+    try {
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, diagnostico: evento => { eventos.push({ ...evento }) } })
+      await adapter.prepare(buildRef, 'vivo', artifact, signal)
+      await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
+      expect(eventos[0]).toMatchObject({ evento: 'exportador-saiu-com-erro', status: -1 })
+      expect(engine.downloadsFromStoppedExporter).toBe(0)
+      engine.exporterExitsBeforeReady = false
+      await expect(adapter.exportArtifact(buildRef, signal)).resolves.toMatchObject({ files: 3 })
+      expect(engine.downloadsFromStoppedExporter).toBe(0)
+      expect(engine.containers.filter(row => row.Labels['dz23.role'] === 'export')).toHaveLength(0)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('espera a MARCA de pronto: saida sem a marca e copia em andamento', async () => {
+    const engine = new FakeEngine(); engine.downloadPayload = exportTar(); engine.exportIncompleto = true
+    const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-marca-')); const signal = new AbortController().signal
+    try {
+      const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 })
+      await adapter.prepare(buildRef, 'marca', artifact, signal)
+      vi.spyOn(engine, 'containerLogs').mockImplementationOnce(async () => ({ stdout: Buffer.from('copiando…'), stderr: Buffer.alloc(0) }))
+        .mockImplementationOnce(async () => { engine.exportIncompleto = false; return { stdout: Buffer.from('copiando…'), stderr: Buffer.alloc(0) } })
+      await expect(adapter.exportArtifact(buildRef, signal)).resolves.toMatchObject({ files: 3 })
+      expect(engine.downloadsFromStoppedExporter).toBe(0)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
   it('removes exporter resources even when the downloaded archive is invalid', async () => {
     const engine = new FakeEngine(); engine.downloadPayload = Buffer.from('not a tar'); const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-fail-')); const signal = new AbortController().signal
     try {
@@ -452,7 +482,7 @@ describe('server-authoritative Docker builder adapter', () => {
     const engine = new FakeEngine(); engine.downloadPayload = exportTar(); const root = await mkdtemp(join(tmpdir(), 'dz23-adapter-export-race-')); const signal = new AbortController().signal
     try {
       const adapter = new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256 }); await adapter.prepare(buildRef, 'export-race', artifact, signal)
-      let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve }); vi.spyOn(engine, 'waitContainer').mockImplementationOnce(async () => { await blocked; return { StatusCode: 0 } })
+      let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve }); vi.spyOn(engine, 'containerLogs').mockImplementationOnce(async () => { await blocked; return { stdout: Buffer.from(EXPORTACAO_PRONTA), stderr: Buffer.alloc(0) } })
       const first = adapter.exportArtifact(buildRef, signal); await vi.waitFor(() => expect(engine.created.some(row => row.body.Labels && object(row.body.Labels)['dz23.role'] === 'export')).toBe(true)); const second = adapter.exportArtifact(buildRef, signal); release()
       await expect(Promise.all([first, second])).resolves.toEqual([expect.objectContaining({ relative_path: `exports/${buildRef}` }), expect.objectContaining({ relative_path: `exports/${buildRef}` })])
       expect(engine.created.filter(row => object(row.body.Labels)['dz23.role'] === 'export')).toHaveLength(1)
@@ -550,6 +580,11 @@ class FakeEngine implements DockerEnginePort {
   handleArchives = 0
   readonly waitResolvers = new Map<string, (value: { readonly StatusCode: number }) => void>()
   downloadPayload: Buffer = Buffer.alloc(0)
+  exporterExitsBeforeReady = false
+  /** A cópia ainda está andando: o que se baixar agora sai pela metade (aqui, vazio). */
+  exportIncompleto = false
+  /** Downloads feitos de um exportador que já tinha saído: o `tmpfs` estava vazio. */
+  downloadsFromStoppedExporter = 0
   async ping(): Promise<void> { if (this.pingFailure) throw new Error('down') }
   async inspectImage(digest: string): Promise<{ readonly Id: string }> { this.inspected.push(digest); return { Id: this.imageId } }
   async createVolume(name: string, volumeLabels: Readonly<Record<string, string>>, driverOpts: Readonly<Record<string, string>>): Promise<void> { this.volumes.push({ Name: name, Labels: { ...volumeLabels } }); this.volumeOptions.push({ ...driverOpts }) }
@@ -573,19 +608,32 @@ class FakeEngine implements DockerEnginePort {
   }
   async startContainer(id: string): Promise<void> { this.started.push(id); const row = this.containers.find(value => value.Id === id); if (row !== undefined) row.State = 'running' }
   async waitContainer(id: string, signal: AbortSignal): Promise<{ readonly StatusCode: number }> {
-    if (!this.waitForAbort) return { StatusCode: this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'export' ? this.exportExitCode : 0 }
+    const exportador = this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'export'
+    // Como o exportador de verdade: com a cópia bem-sucedida ele FICA VIVO até
+    // ser parado (o `tmpfs` some quando ele sai). `exporterExitsBeforeReady`
+    // é o programa antigo, que saía com 0 logo depois de copiar.
+    if (exportador && this.exportExitCode === 0 && !this.exporterExitsBeforeReady && !this.waitForAbort) {
+      return new Promise((resolve, reject) => {
+        this.waitResolvers.set(id, resolve)
+        signal.addEventListener('abort', () => { this.waitResolvers.delete(id); reject(signal.reason) }, { once: true })
+      })
+    }
+    if (!this.waitForAbort) return { StatusCode: exportador ? this.exportExitCode : 0 }
     return new Promise((resolve, reject) => {
       this.waitResolvers.set(id, resolve)
       signal.addEventListener('abort', () => { this.waitResolvers.delete(id); reject(signal.reason) }, { once: true })
     })
   }
   async containerLogs(id: string, maximumBytes: number): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> {
-    if (this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'template-verify') return { stdout: Buffer.from(this.templateDigest), stderr: Buffer.alloc(0) }
+    const papel = this.containers.find(row => row.Id === id)?.Labels['dz23.role']
+    if (papel === 'export' && this.exportExitCode === 0 && !this.exporterExitsBeforeReady) return { stdout: Buffer.from(`${EXPORTACAO_PRONTA}\n`), stderr: Buffer.alloc(0) }
+    if (papel === 'template-verify') return { stdout: Buffer.from(this.templateDigest), stderr: Buffer.alloc(0) }
     if (this.logs.stdout.byteLength + this.logs.stderr.byteLength > maximumBytes) throw new Error('DOCKER_RESPONSE_TOO_LARGE')
     return this.logs
   }
-  async downloadArchive(_container: string, source: string, destination: FileHandle): Promise<{ readonly bytes: number; readonly sha256: string }> { const payload = source === '/template-store' ? templateTar(this.templateDigest) : this.downloadPayload; await destination.writeFile(payload); await destination.sync(); return { bytes: payload.length + this.reportedDownloadBytesDelta, sha256: createHash('sha256').update(payload).digest('hex') } }
+  async downloadArchive(_container: string, source: string, destination: FileHandle): Promise<{ readonly bytes: number; readonly sha256: string }> { const row = this.containers.find(value => value.Id === _container); const vazio = source === '/export/.' && row !== undefined && (row.State !== 'running' || this.exporterExitsBeforeReady || this.exportIncompleto); if (vazio) this.downloadsFromStoppedExporter += 1; const payload = source === '/template-store' ? templateTar(this.templateDigest) : vazio ? Buffer.alloc(1024) : this.downloadPayload; await destination.writeFile(payload); await destination.sync(); return { bytes: payload.length + this.reportedDownloadBytesDelta, sha256: createHash('sha256').update(payload).digest('hex') } }
   async stopContainer(id: string): Promise<void> {
+    const parado = this.containers.find(row => row.Id === id); if (parado !== undefined) parado.State = 'exited'
     if (this.failExporterCleanup && this.containers.find(row => row.Id === id)?.Labels['dz23.role'] === 'export') throw new Error('stop exporter failed')
     this.waitResolvers.get(id)?.({ StatusCode: 137 }); this.waitResolvers.delete(id)
   }

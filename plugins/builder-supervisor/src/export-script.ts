@@ -52,6 +52,8 @@ for (const [name, isDir, required] of entries) {
   fs.mkdirSync(p.dirname(to), { recursive: true });
   copyTree(from, to, fs.realpathSync(from), []);
 }
+process.stdout.write(READY + '\n');
+if (KEEP_ALIVE) setInterval(() => {}, 60000);
 `
 
 /**
@@ -61,9 +63,21 @@ for (const [name, isDir, required] of entries) {
  * @param destino - para onde.
  * @returns o programa.
  */
-export function programaDeExportacao(raiz: string, destino: string): string {
-  return `const ROOT = ${JSON.stringify(raiz)}; const TARGET = ${JSON.stringify(destino)};${PROGRAMA}`
+export function programaDeExportacao(raiz: string, destino: string, manterVivo = false): string {
+  return `const ROOT = ${JSON.stringify(raiz)}; const TARGET = ${JSON.stringify(destino)}; const READY = ${JSON.stringify(EXPORTACAO_PRONTA)}; const KEEP_ALIVE = ${String(manterVivo)};${PROGRAMA}`
 }
 
-/** O programa do `node -e` no contêiner de exportação. */
-export const EXPORT_SCRIPT = programaDeExportacao('/workspace', '/export')
+/**
+ * A marca que o exportador escreve quando a cópia TERMINOU.
+ *
+ * O volume de exportação é `tmpfs`, e um `tmpfs` só existe montado enquanto o
+ * contêiner roda: baixar `/export` de um exportador que JÁ SAIU devolve uma
+ * pasta vazia. Medido em 20/09/2026 no computador do titular — o leitor
+ * recusava na linha "nenhum arquivo", depois de a construção passar em tudo.
+ * Por isso o exportador fica vivo depois da cópia, o adaptador espera esta
+ * marca, baixa, e só então o para.
+ */
+export const EXPORTACAO_PRONTA = 'DZ23_EXPORT_READY'
+
+/** O programa do `node -e` no contêiner de exportação: fica vivo até ser parado. */
+export const EXPORT_SCRIPT = programaDeExportacao('/workspace', '/export', true)

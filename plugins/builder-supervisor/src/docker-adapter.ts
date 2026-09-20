@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { EXPORT_SCRIPT } from './export-script.js'
+import { EXPORT_SCRIPT, EXPORTACAO_PRONTA } from './export-script.js'
 import { rm } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
@@ -336,7 +336,7 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
           { Type: 'volume', Source: resources.exportVolume, Target: '/export', ReadOnly: false },
         ]), signal)
         await this.options.engine.startContainer(exporter, signal)
-        const completion = await this.options.engine.waitContainer(exporter, signal)
+        const completion = await esperarExportacao(this.options.engine, exporter, signal)
         if (completion.StatusCode !== 0) {
           const saida = await this.options.engine.containerLogs(exporter, 64 * 1024, AbortSignal.timeout(5_000)).catch(() => undefined)
           this.options.diagnostico?.({ evento: 'exportador-saiu-com-erro', status: completion.StatusCode, saida: saida === undefined ? '' : saida.stderr.toString('utf8').slice(-600) })
@@ -448,4 +448,32 @@ export function ondeRecusou(error: unknown): string {
     if (achado !== null && !/\binvalid\b|\bmismatch\b/u.test(linha)) return `${achado[1]}:${achado[2]}`
   }
   return ''
+}
+
+/**
+ * Espera o exportador terminar a CÓPIA sem deixá-lo sair (ver
+ * `EXPORTACAO_PRONTA`): a pasta de exportação some quando ele sai.
+ *
+ * Sair antes da marca é falha, mesmo com código 0 — era exatamente o caso
+ * que devolvia uma pasta vazia. A resposta usa a forma de `waitContainer` para
+ * o resto do adaptador não mudar: `StatusCode` 0 quer dizer "pronto, e vivo".
+ * @param engine - o motor.
+ * @param exportador - o contêiner.
+ * @param signal - o cancelamento.
+ * @returns 0 quando pronto; o código de saída (ou -1) quando saiu antes.
+ */
+export async function esperarExportacao(
+  engine: Pick<DockerEnginePort, 'waitContainer' | 'containerLogs'>,
+  exportador: string,
+  signal: AbortSignal,
+  intervaloMs = 250,
+): Promise<{ readonly StatusCode: number }> {
+  const saida = engine.waitContainer(exportador, signal).then(fim => ({ saiu: true as const, codigo: fim.StatusCode }), () => ({ saiu: true as const, codigo: -1 }))
+  for (;;) {
+    signal.throwIfAborted()
+    const vez = await Promise.race([saida, new Promise<undefined>(resolver => { const espera = setTimeout(resolver, intervaloMs) as unknown as { unref?: () => void }; espera.unref?.() })])
+    if (vez !== undefined) return { StatusCode: vez.codigo === 0 ? -1 : vez.codigo }
+    const logs = await engine.containerLogs(exportador, 64 * 1024, signal).catch(() => undefined)
+    if (logs !== undefined && logs.stdout.toString('utf8').includes(EXPORTACAO_PRONTA)) return { StatusCode: 0 }
+  }
 }

@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { EXPORT_SCRIPT, programaDeExportacao } from '../src/export-script.ts'
+import { EXPORT_SCRIPT, EXPORTACAO_PRONTA, programaDeExportacao } from '../src/export-script.ts'
 
 function espaco() {
   const raiz = mkdtempSync(join(tmpdir(), 'export-ws-')); const destino = mkdtempSync(join(tmpdir(), 'export-out-'))
@@ -19,8 +19,23 @@ function rodar(raiz: string, destino: string) {
 }
 
 describe('a exportação do aplicativo construído', () => {
-  it('o programa do contêiner é o mesmo texto que o teste roda', () => {
-    expect(EXPORT_SCRIPT).toBe(programaDeExportacao('/workspace', '/export'))
+  it('o programa do contêiner é o mesmo texto que o teste roda, e fica vivo depois de avisar', () => {
+    expect(EXPORT_SCRIPT).toBe(programaDeExportacao('/workspace', '/export', true))
+  })
+
+  it('avisa que a cópia terminou, e só depois dela', () => {
+    const { raiz, destino } = espaco()
+    const saida = rodar(raiz, destino)
+    expect(saida.stdout).toBe(`${EXPORTACAO_PRONTA}\n`)
+    const falha = rodar(mkdtempSync(join(tmpdir(), 'vazio-')), destino)
+    expect(falha.stdout).toBe('')
+  })
+
+  it('vivo, ele não sai sozinho depois de avisar', () => {
+    const { raiz, destino } = espaco()
+    const saida = spawnSync(process.execPath, ['-e', programaDeExportacao(raiz, destino, true)], { encoding: 'utf8', timeout: 1500 })
+    expect(saida.stdout).toContain(EXPORTACAO_PRONTA)
+    expect(saida.signal).toBe('SIGTERM')
   })
 
   it('copia os itens exigidos', () => {
