@@ -210,11 +210,16 @@ describe('restore core without Docker', () => {
     expect(commit).toBeGreaterThan(readiness)
   })
 
-  it('holds the exclusive lock and completes the safety backup before creating staging', async () => {
+  it('holds the exclusive lock and completes the safety backup before creating staging', async ({ onTestFinished }) => {
+    // A proteção real valida os ancestrais: o destino não pode depender
+    // das permissões da pasta de checkout de quem executa a suíte.
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-restore-safety-'))
+    onTestFinished(() => rm(directory, { recursive: true, force: true }))
+    const safetyPath = join(directory, 'safety.dump')
     const client = new ExistingClient()
     let backedUp = false
     await expect(restorePostgresStorage({
-      ...restoreBase, ssl: 'off', write: true, safetyBackup: 'safety.dump',
+      ...restoreBase, ssl: 'off', write: true, safetyBackup: safetyPath,
       force: true, confirmation: 'REPLACE_DZ23_STORAGE', allowDomainLoss: true,
     }, {
       ...journalMemory(),
@@ -226,18 +231,23 @@ describe('restore core without Docker', () => {
     expect(client.sql.some(sql => sql.startsWith('CREATE SCHEMA'))).toBe(false)
   })
 
-  it('records and returns one successful safety backup for an existing target', async () => {
+  it('records and returns one successful safety backup for an existing target', async ({ onTestFinished }) => {
+    // A proteção real valida os ancestrais: o destino não pode depender
+    // das permissões da pasta de checkout de quem executa a suíte.
+    const directory = await mkdtemp(join(tmpdir(), 'dz23-restore-safety-'))
+    onTestFinished(() => rm(directory, { recursive: true, force: true }))
+    const safetyPath = join(directory, 'safety.dump')
     const client = new ExistingClient()
     const report = await restorePostgresStorage({
-      ...restoreBase, ssl: 'off', write: true, safetyBackup: 'safety.dump', force: true, confirmation: 'REPLACE_DZ23_STORAGE',
+      ...restoreBase, ssl: 'off', write: true, safetyBackup: safetyPath, force: true, confirmation: 'REPLACE_DZ23_STORAGE',
     }, {
       ...journalMemory(), resolveConnection: async () => connection, createClient: () => client as never, createBackend: () => fakeBackend() as never,
       createSafetyBackup: async (_dsn, _schema, _path, _ssl, _environment, _signal, _resume, _maxBytes, ownership) => {
         expect(ownership).toEqual({ attemptId: 'attempt-0001', targetSchema: 'dz23_storage', targetFingerprint, inputSha256: verifiedInput.inputSha256 })
-        return { file: resolve('safety.dump'), sha256: 'a'.repeat(64), bytes: 10 }
+        return { file: safetyPath, sha256: 'a'.repeat(64), bytes: 10 }
       },
     })
-    expect(report).toMatchObject({ mode: 'write', safetyBackup: resolve('safety.dump'), safetyBackupStatus: 'created', safetyBackupSha256: 'a'.repeat(64) })
+    expect(report).toMatchObject({ mode: 'write', safetyBackup: safetyPath, safetyBackupStatus: 'created', safetyBackupSha256: 'a'.repeat(64) })
   })
 
   it('rolls back the atomic swap when readiness fails', async () => {

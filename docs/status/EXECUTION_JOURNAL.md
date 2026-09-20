@@ -94,3 +94,15 @@ com destino `integ`; repetir CI e dependências reais antes de promover. O
 protocolo `docs/plans/FRIGG-JOURNEY-BENCHMARKS.md` separa doze jornadas e onze
 dimensões; comparação externa permanece `NOT_EXECUTED`. Não declarar vantagem
 sobre Manus, paridade nativa nem auditoria de segurança exaustiva.
+
+
+## 2026-09-20 — retomada: a meta é usuário final, não PR
+
+Prado reafirmou que o objetivo ainda não foi cumprido. Corrigidos comandos
+silenciosos em caminhos com espaços/acentos e o launcher que abria a interface
+técnica. O runtime real com Node 22.23.1 abriu o FRIGG e nove destinos; E2E
+completo 173 PASS/3 SKIP. Dois testes de restauração agora usam destinos
+privados isolados, sem alterar as guardas. Raiz continua com falhas; Docker,
+PostgreSQL real, modelo e computador do titular seguem bloqueando provas.
+Estado e limites: `audit/FRIGG-USER-READINESS-20260920.md`. Missão permanece
+EXECUTING; nenhum merge, release nem prontidão universal declarada.

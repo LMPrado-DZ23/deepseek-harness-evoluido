@@ -238,13 +238,13 @@ describe('a partida chama o `dsh` com o perfil', () => {
 
 describe('a sobreposicao local do perfil', () => {
   it('sem o arquivo, a partida e a de sempre — nada de --patch', () => {
-    expect(argumentosDaPartida('/b.js')).toEqual(['/b.js', '--profile', PERFIL])
+    expect(argumentosDaPartida('/b.js')).toEqual(['/b.js', '--profile', PERFIL, '--no-open'])
   })
 
   it('com o arquivo, ela entra DEPOIS do perfil, como sobreposicao', () => {
     // A ordem importa: `--patch` aplica por cima do perfil, e é por isso que os
     // caminhos desta máquina vencem os de produção sem que o perfil mude.
-    expect(argumentosDaPartida('/b.js', '/r/local.patch.yml')).toEqual(['/b.js', '--profile', PERFIL, '--patch', '/r/local.patch.yml'])
+    expect(argumentosDaPartida('/b.js', '/r/local.patch.yml')).toEqual(['/b.js', '--profile', PERFIL, '--no-open', '--patch', '/r/local.patch.yml'])
   })
 
   it('so e encontrada no lugar em que o instalador a grava', () => {
@@ -260,8 +260,8 @@ describe('a sobreposicao local do perfil', () => {
 describe('a prévia local (pnpm preview:install)', () => {
   it('a sobreposição da prévia vem DEPOIS da do construtor', () => {
     expect(argumentosDaPartida('/b.js', '/r/local.patch.yml', '/r/preview.patch.yml'))
-      .toEqual(['/b.js', '--profile', PERFIL, '--patch', '/r/local.patch.yml', '--patch', '/r/preview.patch.yml'])
-    expect(argumentosDaPartida('/b.js', undefined, '/r/preview.patch.yml')).toEqual(['/b.js', '--profile', PERFIL, '--patch', '/r/preview.patch.yml'])
+      .toEqual(['/b.js', '--profile', PERFIL, '--no-open', '--patch', '/r/local.patch.yml', '--patch', '/r/preview.patch.yml'])
+    expect(argumentosDaPartida('/b.js', undefined, '/r/preview.patch.yml')).toEqual(['/b.js', '--profile', PERFIL, '--no-open', '--patch', '/r/preview.patch.yml'])
   })
 
   it('o segredo da borda só entra no ambiente do filho quando existe', () => {
@@ -269,8 +269,12 @@ describe('a prévia local (pnpm preview:install)', () => {
     expect(ambienteDaPartida('/d', {}, 'x'.repeat(40)).DZ23_EDGE_SECRET).toBe('x'.repeat(40))
   })
 
+  it('sem borda, o convite abre o FRIGG e preserva a admissão', () => {
+    expect(enderecoComPrevia('dsh web: http://127.0.0.1:3080/?token=abc')).toBe('http://127.0.0.1:3080/studio/?token=abc')
+  })
+
   it('o convite do dsh vira o endereço no host da borda, com o mesmo caminho', () => {
-    expect(enderecoComPrevia('dsh web: http://127.0.0.1:3080/?token=abc', 8088)).toBe('http://studio.dz23.localhost:8088/?token=abc')
+    expect(enderecoComPrevia('dsh web: http://127.0.0.1:3080/?token=abc', 8088)).toBe('http://studio.dz23.localhost:8088/studio/?token=abc')
     expect(enderecoComPrevia('outra linha', 8088)).toBeUndefined()
   })
 

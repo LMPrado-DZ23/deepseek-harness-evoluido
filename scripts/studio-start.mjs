@@ -3,7 +3,8 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { createInterface } from 'node:readline'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { iniciarBorda, segredoValido } from './preview-edge.mjs'
 import { bloqueios, conferencias, relatorio, rotasConfiguradas, versaoEsperada } from './studio-doctor.mjs'
@@ -159,7 +160,7 @@ export function argumentosDaPartida(bin, sobreposicao, previa) {
   // instalador do construtor — entra só quando o arquivo existe. Sem ela, o
   // perfil sobe com os caminhos de produção, byte por byte como antes. A da
   // PRÉVIA vem depois, e só quando `pnpm preview:install` a gravou.
-  return [bin, '--profile', PERFIL, ...(sobreposicao === undefined ? [] : ['--patch', sobreposicao]), ...(previa === undefined ? [] : ['--patch', previa])]
+  return [bin, '--profile', PERFIL, '--no-open', ...(sobreposicao === undefined ? [] : ['--patch', sobreposicao]), ...(previa === undefined ? [] : ['--patch', previa])]
 }
 
 /**
@@ -184,16 +185,23 @@ export function previaLocalPresente(base) {
 }
 
 /**
- * O endereço para abrir o FRIGG QUANDO há prévia: o mesmo convite que o `dsh`
- * anuncia, no host da borda. O cookie de admissão da prévia só é de primeira
+ * O endereço da interface FRIGG, preservando a admissão do Harness.
+ * Quando há prévia, usa o host da borda; sem ela, mantém o loopback. O cookie de admissão da prévia só é de primeira
  * parte se o Studio e a prévia forem do mesmo site (`dz23.localhost`).
  * @param linha - uma linha da saída do `dsh`.
- * @param porta - a porta da borda.
+ * @param porta - a porta da borda, quando instalada.
  * @returns o endereço, ou `undefined`.
  */
 export function enderecoComPrevia(linha, porta) {
-  const achado = /dsh web: http:\/\/127\.0\.0\.1:\d+(\/\S*)/u.exec(linha)
-  return achado === null ? undefined : `http://studio.dz23.localhost:${String(porta)}${achado[1]}`
+  const achado = /^dsh web: (http:\/\/127\.0\.0\.1:\d+\/\S*)$/u.exec(linha.trim())
+  if (achado === null) return undefined
+  const endereco = new URL(achado[1])
+  endereco.pathname = '/studio/'
+  if (porta !== undefined) {
+    endereco.hostname = 'studio.dz23.localhost'
+    endereco.port = String(porta)
+  }
+  return endereco.href
 }
 
 /**
@@ -241,18 +249,16 @@ async function arrancar(base) {
   if (previa !== undefined) await iniciarBorda({ porta: previa.porta, harnessHost: '127.0.0.1', harnessPorta: previa.portaDoHarness, segredo })
   const filho = spawn(process.execPath, argumentosDaPartida(bin, sobreposicaoLocalPresente(base), previa?.patch), {
     cwd: base,
-    stdio: previa === undefined ? 'inherit' : ['inherit', 'pipe', 'inherit'],
+    stdio: ['inherit', 'pipe', 'inherit'],
     env: ambienteDaPartida(base, process.env, segredo),
   })
-  if (previa !== undefined) {
-    filho.stdout.on('data', pedaco => {
-      process.stdout.write(pedaco)
-      for (const linha of String(pedaco).split('\n')) {
-        const endereco = enderecoComPrevia(linha, previa.porta)
-        if (endereco !== undefined) process.stdout.write(`\nFRIGG com prévia — abra este endereço: ${endereco}\n`)
-      }
-    })
-  }
+  // O anúncio pode chegar em vários chunks. Ler linhas completas evita
+  // cortar o convite e nunca apresenta a interface técnica como porta do FRIGG.
+  const linhas = createInterface({ input: filho.stdout })
+  linhas.on('line', linha => {
+    const endereco = enderecoComPrevia(linha, previa?.porta)
+    process.stdout.write(endereco === undefined ? `${linha}\n` : `\nFRIGG — abra este endereço: ${endereco}\n`)
+  })
   filho.on('exit', codigo => { process.exit(codigo ?? 0) })
   // Sem isto, um `Ctrl+C` deixaria o Studio rodando sem dono.
   for (const sinal of ['SIGINT', 'SIGTERM']) {
@@ -282,4 +288,4 @@ export function principal(argumentos = process.argv.slice(2), base = raiz) {
   })
 }
 
-if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) principal()
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) principal()

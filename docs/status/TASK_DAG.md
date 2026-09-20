@@ -18,6 +18,8 @@ Atualização da auditoria de 20/09/2026 (base `997fa20`):
 | --- | --- | --- | --- | --- |
 | AUDIT-OCI-01 | P0 | Verificação real de digest no CLI e temporários isolados | — | REVIEW — correção e testes locais; repetir CI/registro real |
 | AUDIT-FILES-01 | P0 | Impedir perda concorrente e desvios por links na pasta de trabalho | — | REVIEW — regressões com filesystem real; validação global limitada pelo ambiente |
+| AUDIT-START-01 | P0 | Corrigir partida e provisionamento em caminhos reais do usuário | — | REVIEW — subprocessos e mutações; Windows nativo pendente |
+| AUDIT-ENTRY-01 | P1 | Abrir o FRIGG pelo launcher e manter a admissão | — | REVIEW — runtime real e nove destinos; criação ainda bloqueada |
 | AUDIT-MOBILE-01 | P2 | Manter campo e envio acessíveis em telas móveis estreitas | — | REVIEW — 8 testes Chromium; aparelhos reais pendentes |
 | BENCHMARK-JOURNEYS-01 | P3 | Executar protocolo pareado por jornada e plataforma | AUDIT-OCI-01, AUDIT-FILES-01 | PENDING — protocolo escrito, comparação externa não executada |
 

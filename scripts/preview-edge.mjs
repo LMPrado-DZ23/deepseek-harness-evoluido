@@ -26,6 +26,7 @@
  */
 import { request as httpRequest, createServer } from 'node:http'
 import { connect } from 'node:net'
+import { pathToFileURL } from 'node:url'
 
 export const HOST_DO_STUDIO = 'studio.dz23.localhost'
 const HOST_DA_PREVIA = /^p-[a-f0-9]{24}\.dz23\.localhost$/u
@@ -156,7 +157,7 @@ export function iniciarBorda({ porta, harnessHost, harnessPorta, segredo }) {
   })
 }
 
-const chamadoDiretamente = process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`
+const chamadoDiretamente = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
 if (chamadoDiretamente) {
   const porta = Number(process.env.FRIGG_EDGE_PORT ?? '8088')
   const harnessPorta = Number(process.env.FRIGG_HARNESS_PORT ?? '3080')

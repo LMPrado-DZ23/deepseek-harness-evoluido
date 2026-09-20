@@ -18,6 +18,13 @@ Detalhes e próximos passos: `audit/FRIGG-AUDIT-20260920.md`.
 A API autenticada do GitHub está acessível nesta auditoria. Os registros de
 acesso abaixo pertencem às sessões datadas que descrevem.
 
+A retomada confirmou `DESKTOP-PRADO` offline pelo conector disponível.
+Node 22.23.1 foi obtido e usado: não é mais bloqueio de runtime desta sessão.
+Instalar PostgreSQL via apt falhou por restrições de identidade do ambiente
+(`setgroups`/`seteuid`); nenhuma proteção foi contornada. Docker e provedor
+real permanecem indisponíveis. Classificação: `BLOCKED_BY_EXTERNAL_DEPENDENCY`
+para as provas que precisam deles, não para todo trabalho de produto.
+
 ## Registros anteriores
 
 | ID | o que está bloqueado | evidência do bloqueio | trabalho interno já feito | ação humana mínima |

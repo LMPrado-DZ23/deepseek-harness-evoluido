@@ -32,7 +32,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const raiz = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -217,7 +217,7 @@ function selfTest() {
   return falhas === 0
 }
 
-const chamadoDiretamente = process.argv[1] !== undefined && import.meta.url === `file://${resolve(process.argv[1])}`
+const chamadoDiretamente = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 if (chamadoDiretamente && process.argv.includes('--self-test')) process.exit(selfTest() ? 0 : 1)
 
 if (chamadoDiretamente) {

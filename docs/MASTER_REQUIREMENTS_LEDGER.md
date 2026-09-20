@@ -478,22 +478,25 @@ declarada.
 
 | AUDIT-LOADER-01 | Gates TypeScript e servidor E2E executam sem exigir o socket IPC privado do lancador tsx | Restricao reproduzida durante auditoria de 20/09/2026 | v1.0 | BETA | package.json, apps/studio-web/playwright.config.ts | Mesmos scripts e servidor executados pelo loader node --import tsx | execucao: servidor de E2E passou a iniciar no Chromium fixado; nenhum teste ou assercao removido | A troca do lancador nao elimina as restricoes a sockets Unix dos testes do produto; ver audit/FRIGG-AUDIT-20260920.md | repetir gates e CI na versao Node fixada |
 | AUDIT-MOBILE-01 | Campo de mensagem e botao de envio cabem em 320 e 390 px e permitem continuar a conversa | Auditoria visual de 20/09/2026 | v1.0 | BETA | apps/studio-web/src/tarefa/tarefa.css, apps/studio-web/tests/overflow.spec.ts | Chromium, medicao de limites dos controles e clique real nas duas larguras | execucao: o campo chegava a 465 px e era cortado; minmax(0, 1fr) impede expansao intrinseca da coluna; 8 testes de overflow aprovados | Servidor de teste; celular fisico e outros navegadores ainda nao medidos | repetir em dispositivos reais |
+| AUDIT-START-01 | Comandos de partida e provisionamento executam em caminhos com espacos, acentos, # e % | Retomada da meta de usuario final, 20/09/2026 | v1.0 | BETA | scripts/studio-start.mjs, scripts/preview-edge.mjs, scripts/builder-doctor.mjs, scripts/provision-builder.mjs, scripts/provision-preview.mjs, scripts/startup-paths.test.mjs | CLI em subprocessos reais; antes retornava 0 sem fazer nada; depois executa e preserva importacao sem efeitos | execucao: pathToFileURL faz a conversao correta, em vez de concatenar file://; regressao na CI Linux e Windows | Autotestes de provisionamento nao instalam Docker nem provam Windows nativo nesta sessao | validar instalacao na maquina do titular |
+| AUDIT-ENTRY-01 | A partida leva a interface FRIGG em /studio/ e preserva a admissao | Retomada da meta de usuario final, 20/09/2026 | v1.0 | BETA | scripts/studio-start.mjs, scripts/studio-start.spec.mjs, scripts/startup-paths.test.mjs, docs/COMECAR.md | Launcher real com Node 22.23.1, Harness original e Chromium; homepage FRIGG e nove destinos HTTP 200 | execucao: antes abria DeepSeek Harness / Internal Testing Notice; agora anuncia FRIGG e impede autoabertura da tela tecnica; linhas divididas em chunks testadas | Navegacao real nao prova criacao por modelo, Docker, reinicio da maquina nem mobile nativo | fechar jornada real de criacao, alteracao, exportacao e recuperacao |
+
 
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 249 |
+| `BETA` | 251 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 360.**
+**Total de requisitos rastreados: 362.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 323 |
+| v1.0 | 325 |
 | v1.x | 34 |
 | v2 | 3 |

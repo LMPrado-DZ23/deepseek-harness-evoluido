@@ -18,6 +18,21 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Retomada da meta de usuário final — 20/09/2026
+
+A meta permanece **EXECUTING**. PR #1 é checkpoint, não entrega final ao usuário.
+`AUDIT-START-01` corrige comandos que não executavam em pastas com espaços;
+`AUDIT-ENTRY-01` leva a abertura real para o FRIGG, em vez da interface técnica.
+Node 22.23.1 e runtime real foram exercitados nesta sessão. Navegador completo:
+173 PASS, 3 SKIP, zero falhas. Um objetivo criado pela tela persistiu após
+recarga e reinício do processo real; reinício do computador não executado. Suíte raiz sob Node 22: 4.437 PASS, 175 FAIL,
+68 SKIP; não está aprovada. Relatório detalhado em
+`audit/FRIGG-USER-READINESS-20260920.md`.
+
+`DESKTOP-PRADO` foi encontrado offline. Docker, banco real e modelo não estão
+operacionais neste ambiente. Isso bloqueia provas específicas, não transforma
+as tarefas internas abertas abaixo em concluídas.
+
 ## Auditoria adicional em 20/09/2026 — base GitHub `997fa20`
 
 Correções candidatas `AUDIT-OCI-01` e `AUDIT-FILES-01`: o CLI baixava blobs sem

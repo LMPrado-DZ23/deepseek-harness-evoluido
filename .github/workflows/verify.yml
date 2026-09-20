@@ -48,6 +48,7 @@ jobs:
             'tests/portability/image-lock.test.mjs'
             'tests/portability/windows-contract-coverage.test.mjs'
             'scripts/ponte/puxar-imagem.cli.test.mjs'
+            'scripts/startup-paths.test.mjs'
           )
           node --test @hermeticTests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -93,7 +94,7 @@ jobs:
 
       - name: Verify pinned upstream content
         run: |
-          node --test scripts/ponte/puxar-imagem.cli.test.mjs
+          node --test scripts/ponte/puxar-imagem.cli.test.mjs scripts/startup-paths.test.mjs
           node scripts/check-upstream-content.mjs --materialize-symlinks
           node scripts/check-upstream-pin.mjs --self-test
 

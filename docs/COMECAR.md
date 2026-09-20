@@ -90,8 +90,9 @@ pnpm studio
 ```
 
 O comando confere tudo de novo antes de dar a partida — se faltar algo, ele
-explica e não sobe. Quando sobe, o endereço aparece no terminal. Abra no
-navegador. Para parar, `Ctrl+C`.
+explica e não sobe. Quando sobe, o endereço **FRIGG — abra este endereço** aparece no terminal.
+Ele aponta para `/studio/`, a interface do produto. Abra esse endereço no
+navegador; a interface técnica do Harness não é aberta automaticamente. Para parar, `Ctrl+C`.
 
 Tudo que o Studio guarda fica em `dsh-home/`, **dentro da pasta que você
 baixou**. Nada é espalhado pelo seu sistema, e apagar a pasta apaga tudo.
