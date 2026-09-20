@@ -413,6 +413,20 @@ describe('T-25: intake e etapa nova tambem passam pelo motor de contexto', () =>
     expect(textoDoReparo).not.toMatch(/\{(?:schema|issues|value)\}/u)
   })
 
+  it('a sintese recebe a regra das SECOES: titulo curto, nao frase (JORNADA-REAL-01)', async () => {
+    // As secoes viram texto exigido na tela. Sem a regra, a Mistral escreveu
+    // descricoes com numeros, e a alteracao seguinte deixou a tela dizendo 8 e 10.
+    const complete = vi.fn().mockResolvedValue({ value: JSON.stringify(validSpec), route: 'ollama', model: 'qwen' })
+    const intake = new IntakeEngine({ complete })
+    await intake.buildSpec(conversation('Quero um contador de copos.', { a: 'x'.repeat(2_000) }) as never)
+    const regra = intake.lastLedger!.included.find(item => item.id === 'spec.sections')
+    expect(regra?.kind).toBe('instruction')
+    const texto = complete.mock.calls[0]![3] as string
+    expect(texto).toContain('pages[].sections')
+    expect(texto).toMatch(/uma a quatro palavras/u)
+    expect(texto).not.toContain('prompts.specSecoes')
+  })
+
   it('a deteccao de dado sensivel e INSTRUCAO: nunca cai por falta de espaco', async () => {
     // Corta-la produziria um aplicativo que trata CPF como campo comum, e a
     // pessoa nao teria como saber que a instrucao existiu e sumiu.

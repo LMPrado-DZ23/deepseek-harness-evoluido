@@ -16,7 +16,7 @@
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
 - `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
-- `atualizado_em`: 2026-09-19
+- `atualizado_em`: 2026-09-20
 
 ## PRIMEIRO APLICATIVO DE MODELO REAL APROVADO — 20/09/2026, madrugada (JORNADA-REAL-01)
 
@@ -27,9 +27,14 @@ que só apareciam com modelo, construtor e computador reais foram consertados
 no caminho (ver o livro mestre, de LLM-CHAVE-01 a A11Y-REPARO-01).
 
 Estado de EB-04 / ABRIR-05 / ABRIR-08: **a criação real funciona até a
-aprovação.** FALTA provar: abrir a prévia (PREVIA-PESSOAL-01 acabou de
-consertar a primeira recusa), pedir uma alteração na mesma conversa e
-retomar depois de reiniciar.
+prévia, e a alteração na mesma conversa também.** Medido no Chrome real do
+titular: a prévia abriu; "Mude a meta para 10 copos por dia." gerou a
+revisão 2 (execução `37438b09`, tentativa 2 PASSOU); na prévia nova, três
+cliques → 3 e "Faltam: 7 copos", "Zerar" → 0, "Meta: 10 copos".
+Defeitos vistos: o modelo copia frases da especificação para a tela e uma
+ficou velha ("meta de 8 copos"); o painel embutido do app Claude não recebe o
+READY do iframe (no Chrome funciona). FALTA provar: retomar depois de
+reiniciar.
 
 ## A JORNADA PELA MISTRAL — 20/09/2026, madrugada
 

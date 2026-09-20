@@ -153,6 +153,7 @@
   "prompts": {
     "recommend": "Recomende uma resposta curta, em português comum, para a pergunta \"{question}\". Ideia: {brief}",
     "specOnly": "Produza somente JSON válido para AppSpec v1.",
+    "specSecoes": "Cada item de pages[].sections é o TÍTULO curto de uma parte da tela, com uma a quatro palavras (por exemplo \"Contagem\", \"Meta do dia\", \"Ações\"). A verificação procura esse título escrito na página, exatamente como está; por isso não escreva ali frases, descrições nem números que possam mudar depois — o que a parte faz vai nos critérios de aceite.",
     "category": "Categoria: {category}.",
     "idea": "Ideia: {brief}",
     "answers": "Respostas: {answers}",

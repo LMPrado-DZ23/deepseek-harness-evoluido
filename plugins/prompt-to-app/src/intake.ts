@@ -73,6 +73,12 @@ export class IntakeEngine {
     const sensitive = detectSensitiveData([conversation.project.original_brief, ...Object.values(conversation.answers)].join('\n'))
     const assembled = assembleContext([
       { id: 'spec.only', kind: 'instruction', priority: 0, source: 'studio-instruction', text: prompt('prompts.specOnly') },
+      // As seções viram TEXTO EXIGIDO na tela (acceptance.ts: `section:`), e
+      // o esquema só diz "string até 120". Medido em 20/09/2026 com a Mistral:
+      // sem esta regra ela escreveu descrições ("Mostra a meta de 8 copos e
+      // quantos faltam."), o aplicativo foi OBRIGADO a exibi-las, e depois de
+      // "Mude a meta para 10" a tela dizia 8 e 10 ao mesmo tempo.
+      { id: 'spec.sections', kind: 'instruction', priority: 0, source: 'studio-instruction', text: prompt('prompts.specSecoes') },
       { id: 'spec.category', kind: 'instruction', priority: 0, source: 'studio-instruction', text: prompt('prompts.category', { category: conversation.project.category }) },
       // A deteccao de dado sensivel e INSTRUCAO, e nao evidencia, embora
       // pareca material: ela diz ao modelo o que NAO pode tratar como campo
