@@ -1,0 +1,40 @@
+{
+  "date": "2026-09-20",
+  "requirement": "AUDIT-SYNTHESIS-REPLAY-01",
+  "status": "FAILED",
+  "source_snapshot": "824fc1e2e1d75ef290a4c1ff77efa0e057ea170c",
+  "execution": "Isolated Git index snapshot; added regression cases inside existing HTTP fixture; deterministic model, no external provider",
+  "tests": [
+    {
+      "name": "last keyed answer replays original spec",
+      "expected_status": 201,
+      "actual_status": 409
+    },
+    {
+      "name": "uncertain synthesis does not repeat model call for same key",
+      "calls_before_retry": 3,
+      "calls_after_retry": 4
+    },
+    {
+      "name": "correction replay does not synthesize again",
+      "calls_before_retry": 4,
+      "calls_after_retry": 5
+    },
+    {
+      "name": "old final answer after correction replays original spec",
+      "expected_status": 201,
+      "actual_status": 409,
+      "later_progress_assertion": "Not reached because replay status failed"
+    }
+  ],
+  "suite_result": {
+    "failed": 4,
+    "skipped": 52
+  },
+  "regressions": "synthesis-replay-regressions.ts.txt",
+  "limits": [
+    "No production fix in this checkpoint",
+    "No claim that actual provider billing was measured",
+    "Needs durable synthesis receipt, recovery of spec/state/audit, later-progress protection and explicit new-attempt path"
+  ]
+}

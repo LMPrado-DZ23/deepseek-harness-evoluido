@@ -2,6 +2,7 @@ import { CSRF_STORAGE_KEY, csrfToken } from '../api'
 import { HARNESS_SELECTION_STORAGE_KEY } from '../assistant/assistantLaunch'
 import { forgetSavedShell } from '../pwa/register'
 import { publishSessionRevocation } from './sessionRevocation'
+import { clearPendingPlanIntents } from '../plan/pendingIntent'
 
 export const SIGN_OUT_ENDPOINT = '/api/studio/identity/logout'
 
@@ -13,6 +14,7 @@ export interface SignOutPort {
   fetch(input: string, init: RequestInit): Promise<Response>
   getCsrf(): Promise<string>
   forgetShell(): Promise<unknown>
+  clearPlanIntents(): Promise<unknown>
   sessionStorage: BrowserStorage
   localStorage: BrowserStorage
   notifyRevoked(): void
@@ -23,8 +25,9 @@ function removeOwnedKey(storage: BrowserStorage, key: string): void {
   try { storage.removeItem(key) } catch { /* the server session is already revoked */ }
 }
 
-export async function clearOwnedBrowserSessionState(port: Pick<SignOutPort, 'forgetShell' | 'sessionStorage' | 'localStorage'>): Promise<void> {
+export async function clearOwnedBrowserSessionState(port: Pick<SignOutPort, 'forgetShell' | 'clearPlanIntents' | 'sessionStorage' | 'localStorage'>): Promise<void> {
   await port.forgetShell().catch(() => undefined)
+  await port.clearPlanIntents().catch(() => undefined)
   removeOwnedKey(port.sessionStorage, CSRF_STORAGE_KEY)
   removeOwnedKey(port.localStorage, HARNESS_SELECTION_STORAGE_KEY)
 }
@@ -50,6 +53,7 @@ export async function signOutCurrentSession(port: SignOutPort): Promise<void> {
 export function clearOwnedBrowserSessionStateInBrowser(): Promise<void> {
   return clearOwnedBrowserSessionState({
     forgetShell: () => forgetSavedShell(),
+    clearPlanIntents: () => clearPendingPlanIntents(),
     sessionStorage: window.sessionStorage,
     localStorage: window.localStorage,
   })
@@ -60,6 +64,7 @@ export function signOutInBrowser(): Promise<void> {
     fetch: (input, init) => window.fetch(input, init),
     getCsrf: csrfToken,
     forgetShell: () => forgetSavedShell(),
+    clearPlanIntents: () => clearPendingPlanIntents(),
     sessionStorage: window.sessionStorage,
     localStorage: window.localStorage,
     notifyRevoked: () => publishSessionRevocation(),

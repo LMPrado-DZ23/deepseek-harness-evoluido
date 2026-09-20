@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { createWriteStream } from 'node:fs'
-import { lstat, mkdir, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
-import { basename, join, relative, sep } from 'node:path'
+import { constants, createWriteStream } from 'node:fs'
+import { link, lstat, mkdir, open, readdir, rm, type FileHandle } from 'node:fs/promises'
+import { openDirectory, referenceOf } from '@dz23-studio/integration-hub'
+import { basename, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Transform } from 'node:stream'
 
@@ -59,22 +60,35 @@ export interface ArquivoDaPasta {
 export async function listarArquivos(pasta: string): Promise<{ readonly arquivos: readonly ArquivoDaPasta[]; readonly cortada: boolean }> {
   const achados: ArquivoDaPasta[] = []
   let cortada = false
-  const visitar = async (atual: string, profundidade: number): Promise<void> => {
+  const visitar = async (diretorio: FileHandle, atual: string, relativo: string, profundidade: number): Promise<void> => {
     if (profundidade > PROFUNDIDADE_MAXIMA || cortada) return
-    let entradas: import('node:fs').Dirent[]
-    try { entradas = await readdir(atual, { withFileTypes: true }) } catch { return }
+    const entradas = await readdir(referenceOf(diretorio, atual), { withFileTypes: true })
     for (const entrada of entradas) {
       if (achados.length >= MAXIMO_NA_LISTA) { cortada = true; return }
       if (entrada.name.startsWith('.parcial-')) continue
-      const completo = join(atual, entrada.name)
+      const completo = join(referenceOf(diretorio, atual), entrada.name)
+      const caminho = relativo === '' ? entrada.name : `${relativo}/${entrada.name}`
       if (entrada.isSymbolicLink()) continue
-      if (entrada.isDirectory()) { await visitar(completo, profundidade + 1); continue }
+      if (entrada.isDirectory()) {
+        const filho = await openDirectory(completo)
+        if (filho !== undefined) {
+          try { await visitar(filho, completo, caminho, profundidade + 1) } finally { await filho.close() }
+        }
+        continue
+      }
       if (!entrada.isFile()) continue
-      const info = await stat(completo)
-      achados.push({ caminho: relative(pasta, completo).split(sep).join('/'), bytes: info.size, alterado_em: info.mtime.toISOString() })
+      let info: Awaited<ReturnType<typeof lstat>>
+      try { info = await lstat(completo) } catch (erro) {
+        if ((erro as NodeJS.ErrnoException).code === 'ENOENT') continue
+        throw erro
+      }
+      if (!info.isFile()) continue
+      achados.push({ caminho, bytes: Number(info.size), alterado_em: info.mtime.toISOString() })
     }
   }
-  await visitar(pasta, 0)
+  const raiz = await openDirectory(pasta)
+  if (raiz === undefined) throw new ArquivoRecusado('FORA', 'fora')
+  try { await visitar(raiz, pasta, '', 0) } finally { await raiz.close() }
   achados.sort((a, b) => b.alterado_em.localeCompare(a.alterado_em) || a.caminho.localeCompare(b.caminho))
   return { arquivos: achados, cortada }
 }
@@ -93,9 +107,11 @@ export async function listarArquivos(pasta: string): Promise<{ readonly arquivos
  */
 export async function gravarEnviado(pasta: string, nome: string, corpo: NodeJS.ReadableStream, limite = ARQUIVO_MAXIMO_BYTES): Promise<string> {
   const limpo = nomeSeguro(nome)
-  const destino = join(pasta, PASTA_DOS_ENVIADOS)
-  await mkdir(destino, { recursive: true, mode: 0o700 })
-  const parcial = join(destino, `.parcial-${randomUUID()}`)
+  const raiz = await openDirectory(pasta)
+  if (raiz === undefined) throw new ArquivoRecusado('FORA', 'fora')
+  let diretorio: Awaited<ReturnType<typeof openDirectory>>
+  let parcial: string | undefined
+  let criouParcial = false
   let total = 0
   const teto = new Transform({
     transform(pedaco: Buffer, _codificacao, pronto) {
@@ -105,39 +121,96 @@ export async function gravarEnviado(pasta: string, nome: string, corpo: NodeJS.R
     },
   })
   try {
-    await pipeline(corpo, teto, createWriteStream(parcial, { mode: 0o600, flags: 'wx' }))
-  } catch (erro) {
-    await rm(parcial, { force: true })
-    throw erro
+    const destino = join(referenceOf(raiz, pasta), PASTA_DOS_ENVIADOS)
+    try { await mkdir(destino, { mode: 0o700 }) } catch (erro) {
+      if ((erro as NodeJS.ErrnoException).code !== 'EEXIST') throw erro
+    }
+    diretorio = await openDirectory(destino)
+    if (diretorio === undefined) throw new ArquivoRecusado('FORA', 'fora')
+    const identidade = await diretorio.stat()
+    const conferirPasta = async (): Promise<void> => {
+      const atual = await lstat(join(pasta, PASTA_DOS_ENVIADOS))
+      if (!atual.isDirectory() || atual.dev !== identidade.dev || atual.ino !== identidade.ino) {
+        throw new ArquivoRecusado('FORA', 'fora')
+      }
+    }
+    await conferirPasta()
+    const destinoFixado = referenceOf(diretorio, destino)
+    parcial = join(destinoFixado, `.parcial-${randomUUID()}`)
+    const saida = createWriteStream(parcial, { mode: 0o600, flags: 'wx' })
+    saida.once('open', () => { criouParcial = true })
+    await pipeline(corpo, teto, saida)
+    await conferirPasta()
+    const final = await publicarSemSobrescrever(parcial, destinoFixado, limpo)
+    await conferirPasta()
+    return `${PASTA_DOS_ENVIADOS}/${final}`
+  } finally {
+    try {
+      if (criouParcial && parcial !== undefined) await rm(parcial, { force: true })
+    } finally {
+      try { await diretorio?.close() } finally { await raiz.close() }
+    }
   }
-  const final = await nomeLivre(destino, limpo)
-  await rename(parcial, join(destino, final))
-  return `${PASTA_DOS_ENVIADOS}/${final}`
 }
 
-async function nomeLivre(pasta: string, nome: string): Promise<string> {
+/** link publica sem substituir: a existência e a reserva são uma operação. */
+async function publicarSemSobrescrever(parcial: string, pasta: string, nome: string): Promise<string> {
   const ponto = nome.lastIndexOf('.')
   const base = ponto > 0 ? nome.slice(0, ponto) : nome
   const extensao = ponto > 0 ? nome.slice(ponto) : ''
   for (let n = 0; n < 1000; n++) {
     const candidato = n === 0 ? nome : `${base} (${String(n + 1)})${extensao}`
-    try { await lstat(join(pasta, candidato)) } catch { return candidato }
+    try { await link(parcial, join(pasta, candidato)); return candidato } catch (erro) {
+      if ((erro as NodeJS.ErrnoException).code !== 'EEXIST') throw erro
+    }
   }
-  return `${base}-${randomUUID()}${extensao}`
+  const candidato = `${base}-${randomUUID()}${extensao}`
+  await link(parcial, join(pasta, candidato))
+  return candidato
 }
 
 /**
- * O arquivo a baixar, conferido DENTRO da pasta (links resolvidos antes).
+ * Abre o arquivo dentro da pasta, sem seguir links em seus componentes.
+ * No Linux/WSL cada acesso parte do descritor da pasta já aberto. Nas outras
+ * plataformas valem as limitações de referenceOf/openDirectory: a comparação
+ * de identidade não substitui openat contra um escritor local hostil.
  * @param pasta - a pasta de trabalho.
  * @param relativo - o caminho pedido.
- * @returns o caminho absoluto real.
+ * @returns o descritor validado e o nome; o consumidor deve fechar o descritor.
  */
-export async function arquivoParaBaixar(pasta: string, relativo: string): Promise<string> {
+export async function arquivoParaBaixar(pasta: string, relativo: string): Promise<{ readonly arquivo: FileHandle; readonly nome: string }> {
   if (relativo === '' || relativo.includes('\u0000')) throw new ArquivoRecusado('AUSENTE', 'ausente')
-  const raiz = await realpath(pasta)
-  let real: string
-  try { real = await realpath(join(raiz, relativo)) } catch { throw new ArquivoRecusado('AUSENTE', 'ausente') }
-  if (real !== raiz && !real.startsWith(`${raiz}${sep}`)) throw new ArquivoRecusado('FORA', 'fora')
-  if (!(await stat(real)).isFile()) throw new ArquivoRecusado('AUSENTE', 'ausente')
-  return real
+  const partes = relativo.replaceAll('\\', '/').split('/')
+  if (partes.some(p => p === '' || p === '.' || p === '..' || (process.platform === 'win32' && p.includes(':')))) throw new ArquivoRecusado('FORA', 'fora')
+  const nome = partes.pop()!
+  const abertos: FileHandle[] = []
+  let arquivo: FileHandle | undefined
+  try {
+    let caminho = pasta
+    let diretorio = await openDirectory(caminho)
+    if (diretorio === undefined) throw new ArquivoRecusado('FORA', 'fora')
+    abertos.push(diretorio)
+    for (const parte of partes) {
+      caminho = join(referenceOf(diretorio, caminho), parte)
+      diretorio = await openDirectory(caminho)
+      if (diretorio === undefined) throw new ArquivoRecusado('FORA', 'fora')
+      abertos.push(diretorio)
+    }
+    const alvo = join(referenceOf(diretorio, caminho), nome)
+    const antes = await lstat(alvo)
+    if (antes.isSymbolicLink()) throw new ArquivoRecusado('FORA', 'fora')
+    if (!antes.isFile()) throw new ArquivoRecusado('AUSENTE', 'ausente')
+    arquivo = await open(alvo, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+    const aberto = await arquivo.stat()
+    if (!aberto.isFile() || aberto.dev !== antes.dev || aberto.ino !== antes.ino) throw new ArquivoRecusado('FORA', 'fora')
+    // O consumidor lê ESTE descritor, nunca reabre o caminho conferido.
+    return { arquivo, nome }
+  } catch (erro) {
+    await arquivo?.close()
+    if ((erro as NodeJS.ErrnoException).code === 'ENOENT') throw new ArquivoRecusado('AUSENTE', 'ausente')
+    if ((erro as NodeJS.ErrnoException).code === 'ELOOP') throw new ArquivoRecusado('FORA', 'fora')
+    throw erro
+  } finally {
+    await Promise.all(abertos.map(handle => handle.close()))
+  }
 }

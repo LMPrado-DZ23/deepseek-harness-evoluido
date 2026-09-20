@@ -54,6 +54,7 @@ export interface SituacaoDaTarefa {
   readonly estado: string | null
   /** A pergunta de admissão sem resposta, quando existe uma. */
   readonly perguntaAberta: string | null
+  readonly revisaoPendente?: boolean
 }
 
 /**
@@ -84,6 +85,7 @@ export function destinoDoEnvio(situacao: SituacaoDaTarefa, intencao: Intencao): 
     silêncio justamente na hora em que ela mais quer saber.
   */
   if (intencao === 'perguntar') return { tipo: 'perguntar' }
+  if (situacao.revisaoPendente === true) return { tipo: 'ajustar' }
   // A pergunta aberta vence o estado: ela é o que está esperando resposta, e
   // ignorá-la faria o texto da pessoa virar pedido de mudança num plano que
   // ainda não existe.
@@ -100,6 +102,7 @@ export function destinoDoEnvio(situacao: SituacaoDaTarefa, intencao: Intencao): 
  * @returns a intenção padrão deste momento.
  */
 export function intencaoPadrao(situacao: SituacaoDaTarefa): Intencao {
+  if (situacao.revisaoPendente === true) return 'agir'
   /*
     O PADRÃO É PERGUNTAR onde o defeito morava.
 

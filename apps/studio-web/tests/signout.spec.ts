@@ -1,7 +1,25 @@
 import { expect, request as apiRequest, test, type BrowserContext, type Page } from '@playwright/test'
+import { PLAN_INTENT_DATABASE } from '../src/plan/pendingIntent'
 
 const origin = 'http://studio.dz23.localhost:4179'
 const sessionGenerationKey = 'dz23.studio.session-generation.v1'
+
+async function receipts(page: Page, databaseName: string, seed = false): Promise<number> {
+  return page.evaluate(({ databaseName, seed }) => new Promise<number>((resolve, reject) => {
+    const opening = indexedDB.open(databaseName, 1)
+    opening.onupgradeneeded = () => { opening.result.createObjectStore('pending', { keyPath: 'slot' }) }
+    opening.onerror = () => reject(opening.error)
+    opening.onsuccess = () => {
+      const database = opening.result
+      const transaction = database.transaction('pending', seed ? 'readwrite' : 'readonly')
+      const store = transaction.objectStore('pending')
+      if (seed) store.put({ slot: 'a'.repeat(64), digest: 'b'.repeat(64), key: 'c'.repeat(32), baseRevision: 1 })
+      const count = store.count()
+      transaction.oncomplete = () => { database.close(); resolve(count.result) }
+      transaction.onabort = () => { database.close(); reject(transaction.error) }
+    }
+  }), { databaseName, seed })
+}
 
 async function prepareBrowserState(context: BrowserContext, page: Page, token: string, path = '/studio/'): Promise<void> {
   await context.addCookies([{ name: 'dz23_studio_session', value: token, url: origin }])
@@ -31,11 +49,15 @@ async function browserState(page: Page) {
 
 test('revoga a sessão atual antes de limpar somente o estado FRIGG do navegador', async ({ context, page }) => {
   await prepareBrowserState(context, page, 'e2e-logout')
+  await receipts(page, PLAN_INTENT_DATABASE, true)
+  await receipts(page, 'test.unrelated-intents', true)
 
   const logoutResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/studio/identity/logout')
   await page.getByRole('button', { name: 'Sair' }).click()
   expect((await logoutResponse).status()).toBe(200)
   await expect(page).toHaveURL(/\/login$/u)
+  expect(await receipts(page, PLAN_INTENT_DATABASE)).toBe(0)
+  expect(await receipts(page, 'test.unrelated-intents')).toBe(1)
 
   await expect(browserState(page)).resolves.toEqual({
     csrf: null,
@@ -58,6 +80,7 @@ test('preserva cookie, tela, cache e storage quando o servidor não revoga', asy
   const sibling = await context.newPage()
   await prepareBrowserState(context, page, 'e2e-logout-fail')
   await prepareBrowserState(context, sibling, 'e2e-logout-fail')
+  await receipts(page, PLAN_INTENT_DATABASE, true)
 
   const logoutResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/studio/identity/logout')
   await page.getByRole('button', { name: 'Sair' }).click()
@@ -67,6 +90,7 @@ test('preserva cookie, tela, cache e storage quando o servidor não revoga', asy
   await expect(page.getByRole('button', { name: 'Sair' })).toBeEnabled()
   await expect(sibling).toHaveURL(/\/studio\/$/u)
   await expect(sibling.getByRole('button', { name: 'Sair' })).toBeEnabled()
+  expect(await receipts(page, PLAN_INTENT_DATABASE)).toBe(1)
 
   await expect(browserState(page)).resolves.toEqual({
     csrf: 'csrf-e2e',

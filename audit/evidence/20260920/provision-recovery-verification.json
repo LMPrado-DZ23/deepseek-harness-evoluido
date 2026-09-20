@@ -1,0 +1,102 @@
+{
+  "date": "2026-09-20",
+  "previousCheckpoint": "d7de66c09a8f2c341b88ec2a33593244e6f925c4",
+  "status": "BETA_NOT_RELEASE_READY",
+  "proofNode22": {
+    "proof": "PERSONAL_ADOPTION",
+    "status": "PASS",
+    "separateProcesses": true,
+    "storage": "Harness JSON domains",
+    "emailTransport": "captured locally, not SMTP",
+    "results": [
+      {
+        "phase": "interrupt",
+        "status": "PASS",
+        "partialProvisioningPersisted": true,
+        "sessionIssued": false
+      },
+      {
+        "phase": "recover",
+        "status": "PASS",
+        "projectsPreserved": 1,
+        "filesPreserved": 1,
+        "foreignScopeDenied": true,
+        "anonymousAccessDisabled": true
+      },
+      {
+        "phase": "reopen",
+        "status": "PASS",
+        "projectsPreserved": 1,
+        "filesPreserved": 1,
+        "foreignScopeDenied": true,
+        "anonymousAccessDisabled": true
+      }
+    ]
+  },
+  "mutations": [
+    {
+      "mutation": "sem_marcador",
+      "detected": true
+    },
+    {
+      "mutation": "nao_retomar",
+      "detected": true
+    },
+    {
+      "mutation": "reprovisionar_todo_login",
+      "detected": true
+    },
+    {
+      "mutation": "nao_limpar_conclusao",
+      "detected": true
+    }
+  ],
+  "focused": {
+    "identityAndTenancyPassed": 190
+  },
+  "webUnit": {
+    "passed": 1075
+  },
+  "gates": {
+    "count": 32,
+    "status": "PASS",
+    "constitution": "PASS"
+  },
+  "root": {
+    "passed": 4461,
+    "failed": 174,
+    "skipped": 68,
+    "newFailureNames": []
+  },
+  "postgres": {
+    "status": "NOT_EXECUTED",
+    "reason": "Docker and PostgreSQL server unavailable"
+  },
+  "previousCheckpointCI": {
+    "run": 35520291793,
+    "conclusion": "failure",
+    "jobsHaveSteps": false,
+    "specificCause": "NOT_CONFIRMED"
+  },
+  "limits": [
+    "No real SMTP or PC validation.",
+    "Personal conversation bindings still in memory.",
+    "No distributed CAS.",
+    "Old binary rejects new pending marker; complete provisioning or restore consistent backup for downgrade."
+  ],
+  "sourceSha256": {
+    "plugins/identity/src/service.ts": "792096a160cb5b6de40661d343a72414ee6ddea9fdf47276eb18bb78e5d311c3",
+    "plugins/identity/src/model.ts": "a1c93a02ee65c76f2a8c67dc7dce73cc541919c618ee92646c3378d0b33a8f37",
+    "scripts/prove-personal-adoption.mjs": "eb09a8db61b2d6570ae912c137b78dfc362dd545cd691d4874bbcc1f8f1200ad"
+  },
+  "browser": {
+    "status": "PASS",
+    "startTime": "2026-09-20T15:44:45.609Z",
+    "duration": 393094.323,
+    "expected": 174,
+    "skipped": 3,
+    "unexpected": 0,
+    "flaky": 0,
+    "environment": "isolated copy with current identity source and existing compiled UI"
+  }
+}

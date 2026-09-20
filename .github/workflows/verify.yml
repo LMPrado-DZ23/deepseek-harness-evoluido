@@ -47,6 +47,8 @@ jobs:
             'tests/portability/clean-clone-readme.test.mjs'
             'tests/portability/image-lock.test.mjs'
             'tests/portability/windows-contract-coverage.test.mjs'
+            'scripts/ponte/puxar-imagem.cli.test.mjs'
+            'scripts/startup-paths.test.mjs'
           )
           node --test @hermeticTests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -92,6 +94,7 @@ jobs:
 
       - name: Verify pinned upstream content
         run: |
+          node --test scripts/ponte/puxar-imagem.cli.test.mjs scripts/startup-paths.test.mjs
           node scripts/check-upstream-content.mjs --materialize-symlinks
           node scripts/check-upstream-pin.mjs --self-test
 
@@ -104,6 +107,14 @@ jobs:
         run: |
           pnpm install --frozen-lockfile --filter '@dz23-studio/*...'
           pnpm build
+
+      - name: Durable plan replay across processes
+        run: pnpm prove:plan-replay
+
+      - name: Preserve personal work after first registration
+        run: |
+          pnpm prove:personal-adoption
+          pnpm prove:personal-adoption:recovery
 
       - name: Static and policy gates
         run: |
@@ -321,4 +332,3 @@ jobs:
         # tem de ser exatamente o que `pnpm build` produz a partir do fonte
         # revisado — e um `lib/` adulterado reprova aqui.
         run: git diff --exit-code
-

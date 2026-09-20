@@ -34,7 +34,7 @@
 import { existsSync, readFileSync, statfsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { relatorio, bloqueios } from './studio-doctor.mjs'
 
 const raiz = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -372,7 +372,7 @@ export async function observarConstrutor(base = raiz, sonda = SONDA_DO_CONSTRUTO
 
 /** Este arquivo foi CHAMADO, ou apenas importado por um teste? */
 const chamadoDiretamente = process.argv[1] !== undefined
-  && import.meta.url === `file://${resolve(process.argv[1])}`
+  && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 
 if (chamadoDiretamente && process.argv.includes('--self-test')) {
   const casos = []

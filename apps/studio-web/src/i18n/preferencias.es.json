@@ -95,5 +95,11 @@
     "ligar": "Usar {nome}",
     "linhaComoInstalar": "Para aparecer aquí, instala la herramienta (Claude Code, Gemini CLI, Qwen Code o Codex CLI), inicia sesión con tu cuenta en la terminal y reinicia FRIGG. FRIGG no guarda tu contraseña ni tu clave: la herramienta habla con el proveedor.",
     "limitacao": "Por la línea de comandos el agente conversa, pero no usa herramientas (buscar, escribir archivos, programar). Un proyecto con el perfil privado solo usa la IA local."
+  },
+  "envios": {
+    "indisponivel": "No pude conservar este envío en el dispositivo. La solicitud no se envió. Revisa la conversación y los permisos de almacenamiento del navegador antes de intentarlo de nuevo.",
+    "identidade": "No pude confirmar tu espacio de trabajo. Actualiza la página antes de enviar. La solicitud no se envió.",
+    "confirmacaoPendente": "La solicitud se guardó en el servidor, pero este dispositivo no pudo guardar la confirmación. Si la reenvías, FRIGG intentará recuperar el mismo resultado.",
+    "revisaoOriginal": "Vuelve a enviar el texto original para completar la revisión pendiente. Este texto diferente no se envió y se conservó la clave anterior."
   }
 }

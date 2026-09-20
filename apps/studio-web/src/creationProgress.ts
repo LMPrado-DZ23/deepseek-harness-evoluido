@@ -41,3 +41,10 @@ export function attemptSentence(running: RunningStage | null): string | null {
   if (running === null || running.attempt <= 1) return null
   return t.creation.attempt.replace('{n}', String(running.attempt))
 }
+
+
+/** A execucao pode terminar antes de a transicao do projeto ser persistida. */
+export function generationSettled(projectState: string, runState: string): boolean {
+  return !['GENERATING', 'BUILD_OK', 'TESTS_OK'].includes(projectState)
+    && ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED'].includes(runState)
+}

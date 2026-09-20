@@ -24,6 +24,8 @@ import { latestGreenCheckpoint, noGreenReason, runCheckpoints, type CheckpointBl
 import { PERGUNTA_QUESTION_ID, MAX_PERGUNTA, MIN_PERGUNTA, perguntaNormalizada, respostaEmTexto, respostaSobreATarefa } from './pergunta.js'
 import { t } from './i18n.js'
 
+type PlanSlicePlanner = { slice(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, existing: readonly { readonly title: string; readonly planned_files: readonly string[] }[], request: string, category: StudioProjectCategory): Promise<{ readonly slice: StudioPlanSlice }> }
+
 export interface PromptToAppActor {
   readonly userId: string
   readonly orgId: string
@@ -147,6 +149,27 @@ export class PromptToAppService {
    * fecha a janela curta entre ler "não há reserva" e gravá-la.
    */
   readonly #creationMutex = new CreationMutex()
+  /** Serializa gravações do plano nesta instância; não substitui CAS entre processos. */
+  readonly #planMutex = new CreationMutex()
+
+  #withPlanWrite<T>(actor: PromptToAppActor, projectId: string, work: () => Promise<T>, resumeRevision = false): Promise<T> {
+    return this.#planMutex.run(JSON.stringify([actor.orgId, actor.tenantId, projectId]), async () => {
+      if (!resumeRevision) this.#assertRevisionIdle(this.project(actor, projectId))
+      return work()
+    })
+  }
+
+  projectForMutation(actor: PromptToAppActor, projectId: string): StudioProject {
+    this.#authorize(actor, 'project.write')
+    const project = this.project(actor, projectId)
+    this.#assertRevisionIdle(project)
+    return project
+  }
+
+  #assertRevisionIdle(project: StudioProject): void {
+    if (project.pending_revision !== undefined) throw new PromptToAppError('CONFLICT', t('errors.revisionPending'))
+  }
+
   readonly #intakeTurnStore: IntakeTurnRecordStore | undefined
   readonly #designSpecStore: DesignSpecRecordStore | undefined
   readonly #appSpecStore: AppSpecRecordStore | undefined
@@ -283,6 +306,8 @@ export class PromptToAppService {
     requestKey: string | undefined,
     executar: (idReservado: string | undefined) => Promise<{ readonly id: string, readonly valor: T }>,
     reler: (resultId: string) => Promise<T | undefined>,
+    retryMissingResult = true,
+    uncertainMessage = t('errors.planSliceUncertain'),
   ): Promise<T> {
     if (requestKey === undefined || this.#repository.creationKeys === undefined || this.#repository.putCreationKey === undefined) {
       return (await executar(undefined)).valor
@@ -296,14 +321,15 @@ export class PromptToAppService {
       )
       const desfecho = desfechoDoEnvio(reserva, fingerprint)
       if (desfecho.kind === 'CONFLITO') throw new PromptToAppError('CONFLICT', t('errors.creationKeyConflict'))
-      if (desfecho.kind === 'REUSAR' && desfecho.resultId !== undefined) {
+      if (desfecho.kind === 'REUSAR') {
         // A releitura passa pela MESMA autorização: recuperar a resposta não
         // pode virar atalho para ler o que é de outra pessoa.
-        const existente = await reler(desfecho.resultId)
+        const existente = desfecho.resultId === undefined ? undefined : await reler(desfecho.resultId)
         if (existente !== undefined) return existente
+        if (!retryMissingResult) throw new PromptToAppError('REPLAY', uncertainMessage)
         // A reserva ficou e o efeito não: o processo caiu entre as duas
         // escritas. Termina com o MESMO identificador.
-        return (await executar(desfecho.resultId)).valor
+        if (desfecho.resultId !== undefined) return (await executar(desfecho.resultId)).valor
       }
       const idReservado = this.#createId()
       await this.#repository.putCreationKey!({
@@ -415,7 +441,8 @@ export class PromptToAppService {
    *
    * `produzir` é passado de fora porque quem sabe falar com o modelo é o
    * motor de intake, e ele não mora aqui. O importante é a ORDEM: com chave,
-   * `produzir` só é chamado quando o envio é novo.
+   * `produzir` só é chamado quando o envio é novo. Reserva sem turno fica
+   * incerta: até resposta digitada pode acionar leitura pelo modelo na rota.
    *
    * A impressão é feita SÓ do que o cliente mandou: a resposta digitada, ou a
    * marca de recomendação quando é o modelo que vai escrever.
@@ -512,6 +539,7 @@ export class PromptToAppService {
     requestKey?: string,
   ): Promise<StudioIntakeTurn> {
     this.#authorize(actor, 'project.write'); this.project(actor, projectId)
+    this.#requireReceipts(requestKey)
     const marca = entrada.recommended ? '@recomendado' : entrada.digitada
     return this.#comChaveDeEnvio(
       actor, projectId, 'resposta', marca, requestKey,
@@ -524,6 +552,7 @@ export class PromptToAppService {
         return { id: turno.turn_id, valor: turno }
       },
       async resultId => (await this.intakeTurns(actor, projectId)).find(turno => turno.turn_id === resultId),
+      false, t('errors.intakeUncertain'),
     )
   }
 
@@ -640,19 +669,25 @@ export class PromptToAppService {
     /** O identificador JÁ RESERVADO, quando o envio tem chave. Ver `recordTurn`. */
     specId?: string,
   ): Promise<StudioAppSpecRecord> {
-    this.#authorize(actor, 'project.write'); this.project(actor, projectId)
+    return this.#withPlanWrite(actor, projectId, () => this.#saveSpec(actor, projectId, spec, origin, specId))
+  }
+
+  async #saveSpec(actor: PromptToAppActor, projectId: string, spec: AppSpecV1, origin: 'intake' | 'edit', specId?: string): Promise<StudioAppSpecRecord> {
+    this.#authorize(actor, 'project.write')
+    const current = this.project(actor, projectId)
+    if (current.pending_revision !== undefined && (current.pending_revision.spec_id !== specId || current.pending_revision.requested_by !== actor.userId)) this.#assertRevisionIdle(current)
     const rows = this.#appSpecStore === undefined
       ? this.#repository.specs()
       : await listAppSpecs(this.#appSpecStore, { orgId: actor.orgId, tenantId: actor.tenantId })
     const previous = rows.filter(value => value.project_id === projectId && this.#sameScope(actor, value))
     const value: StudioAppSpecRecord = {
       spec_id: specId ?? this.#createId(), project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
-      version: previous.length + 1, app_spec: spec, sha256: appSpecHash(spec), origin, created_at: this.#now().toISOString(),
+      version: Math.max(0, ...previous.map(row => row.version)) + 1, app_spec: spec, sha256: appSpecHash(spec), origin, created_at: this.#now().toISOString(),
     }
     if (this.#appSpecStore === undefined) await this.#repository.putSpec(value)
     else await putAppSpec(this.#appSpecStore, value)
     const project = this.project(actor, projectId)
-    if (project.state === 'DRAFT') await this.transition(actor, projectId, 'SPEC_READY')
+    if (project.state === 'DRAFT') await this.#transition(actor, projectId, 'SPEC_READY')
     return value
   }
 
@@ -716,23 +751,25 @@ export class PromptToAppService {
   }
 
   async proposePlan(actor: PromptToAppActor, projectId: string, slices: StudioPlan['slices']): Promise<StudioPlan> {
-    this.#authorize(actor, 'project.write')
-    const spec = await this.latestSpec(actor, projectId); const now = this.#now().toISOString()
-    const project = this.project(actor, projectId)
-    const allPlans = this.#planStore === undefined
-      ? this.#repository.plans()
-      : await listPlans(this.#planStore, { orgId: actor.orgId, tenantId: actor.tenantId })
-    const existing = allPlans.filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
-    const previous = [...existing].sort((left, right) => (right.revision ?? 0) - (left.revision ?? 0) || right.created_at.localeCompare(left.created_at))[0]
-    const revising = project.state === 'PLAN_PROPOSED' && previous?.status === 'CHANGE_REQUESTED'
-    if (project.state !== 'SPEC_READY' && !revising) throw new PromptToAppError('INVALID', t('errors.planOrder'))
-    const value: StudioPlan = {
-      plan_id: this.#createId(), spec_id: spec.spec_id, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
-      revision: existing.length + 1, slices, status: 'PROPOSED', created_at: now, updated_at: now,
-    }
-    await this.#putPlan(value)
-    if (!revising) await this.transition(actor, projectId, 'PLAN_PROPOSED')
-    return value
+    return this.#withPlanWrite(actor, projectId, async () => {
+      this.#authorize(actor, 'project.write')
+      const spec = await this.latestSpec(actor, projectId); const now = this.#now().toISOString()
+      const project = this.project(actor, projectId)
+      const allPlans = this.#planStore === undefined
+        ? this.#repository.plans()
+        : await listPlans(this.#planStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+      const existing = allPlans.filter(candidate => candidate.project_id === projectId && this.#sameScope(actor, candidate))
+      const previous = [...existing].sort((left, right) => (right.revision ?? 0) - (left.revision ?? 0) || right.created_at.localeCompare(left.created_at))[0]
+      const revising = project.state === 'PLAN_PROPOSED' && previous?.status === 'CHANGE_REQUESTED'
+      if (project.state !== 'SPEC_READY' && !revising) throw new PromptToAppError('INVALID', t('errors.planOrder'))
+      const value: StudioPlan = {
+        plan_id: this.#createId(), spec_id: spec.spec_id, project_id: projectId, org_id: actor.orgId, tenant_id: actor.tenantId,
+        revision: Math.max(0, ...existing.map(planRevision)) + 1, slices, status: 'PROPOSED', created_at: now, updated_at: now,
+      }
+      await this.#putPlan(value)
+      if (!revising) await this.#transition(actor, projectId, 'PLAN_PROPOSED')
+      return value
+    })
   }
 
   async plan(actor: PromptToAppActor, projectId: string): Promise<StudioPlan> {
@@ -745,6 +782,37 @@ export class PromptToAppService {
     return value
   }
 
+  #requireReceipts(requestKey: string | undefined): void {
+    if (requestKey !== undefined && (this.#repository.creationKeys === undefined || this.#repository.putCreationKey === undefined)) {
+      throw new PromptToAppError('INVALID', t('errors.planReceiptUnavailable'))
+    }
+  }
+
+  async #findPlan(actor: PromptToAppActor, projectId: string, planId: string): Promise<StudioPlan | undefined> {
+    this.project(actor, projectId)
+    const rows = this.#planStore === undefined ? this.#repository.plans()
+      : await listPlans(this.#planStore, { orgId: actor.orgId, tenantId: actor.tenantId })
+    const plan = rows.find(row => row.plan_id === planId && row.project_id === projectId && this.#sameScope(actor, row))
+    return plan
+  }
+
+  async #replayPlan(actor: PromptToAppActor, projectId: string, planId: string): Promise<StudioPlan | undefined> {
+    const plan = await this.#findPlan(actor, projectId, planId)
+    if (plan !== undefined) await this.#recordPlanEdit(actor, plan)
+    return plan
+  }
+
+  /** Identidade determinística permite reparar queda entre plano e trilha sem duplicar a trilha. */
+  async #recordPlanEdit(actor: PromptToAppActor, plan: StudioPlan): Promise<void> {
+    const id = `plan-edit-${createHash('sha256').update(JSON.stringify([plan.org_id, plan.tenant_id, plan.plan_id])).digest('hex')}`
+    if (this.#repository.approvals().some(row => row.approval_id === id && this.#sameScope(actor, row))) return
+    await this.#repository.putApproval({
+      approval_id: id, project_id: plan.project_id, org_id: plan.org_id, tenant_id: plan.tenant_id,
+      subject: 'plan', subject_id: `${plan.plan_id}:r${String(planRevision(plan))}`, approved_by: actor.userId,
+      approved_at: plan.created_at, tier: 'T1', strong_identity: false, from_state: null, to_state: null,
+    })
+  }
+
   /** Grava o plano onde a autoridade de armazenamento manda. */
   async #putPlan(value: StudioPlan): Promise<void> {
     if (this.#planStore === undefined) await this.#repository.putPlan(value)
@@ -752,49 +820,46 @@ export class PromptToAppService {
   }
 
   async approvePlan(actor: PromptToAppActor, projectId: string): Promise<StudioPlan> {
-    this.#authorize(actor, 'project.write'); const value = await this.plan(actor, projectId)
-    if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planUnavailable'))
-    const updated = { ...value, status: 'APPROVED' as const, updated_at: this.#now().toISOString() }
-    await this.#putPlan(updated)
-    await this.#approval(actor, projectId, 'plan', value.plan_id, 'T1', false)
-    await this.transition(actor, projectId, 'PLAN_APPROVED')
-    return updated
+    return this.#withPlanWrite(actor, projectId, async () => {
+      this.#authorize(actor, 'project.write'); const value = await this.plan(actor, projectId)
+      if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planUnavailable'))
+      const updated = { ...value, status: 'APPROVED' as const, updated_at: this.#now().toISOString() }
+      await this.#putPlan(updated)
+      await this.#approval(actor, projectId, 'plan', value.plan_id, 'T1', false)
+      await this.#transition(actor, projectId, 'PLAN_APPROVED')
+      return updated
+    })
   }
 
   async requestPlanChange(actor: PromptToAppActor, projectId: string, reason: string, requestKey?: string): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
     const texto = reason.trim()
     if (texto.length < 3 || texto.length > 2_000) throw new PromptToAppError('INVALID', t('errors.planChangeLength'))
-    /*
-      O pedido de alteração NÃO duplicava efeito antes disto: a guarda de estado
-      já barrava o segundo. O que ele fazia era pior de explicar para quem usa —
-      devolvia um ERRO de repetição para quem só tinha reenviado o mesmo pedido
-      depois de perder a resposta, e a pessoa via "não dá mais" para um pedido
-      que tinha dado certo.
-
-      Não há segunda contabilidade: é a MESMA reserva durável dos outros envios.
-      A releitura não tem identificador próprio porque o plano é um por tarefa —
-      ela confere o ESTADO: o plano ainda está em alteração pedida, e o pedido
-      gravado é este. Se outra pessoa mudou o plano no meio, a releitura não
-      reconhece, e o envio segue para a guarda de estado, que recusa com a
-      verdade de agora.
-    */
+    this.project(actor, projectId)
+    this.#requireReceipts(requestKey)
+    // Cada recibo aponta para a versão preservada, nunca para o plano corrente.
+    // Reservas antigas/incompletas não autorizam aplicar a intenção a outra versão.
     return this.#comChaveDeEnvio(
       actor, projectId, 'mudanca', texto, requestKey,
-      async () => ({ id: projectId, valor: await this.#pedirAlteracao(actor, projectId, texto) }),
-      async () => {
-        const atual = await this.plan(actor, projectId).catch(() => undefined)
-        return atual !== undefined && atual.status === 'CHANGE_REQUESTED' && atual.change_request === texto ? atual : undefined
-      },
+      async id => { const value = await this.#pedirAlteracao(actor, projectId, texto, id); return { id: value.plan_id, valor: value } },
+      id => this.#findPlan(actor, projectId, id),
+      false, t('errors.planChangeUncertain'),
     )
   }
 
-  async #pedirAlteracao(actor: PromptToAppActor, projectId: string, texto: string): Promise<StudioPlan> {
-    const value = await this.plan(actor, projectId)
-    if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planChangeUnavailable'))
-    const updated = { ...value, status: 'CHANGE_REQUESTED' as const, change_request: texto, updated_at: this.#now().toISOString() }
-    await this.#putPlan(updated)
-    return updated
+  async #pedirAlteracao(actor: PromptToAppActor, projectId: string, texto: string, resultId?: string): Promise<StudioPlan> {
+    return this.#withPlanWrite(actor, projectId, async () => {
+      const value = await this.plan(actor, projectId)
+      if (value.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planChangeUnavailable'))
+      const now = this.#now().toISOString()
+      const updated = {
+        ...value,
+        ...(resultId === undefined ? {} : { plan_id: resultId, revision: planRevision(value) + 1, created_at: now }),
+        status: 'CHANGE_REQUESTED' as const, change_request: texto, updated_at: now,
+      }
+      await this.#putPlan(updated)
+      return updated
+    })
   }
 
   /**
@@ -814,35 +879,47 @@ export class PromptToAppService {
    * @param edit - as mudanças, já validadas pelo schema.
    * @returns o plano gravado, uma revisão à frente.
    */
-  async editPlan(actor: PromptToAppActor, projectId: string, edit: PlanEdit): Promise<StudioPlan> {
-    this.#authorize(actor, 'project.write')
-    const value = await this.plan(actor, projectId)
-    let updated: StudioPlan
-    try {
-      updated = applyPlanEdit(value, edit, this.#now().toISOString())
-    } catch (error) {
-      if (!(error instanceof PlanEditError)) throw error
-      // `STALE` e `UNAVAILABLE` viram REPLAY, que a camada HTTP responde como 409:
-      // as duas são "o mundo mudou embaixo de você", e não "seu pedido está errado".
-      const code = error.code === 'STALE' || error.code === 'UNAVAILABLE' ? 'REPLAY' as const
-        : error.code === 'NOT_FOUND' ? 'NOT_FOUND' as const : 'INVALID' as const
-      throw new PromptToAppError(code, error.message)
-    }
-    await this.#putPlan(updated)
-    // O REGISTRO da edição. Não é uma aprovação — aprovar continua sendo um ato
-    // separado, feito depois de ver o resultado da própria edição —, e sim a
-    // mesma trilha auditável que `transition` já usa: um ato de uma pessoa,
-    // num nível, com data e autor.
-    //
-    // Sem ele o plano podia ser reescrito e o repositório só sabia QUE tinha
-    // mudado (`revision`), nunca por QUEM. Num produto multiempresa, com papéis
-    // e organizações, "alguém com permissão de escrita mudou o que vai ser
-    // construído" não é um registro: é a ausência de um.
-    //
-    // T1 porque editar um plano ainda PROPOSTO não constrói nada nem toca
-    // dado sensível. O que constrói é aprovar, e essa aprovação já é gravada.
-    await this.#approval(actor, projectId, 'plan', `${updated.plan_id}:r${String(planRevision(updated))}`, 'T1', false)
-    return updated
+  async editPlan(actor: PromptToAppActor, projectId: string, edit: PlanEdit, requestKey?: string): Promise<StudioPlan> {
+    this.#authorize(actor, 'project.write'); this.project(actor, projectId)
+    this.#requireReceipts(requestKey)
+    return this.#comChaveDeEnvio(actor, projectId, 'edicao-plano', JSON.stringify(edit), requestKey,
+      async id => { const value = await this.#editPlan(actor, projectId, edit, id); return { id: value.plan_id, valor: value } },
+      id => this.#replayPlan(actor, projectId, id),
+    )
+  }
+
+  async #editPlan(actor: PromptToAppActor, projectId: string, edit: PlanEdit, resultId?: string): Promise<StudioPlan> {
+    return this.#withPlanWrite(actor, projectId, async () => {
+      this.#authorize(actor, 'project.write')
+      const value = await this.plan(actor, projectId)
+      let updated: StudioPlan
+      try {
+        updated = applyPlanEdit(value, edit, this.#now().toISOString())
+      } catch (error) {
+        if (!(error instanceof PlanEditError)) throw error
+        // `STALE` e `UNAVAILABLE` viram REPLAY, que a camada HTTP responde como 409:
+        // as duas são "o mundo mudou embaixo de você", e não "seu pedido está errado".
+        const code = error.code === 'STALE' || error.code === 'UNAVAILABLE' ? 'REPLAY' as const
+          : error.code === 'NOT_FOUND' ? 'NOT_FOUND' as const : 'INVALID' as const
+        throw new PromptToAppError(code, error.message)
+      }
+      updated = { ...updated, plan_id: resultId ?? this.#createId(), created_at: updated.updated_at }
+      await this.#putPlan(updated)
+      // O REGISTRO da edição. Não é uma aprovação — aprovar continua sendo um ato
+      // separado, feito depois de ver o resultado da própria edição —, e sim a
+      // mesma trilha auditável que `transition` já usa: um ato de uma pessoa,
+      // num nível, com data e autor.
+      //
+      // Sem ele o plano podia ser reescrito e o repositório só sabia QUE tinha
+      // mudado (`revision`), nunca por QUEM. Num produto multiempresa, com papéis
+      // e organizações, "alguém com permissão de escrita mudou o que vai ser
+      // construído" não é um registro: é a ausência de um.
+      //
+      // T1 porque editar um plano ainda PROPOSTO não constrói nada nem toca
+      // dado sensível. O que constrói é aprovar, e essa aprovação já é gravada.
+      await this.#recordPlanEdit(actor, updated)
+      return updated
+    })
   }
 
   /**
@@ -863,35 +940,58 @@ export class PromptToAppService {
    * @param privacy - o perfil de rota do projeto.
    * @returns o plano com a etapa nova no fim.
    */
-  async addPlanSlice(
+  async addPlanSlice(actor: PromptToAppActor, projectId: string, request: string, planner: PlanSlicePlanner, privacy: RoutePrivacy, requestKey?: string, baseRevision?: number): Promise<StudioPlan> {
+    this.#authorize(actor, 'project.write'); this.project(actor, projectId)
+    const text = request.trim()
+    if (text.length < 3 || text.length > 2_000) throw new PromptToAppError('INVALID', t('errors.sliceUnusable'))
+    this.#requireReceipts(requestKey)
+    return this.#comChaveDeEnvio(actor, projectId, 'etapa-plano', JSON.stringify([text, baseRevision ?? null]), requestKey,
+      async id => { const value = await this.#addPlanSlice(actor, projectId, text, planner, privacy, id, baseRevision); return { id: value.plan_id, valor: value } },
+      id => this.#replayPlan(actor, projectId, id),
+      false, // Após perda do resultado, não repetir automaticamente custo externo incerto.
+    )
+  }
+
+  async #addPlanSlice(
     actor: PromptToAppActor,
     projectId: string,
     request: string,
-    planner: { slice(scope: { orgId: string; tenantId: string }, privacy: RoutePrivacy, spec: AppSpecV1, existing: readonly { readonly title: string; readonly planned_files: readonly string[] }[], request: string, category: StudioProjectCategory): Promise<{ readonly slice: StudioPlanSlice }> },
+    planner: PlanSlicePlanner,
     privacy: RoutePrivacy,
+    resultId?: string,
+    baseRevision?: number,
   ): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write')
     const text = request.trim()
     // O mesmo teto do pedido de mudança: uma frase curta demais não descreve
     // etapa nenhuma, e uma parede de texto vira um plano que ninguém revisa.
     if (text.length < 3 || text.length > 2_000) throw new PromptToAppError('INVALID', t('errors.sliceUnusable'))
-    const project = this.project(actor, projectId)
+    const project = this.projectForMutation(actor, projectId)
     const plan = await this.plan(actor, projectId)
+    if (baseRevision !== undefined && planRevision(plan) !== baseRevision) throw new PromptToAppError('REPLAY', t('errors.planEditStale'))
+    if (plan.status !== 'PROPOSED') throw new PromptToAppError('REPLAY', t('errors.planEditUnavailable'))
     const spec = (await this.latestSpec(actor, projectId)).app_spec
     const { slice } = await planner.slice(
       { orgId: actor.orgId, tenantId: actor.tenantId }, privacy, spec,
       plan.slices.map(existing => ({ title: existing.title, planned_files: existing.planned_files })),
       text, project.category,
     )
-    let updated: StudioPlan
-    try { updated = appendPlanSlice(plan, slice, this.#now().toISOString()) }
-    catch (error) {
-      if (!(error instanceof PlanEditError)) throw error
-      throw new PromptToAppError(error.code === 'UNAVAILABLE' ? 'REPLAY' : 'INVALID', error.message)
-    }
-    await this.#putPlan(updated)
-    await this.#approval(actor, projectId, 'plan', `${updated.plan_id}:r${String(planRevision(updated))}`, 'T1', false)
-    return updated
+    return this.#withPlanWrite(actor, projectId, async () => {
+      const current = await this.plan(actor, projectId)
+      if (current.plan_id !== plan.plan_id || planRevision(current) !== planRevision(plan) || current.status !== 'PROPOSED') {
+        throw new PromptToAppError('REPLAY', t('errors.planEditStale'))
+      }
+      let updated: StudioPlan
+      try { updated = appendPlanSlice(plan, slice, this.#now().toISOString()) }
+      catch (error) {
+        if (!(error instanceof PlanEditError)) throw error
+        throw new PromptToAppError(error.code === 'UNAVAILABLE' ? 'REPLAY' : 'INVALID', error.message)
+      }
+      updated = { ...updated, plan_id: resultId ?? this.#createId(), created_at: updated.updated_at }
+      await this.#putPlan(updated)
+      await this.#recordPlanEdit(actor, updated)
+      return updated
+    })
   }
 
   /**
@@ -916,18 +1016,17 @@ export class PromptToAppService {
   ): Promise<{ readonly project: StudioProject; readonly spec: StudioAppSpecRecord }> {
     this.#authorize(actor, 'project.write')
     this.project(actor, projectId)
+    this.#requireReceipts(requestKey)
     return this.#comChaveDeEnvio(
       actor, projectId, 'revisao', pedido.trim().replace(/\s+/gu, ' '), requestKey,
       async idReservado => {
         const feito = await this.#revisar(actor, projectId, pedido, idReservado)
         return { id: feito.spec.spec_id, valor: feito }
       },
-      async resultId => {
-        // A releitura devolve a MESMA revisão, reautorizada: a especificação
-        // gravada com aquele identificador, e o estado da tarefa agora.
+      resultId => this.#withPlanWrite(actor, projectId, async () => {
         const spec = (await this.specs(actor, projectId)).find(registro => registro.spec_id === resultId)
-        return spec === undefined ? undefined : { project: this.project(actor, projectId), spec }
-      },
+        return spec === undefined ? undefined : this.#finishRevision(actor, projectId, spec)
+      }, true),
     )
   }
 
@@ -942,35 +1041,78 @@ export class PromptToAppService {
   async #revisar(
     actor: PromptToAppActor, projectId: string, pedido: string, specId?: string,
   ): Promise<{ readonly project: StudioProject; readonly spec: StudioAppSpecRecord }> {
-    const project = this.project(actor, projectId)
-    // Os dois erros do módulo viram erro DESTE serviço aqui, e não na camada
-    // HTTP: quem chama o serviço direto — o assistente, um teste de domínio —
-    // recebe a mesma recusa que a rota, com o mesmo código.
-    let revisada: AppSpecV1
-    try {
-      assertRevisionTransition(project.state)
-      const anterior = await this.latestSpec(actor, projectId)
-      revisada = especificacaoRevisada(anterior.app_spec, pedido)
-    } catch (error) {
-      // Repetido e fora de hora são os dois "o mundo não está como você
-      // pensou" — 409, e não 400: quem escreveu não errou nada.
-      if (error instanceof RevisionNotAvailableError) throw new PromptToAppError('REPLAY', error.message)
-      if (error instanceof RevisionError) throw new PromptToAppError(error.code === 'DUPLICATE' ? 'REPLAY' : 'INVALID', error.message)
-      throw error
+    return this.#withPlanWrite(actor, projectId, async () => {
+      const project = this.project(actor, projectId)
+      if (project.pending_revision !== undefined && (project.pending_revision.spec_id !== specId || project.pending_revision.requested_by !== actor.userId)) this.#assertRevisionIdle(project)
+      // Os dois erros do módulo viram erro DESTE serviço aqui, e não na camada
+      // HTTP: quem chama o serviço direto — o assistente, um teste de domínio —
+      // recebe a mesma recusa que a rota, com o mesmo código.
+      let revisada: AppSpecV1
+      try {
+        assertRevisionTransition(project.state)
+        const anterior = await this.latestSpec(actor, projectId)
+        revisada = especificacaoRevisada(anterior.app_spec, pedido)
+      } catch (error) {
+        // Repetido e fora de hora são os dois "o mundo não está como você
+        // pensou" — 409, e não 400: quem escreveu não errou nada.
+        if (error instanceof RevisionNotAvailableError) throw new PromptToAppError('REPLAY', error.message)
+        if (error instanceof RevisionError) throw new PromptToAppError(error.code === 'DUPLICATE' ? 'REPLAY' : 'INVALID', error.message)
+        throw error
+      }
+      // A especificação é gravada ANTES da transição, e a ordem é a mesma lição
+      // da reserva de criação: com o estado mudado primeiro, uma queda no meio
+      // deixaria a tarefa aberta para planejar sem que o pedido tivesse entrado.
+      if (specId !== undefined && project.pending_revision === undefined) {
+        await this.#repository.putProject({ ...project, pending_revision: {
+          spec_id: specId, from_state: project.state, requested_by: actor.userId, requested_at: this.#now().toISOString(),
+        } })
+      }
+      const spec = await this.#saveSpec(actor, projectId, revisada, 'edit', specId)
+      if (specId !== undefined) return this.#finishRevision(actor, projectId, spec)
+      const atual = this.project(actor, projectId)
+      const updated: StudioProject = { ...atual, state: 'SPEC_READY', updated_at: this.#now().toISOString() }
+      await this.#repository.putProject(updated)
+      await this.#approval(actor, projectId, 'transition', `revise:${spec.spec_id}`, 'T1', false, project.state, 'SPEC_READY')
+      return { project: updated, spec }
+    }, true)
+  }
+
+  async #finishRevision(actor: PromptToAppActor, projectId: string, spec: StudioAppSpecRecord): Promise<{ readonly project: StudioProject; readonly spec: StudioAppSpecRecord }> {
+    let project = this.project(actor, projectId)
+    const pending = project.pending_revision
+    const subjectId = `revise:${spec.spec_id}`
+    if (pending?.spec_id !== spec.spec_id) {
+      const completed = this.#repository.approvals().some(row => row.project_id === projectId && this.#sameScope(actor, row) && row.subject === 'transition' && row.subject_id === subjectId && row.to_state === 'SPEC_READY')
+      if (!completed) throw new PromptToAppError('REPLAY', t('errors.revisionUncertain'))
+      return { project, spec }
     }
-    // A especificação é gravada ANTES da transição, e a ordem é a mesma lição
-    // da reserva de criação: com o estado mudado primeiro, uma queda no meio
-    // deixaria a tarefa aberta para planejar sem que o pedido tivesse entrado.
-    const spec = await this.saveSpec(actor, projectId, revisada, 'edit', specId)
-    const atual = this.project(actor, projectId)
-    const updated: StudioProject = { ...atual, state: 'SPEC_READY', updated_at: this.#now().toISOString() }
-    await this.#repository.putProject(updated)
-    await this.#approval(actor, projectId, 'transition', `revise:${spec.spec_id}`, 'T1', false, project.state, 'SPEC_READY')
-    return { project: updated, spec }
+    if (pending.requested_by !== actor.userId || (await this.latestSpec(actor, projectId)).spec_id !== spec.spec_id || (project.state !== pending.from_state && project.state !== 'SPEC_READY')) {
+      throw new PromptToAppError('CONFLICT', t('errors.revisionPending'))
+    }
+    if (project.state !== 'SPEC_READY') {
+      project = { ...project, state: 'SPEC_READY', updated_at: pending.requested_at }
+      await this.#repository.putProject(project)
+    }
+    const approvalId = `revision-${createHash('sha256').update(JSON.stringify([project.org_id, project.tenant_id, projectId, spec.spec_id])).digest('hex')}`
+    if (!this.#repository.approvals().some(row => row.approval_id === approvalId && this.#sameScope(actor, row))) {
+      await this.#repository.putApproval({
+        approval_id: approvalId, project_id: projectId, org_id: project.org_id, tenant_id: project.tenant_id,
+        subject: 'transition', subject_id: subjectId, approved_by: pending.requested_by, approved_at: pending.requested_at,
+        tier: 'T1', strong_identity: false, from_state: pending.from_state, to_state: 'SPEC_READY',
+      })
+    }
+    const { pending_revision: _completed, ...complete } = project
+    await this.#repository.putProject(complete)
+    return { project: complete, spec }
   }
 
   async transition(actor: PromptToAppActor, projectId: string, to: ProjectState): Promise<StudioProject> {
+    return this.#withPlanWrite(actor, projectId, () => this.#transition(actor, projectId, to))
+  }
+
+  async #transition(actor: PromptToAppActor, projectId: string, to: ProjectState): Promise<StudioProject> {
     this.#authorize(actor, 'project.write'); const value = this.project(actor, projectId)
+    this.#assertRevisionIdle(value)
     assertProjectTransition(value.state, to)
     const updated = { ...value, state: to, updated_at: this.#now().toISOString() }
     await this.#repository.putProject(updated)
@@ -1033,20 +1175,22 @@ export class PromptToAppService {
    */
   async undoToCheckpoint(actor: PromptToAppActor, projectId: string, runId: string): Promise<{ readonly project: StudioProject; readonly checkpoint: RunCheckpoint }> {
     this.#authorize(actor, 'project.write')
-    const project = this.project(actor, projectId)
-    // `runs` já filtra por org e tenant: uma tentativa de OUTRO escopo não é
-    // "recusada depois", ela simplesmente não existe para quem pergunta.
-    const checkpoint = runCheckpoints(this.runs(actor, projectId)).find(candidate => candidate.run_id === runId)
-    if (checkpoint === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.checkpointNotFound'))
-    if (!checkpoint.green) throw new PromptToAppError('INVALID', t('errors.checkpointNotGreen'))
-    assertUndoTransition(project.state, 'VERIFIED_PROTOTYPE')
-    const updated: StudioProject = {
-      ...project, state: 'VERIFIED_PROTOTYPE', current_run_id: checkpoint.run_id,
-      updated_at: this.#now().toISOString(),
-    }
-    await this.#repository.putProject(updated)
-    await this.#approval(actor, projectId, 'transition', `undo:${checkpoint.run_id}`, 'T1', false, project.state, 'VERIFIED_PROTOTYPE')
-    return { project: updated, checkpoint }
+    return this.#withPlanWrite(actor, projectId, async () => {
+      const project = this.project(actor, projectId)
+      // `runs` já filtra por org e tenant: uma tentativa de OUTRO escopo não é
+      // "recusada depois", ela simplesmente não existe para quem pergunta.
+      const checkpoint = runCheckpoints(this.runs(actor, projectId)).find(candidate => candidate.run_id === runId)
+      if (checkpoint === undefined) throw new PromptToAppError('NOT_FOUND', t('errors.checkpointNotFound'))
+      if (!checkpoint.green) throw new PromptToAppError('INVALID', t('errors.checkpointNotGreen'))
+      assertUndoTransition(project.state, 'VERIFIED_PROTOTYPE')
+      const updated: StudioProject = {
+        ...project, state: 'VERIFIED_PROTOTYPE', current_run_id: checkpoint.run_id,
+        updated_at: this.#now().toISOString(),
+      }
+      await this.#repository.putProject(updated)
+      await this.#approval(actor, projectId, 'transition', `undo:${checkpoint.run_id}`, 'T1', false, project.state, 'VERIFIED_PROTOTYPE')
+      return { project: updated, checkpoint }
+    })
   }
 
   runs(actor: PromptToAppActor, projectId: string) { this.project(actor, projectId); return this.#repository.runs().filter(value => value.project_id === projectId && this.#sameScope(actor, value)) }
@@ -1144,8 +1288,10 @@ export class PromptToAppService {
 
   async archive(actor: PromptToAppActor, projectId: string): Promise<StudioProject> {
     if (actor.role !== 'owner' && actor.role !== 'admin') throw new PromptToAppError('FORBIDDEN', t('errors.archiveForbidden'))
-    const value = this.project(actor, projectId); const updated = { ...value, archived_at: this.#now().toISOString(), updated_at: this.#now().toISOString() }
-    await this.#repository.putProject(updated); return updated
+    return this.#withPlanWrite(actor, projectId, async () => {
+      const value = this.project(actor, projectId); const updated = { ...value, archived_at: this.#now().toISOString(), updated_at: this.#now().toISOString() }
+      await this.#repository.putProject(updated); return updated
+    })
   }
 
   async #saveDesign(actor: PromptToAppActor, projectId: string, designSpec: DesignSpecV1): Promise<StudioDesignSpecRecord> {

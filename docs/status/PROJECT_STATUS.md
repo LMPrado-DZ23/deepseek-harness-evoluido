@@ -14,9 +14,212 @@
 - `mission_intent`: evoluir o repositório para um Engineering OS sobre o DeepSeek Harness, preservando o motor e a compatibilidade com o upstream
 - `state`: `EXECUTING`
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
-- `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
+- `head`: base canônica `997fa20d897a95061db6da17981c0713dce5f8a3`; correções da auditoria no PR #1, branch `codex/audit-frigg-20260920`, ainda não integradas a `integ`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
+
+## Perguntas duraveis — VALIDADAS LOCALMENTE, 20/09/2026
+
+Pergunta agora reserva metadados antes de enviar e recupera o mesmo turno
+apos fechar a aba. Duas mutacoes detectadas; interface 1.111 PASS; navegador
+completo 184 PASS/3 SKIP/0 FAIL; 32 portoes PASS; raiz 4.487 PASS/174 FAIL/68 SKIP,
+sem novos nomes de falha.
+Ultimo checkpoint remoto: `72190e148e3ef03dcc4fe3a37ca10aef2ee04917`.
+Proxima frente EM EXECUCAO: AUDIT-SYNTHESIS-REPLAY-01 tem quatro regressoes
+confirmadas em copia isolada: 409 no reenvio da ultima resposta, inclusive apos
+correcao posterior; nova chamada ao modelo apos falha (3 -> 4) e em correcao
+reenviada (4 -> 5). HIGH interno aberto, sem correcao de producao neste checkpoint.
+Casos e resultados em audit/evidence/20260920/synthesis-replay-findings.json.
+DESKTOP-PRADO offline em 18:18 UTC; CI 35528112231 falhou sem etapas/logs.
+Sem merge, release ou declaracao de produto pronto.
+
+## Revisao duravel e transicao final — VALIDADAS LOCALMENTE, 20/09/2026
+
+Revisao agora conserva chave no navegador, orienta retomada e preserva o recibo
+quando o servidor ainda tem escrita pendente. Recusa confirmada sem marcador
+permite corrigir texto invalido. Quatro casos focados passaram.
+A validacao revelou GENERATING com execucao PASSED: acompanhamento encerrava
+cedo e deixava Enviar desabilitado. Regressao controlada e correcao passaram.
+Suite intermediaria: 4.486 PASS/175 FAIL/68 SKIP, com timeout de teste.
+Depois de controlar o relogio desse teste: raiz 4.487 PASS/174 FAIL/68 SKIP,
+mesmos nomes de falha da base; sem aumentar timeout de producao.
+Interface: 1.111 PASS; navegador completo: 183 PASS/3 SKIP/0 FAIL;
+32 portoes PASS. Dez mutacoes da revisao, duas da transicao e uma do relogio
+foram detectadas.
+Ultimo checkpoint: `50a120fab8d7e9ee931e3c147ff367e88aa0f6d5`.
+CI 35526814805 falhou sem etapas/logs. DESKTOP-PRADO offline em 17:41 UTC.
+Pergunta duravel em andamento; instalacao, CI e demais funcionalidades pendentes.
+
+## Compositor e continuidade — VALIDADO LOCALMENTE, 20/09/2026
+
+Tres perdas de texto reproduzidas e corrigidas: envio falho, releitura falha
+e novo texto digitado enquanto a resposta chegava. Quatro mutacoes detectadas.
+Interface: 1.100 PASS. Navegador em copia isolada: 178 PASS/3 SKIP/0 FAIL.
+32 portoes PASS; raiz 4.487 PASS/174 FAIL/68 SKIP, sem falhas novas.
+Proxima frente iniciada: chave duravel da revisao e orientacao de retomada.
+Ultimo checkpoint remoto: `ecd47927aefbf86c2b9d2bce9fae5204446e4e9b`.
+CI 35525657270: Linux e Windows falharam sem etapas/logs; causa nao confirmada.
+
+## Recuperacao da revisao — VALIDADA LOCALMENTE, 20/09/2026
+
+AUDIT-REVISION-RECOVERY-01 reproduziu especificacao salva com estado antigo,
+trilha ausente e numeração errada em historico parcial. Marcador no projeto
+permanece ate estado e auditoria confirmarem; outras mudancas aguardam.
+1.429 testes do plugin, oito mutacoes, JSON real em dois processos e
+32 portoes passaram. Raiz: 4.487 PASS/174 FAIL/68 SKIP, sem falhas novas.
+Legados sem marcador/trilha nao sao recuperados por suposicao. Downgrade
+com marcador pendente exige concluir recuperacao ou backup consistente.
+Chave de revisao no cliente e orientacao de retomada ainda pendentes.
+
+## Criacao persistente no navegador — VALIDADA LOCALMENTE, 20/09/2026
+
+AUDIT-CREATE-CLIENT-01 reproduziu chave nova apos fechar a aba com resposta
+perdida. Criacao agora reserva metadados antes de POST, recupera a tarefa e
+limpa a intencao confirmada. Interface: 1.100 PASS; navegador em copia nova:
+175 PASS/3 SKIP/0 FAIL; quatro mutacoes e 32 portoes PASS. Pedido deve ser repetido no mesmo perfil;
+configuracao visual/logo sao passos separados e ainda nao atomicos.
+Checkpoint anterior: `87db22312a88bfdb4d542c8dfc2739d874cfd1e9`.
+DESKTOP-PRADO rechecado em 20/09 16:44 UTC: offline.
+
+## Questionario e consumo incerto — VALIDADO LOCALMENTE, 20/09/2026
+
+AUDIT-INTAKE-REPLAY-01 reproduziu quatro cenarios de chamada repetida depois de
+perder resultado externo ou falhar ao gravar o turno. Resposta digitada tambem
+pode chamar o modelo; todas as reservas sem turno passam a falhar sem repetir.
+Resultado completo ainda e recuperado; nova intencao explicita pode prosseguir.
+1.418 testes do plugin, cinco mutacoes e JSON em dois processos passaram.
+32 portoes PASS; raiz Node 22: 4.476 PASS/174 FAIL/68 SKIP, sem falhas novas.
+Inclui reserva legada sem identificador do resultado. Sintese posterior e respostas inferidas ainda
+nao sao uma operacao atomica; cliente e CAS continuam pendentes.
+Checkpoint anterior publicado: `e36c3553c3dc29464336720186f0d7ac84fb9605`.
+
+## Pedido antigo de alteracao — VALIDADO LOCALMENTE, 20/09/2026
+
+AUDIT-CHANGE-REPLAY-01 reproduziu reenvio antigo alterando uma nova proposta.
+A correcao preserva outra versao para o resultado e relê por identificador.
+Reserva sem resultado, inclusive legado sem vinculo, e recusada sem reaplicar.
+1.409 testes do plugin passaram; prova JSON real em dois processos passou.
+32 portoes PASS e quatro mutacoes detectadas. Raiz Node 22: 4.467 PASS/174 FAIL/68 SKIP;
+sem novas falhas. A interface e o navegador nao foram repetidos neste checkpoint de backend.
+Cliente desta rota e CAS distribuido seguem pendentes.
+Checkpoint anterior publicado: `67d0f9c10e356665808f580d2addd6533f156580`.
+CI run 35522785506 falhou nos dois jobs sem etapas/logs; causa nao confirmada.
+
+## Intencao de envio no navegador — VALIDADA LOCALMENTE, 20/09/2026
+
+`AUDIT-CLIENT-REPLAY-01` estende o recibo do servidor a edicao e acrescimo de
+etapa no mesmo perfil de navegador. IndexedDB conserva somente hashes, chave
+e revisao; nao guarda texto, credencial nem resposta. A transacao termina antes
+do POST. O mesmo texto conserva a revisao original apos fechar a aba; texto
+corrigido inicia outra intencao. O escopo inclui usuario, organizacao e tenant.
+Confirmacao antiga nao apaga uma intencao nova. Corrupcao ou recusa de
+armazenamento impedem envio com erro visivel. Logout confirmado limpa apenas
+os metadados do FRIGG; nao remove bancos de outros aplicativos.
+Provas de navegador passaram para fechamento/reabertura, concorrencia entre
+abas, escopos separados, confirmacoes antigas e logout. Nove mutacoes foram detectadas; 32 portoes PASS, interface 1.095 PASS, navegador 174 PASS/3 SKIP/0 FAIL.
+Raiz Node 22: 4.461 PASS/174 FAIL/68 SKIP, sem novas falhas; PostgreSQL nao executado. Nao ha envio automatico nem armazenamento do rascunho;
+a pessoa redigita o pedido apos reabrir. Outros tipos de envio ainda usam
+memoria; outros aparelhos/perfis e CAS distribuido permanecem pendentes.
+Checkpoint anterior de recuperacao de cadastro: `cd7977bbbe81127e0c0c886139b415331e97b7b9`.
+
+## Recuperacao do cadastro interrompido — 20/09/2026
+
+Checkpoint anterior no PR #1: `d7de66c09a8f2c341b88ec2a33593244e6f925c4`,
+ainda separado de `integ`. `ABRIR-03-R` corrige falha adicional reproduzida:
+usuario era salvo, criacao do espaco falhava, e proximo login ignorava a etapa
+pendente. Um marcador duravel agora exige concluir o provisionamento antes da
+sessao. Matriculas concluidas nao sao reprovisionadas no login.
+190 testes passaram e quatro mutacoes foram detectadas; 32 portoes PASS,
+interface 1.075 PASS, navegador 174 PASS/3 SKIP/0 FAIL. Raiz Node 22 segue
+reprovada: 4.461 PASS/174 FAIL/68 SKIP, sem falhas novas. Prova JSON real injeta
+falha na escrita do espaco, reabre o processo, conclui o cadastro e reabre de
+novo, preservando projeto/arquivo e isolamento. SMTP e PC reais permanecem
+pendentes. Campo pendente novo nao e aceito por binario antigo; downgrade requer
+conclusao ou backup consistente, nunca remocao manual do marcador.
+
+## Verificacao mais recente — reenvios e primeiro cadastro
+
+32 portoes PASS; interface 1.075 PASS; navegador em copia limpa 174 PASS/3 SKIP/0 FAIL.
+Raiz Node 22: 4.459 PASS/174 FAIL/68 SKIP, sem novas falhas frente a rodada
+anterior; PostgreSQL NOT_EXECUTED. Provas JSON de reenvio e cadastro passaram
+em dois processos. Evidencias e limites em `audit/evidence/20260920/replay-adoption-verification.json`.
+A rodada anterior da PWA falhou com bundles antigos no workspace; a mesma
+guarda passou na copia isolada com fontes conferidas.
+
+## Continuidade no primeiro cadastro — 20/09/2026
+
+`ABRIR-03` preserva `user_local`, `org_local` e `tenant_local` para o primeiro
+cadastro verificado no modo pessoal. Convites nao adotam esse trabalho. Mudanca
+de modo/escopo depois da emissao invalida o codigo e registra a recusa.
+188 testes de identidade/permissoes e seis mutacoes passaram. A prova
+`pnpm prove:personal-adoption` cria projeto e arquivo no JSON real, registra a
+conta e reabre tudo em outro processo: acesso preservado, outro tenant recusado
+e acesso anonimo desativado. Email capturado localmente, sem SMTP real.
+Instalacoes ja cadastradas nao sao migradas. Conversas pessoais ainda usam
+vinculos em memoria: a continuidade delas permanece aberta. Esta entrega nao
+certifica o cadastro na maquina do usuario nem encerra a meta geral.
+
+## Reenvios de edição e etapa — 20/09/2026
+
+`AUDIT-REPLAY-01` implementa identidade de envio nas duas rotas que faltavam.
+Edições e etapas criam revisões preservadas, recuperáveis pelo recibo original,
+mesmo depois de outras edições. A recuperação revalida autorização e escopo;
+repara a trilha se houver queda depois da gravação, mantendo a data da edição.
+O navegador mantém texto e chave quando a resposta se perde; falhas na leitura
+dos detalhes aparecem sem desfazer o reconhecimento de uma escrita concluída.
+
+`pnpm prove:plan-replay` reabre os domínios JSON reais em outro processo. As
+operações concluídas não foram repetidas. Chamada de modelo sem resultado
+confirmado não é repetida automaticamente: a interface explica a incerteza e
+como iniciar outra intenção. O teste usa modelo controlado, sem provedor pago.
+Naquele checkpoint, a chave vivia na pagina e se perdia ao fechar.
+AUDIT-CLIENT-REPLAY-01 trata esse limite para edicao e etapa no mesmo perfil
+de navegador. O servidor ainda exige reapresentar a mesma chave. A proteção continua por
+instância; CAS distribuído e aceite da instalação
+real permanecem abertos. A meta geral continua **EXECUTING**.
+
+## Proteção do plano — 20/09/2026
+
+`AUDIT-PLAN-01`: sete regressões reproduziram perda concorrente, chamada de
+modelo desnecessária após aprovação e seleção da proposta antiga após várias
+edições. Serialização das gravações e conferência da revisão depois da resposta
+do modelo corrigem esses casos numa instância do serviço. Novas propostas usam
+a maior revisão existente mais um. 179 testes de serviço/HTTP passaram; cinco
+mutações foram detectadas. Typecheck e build do pacote passaram.
+A proteção não é CAS entre processos. A pendência de reenvio durável deste
+checkpoint foi tratada em `AUDIT-REPLAY-01`, acima. A meta continua aberta.
+
+## Retomada da meta de usuário final — 20/09/2026
+
+A meta permanece **EXECUTING**. PR #1 é checkpoint, não entrega final ao usuário.
+`AUDIT-START-01` corrige comandos que não executavam em pastas com espaços;
+`AUDIT-ENTRY-01` leva a abertura real para o FRIGG, em vez da interface técnica.
+Node 22.23.1 e runtime real foram exercitados nesta sessão. Navegador completo:
+173 PASS, 3 SKIP, zero falhas. Um objetivo criado pela tela persistiu após
+recarga e reinício do processo real; reinício do computador não executado. Suíte raiz sob Node 22: 4.437 PASS, 175 FAIL,
+68 SKIP; não está aprovada. Relatório detalhado em
+`audit/FRIGG-USER-READINESS-20260920.md`.
+
+`DESKTOP-PRADO` foi encontrado offline. Docker, banco real e modelo não estão
+operacionais neste ambiente. Isso bloqueia provas específicas, não transforma
+as tarefas internas abertas abaixo em concluídas.
+
+## Auditoria adicional em 20/09/2026 — base GitHub `997fa20`
+
+Correções candidatas `AUDIT-OCI-01` e `AUDIT-FILES-01`: o CLI baixava blobs sem
+comparar o digest calculado; uploads simultâneos sobrescreviam arquivos; links
+na pasta de trabalho podiam redirecionar operações. Testes e limites estão em
+`audit/FRIGG-AUDIT-20260920.md`. O upstream permanece no pin original.
+`AUDIT-MOBILE-01` corrige o campo e envio cortados em 320/390 px; oito testes
+de overflow e envio passaram. A suíte geral da raiz teve 173 falhas e o banco
+não pôde ser executado; não há certificação global de aprovação.
+
+O README e a orientação ativa em `CLAUDE.md` foram reconciliados com a jornada
+real já registrada abaixo; essa jornada não foi repetida nesta auditoria.
+O protocolo em `docs/plans/FRIGG-JOURNEY-BENCHMARKS.md` define a comparação,
+mas não há resultado comparativo nem declaração de superioridade.
+
+Os registros cronológicos seguintes são preservados como histórico.
 
 ## PRIMEIRO APLICATIVO DE MODELO REAL APROVADO — 20/09/2026, madrugada (JORNADA-REAL-01)
 

@@ -1,0 +1,35 @@
+$ node scripts/run-gates.mjs
+OK   domain-scopes
+OK   domain-routes
+OK   declared-imports
+OK   assistant-tools
+OK   team-role-tools
+OK   rls-coverage
+OK   upstream-pin
+OK   portability
+OK   i18n
+OK   idiomas
+OK   marca
+OK   pix
+OK   bus-matriz
+OK   vocabulary
+OK   memory-map
+OK   constitution
+OK   comprehension
+OK   tracked-lib
+OK   typecheck
+OK   profile-mounts
+OK   lib-freshness
+OK   image-lock
+OK   decision-record
+OK   refs
+OK   requirements-ledger
+OK   secrets
+OK   no-caveman
+OK   p37
+OK   candidates
+OK   vendored-references
+OK   licenses
+OK   licenses:release
+GATES_FAIL=0 portoes=32 vereditos=/tmp/frigg-verdicts.txt
+CONSTITUTION=PASS clausulas=14 PORTÃO=9 CÓDIGO=1 NÃO_AUTOMATIZADO=4 vereditos_conferidos=52

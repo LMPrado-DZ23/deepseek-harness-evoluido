@@ -324,8 +324,10 @@ test.describe('acessibilidade do fluxo principal', () => {
       servidor, da bateria e da rede de quem deixasse a Biblioteca aberta. Por
       isso a guarda é uma CONTAGEM, e não uma captura.
     */
-    let leituras = 0
-    page.on('request', pedido => { if (pedido.url().includes('/exports')) leituras += 1 })
+    const leituras = new Map<string, number>()
+    page.on('request', pedido => {
+      if (pedido.url().includes('/exports')) leituras.set(pedido.url(), (leituras.get(pedido.url()) ?? 0) + 1)
+    })
 
     await page.goto('/studio/biblioteca')
     // `.first()`: as tarefas criadas pelos tamanhos de tela anteriores
@@ -370,10 +372,10 @@ test.describe('acessibilidade do fluxo principal', () => {
     // Uma leitura do acervo por tarefa, mais uma da prévia. Um número que
     // cresce com o tempo é o laço de volta.
     await page.waitForTimeout(1_000)
-    // Uma leitura por tarefa existente, mais a prévia. O teto é generoso de
-    // propósito: o que ele pega é a ORDEM DE GRANDEZA do laço, que media 621
-    // em três segundos, e não o número exato de tarefas do servidor de teste.
-    expect(leituras).toBeLessThan(40)
+    // O total cresce legitimamente com as tarefas de outros casos. Cada
+    // endereco deve ser lido uma vez; repetir qualquer um denuncia o laco.
+    expect(leituras.size).toBeGreaterThan(0)
+    expect([...leituras.entries()].filter(([, count]) => count !== 1)).toEqual([])
   })
 
   test('as Empresas passam no axe — vazia, formulário aberto, empresa gravada e tarefa criada', async ({ page }) => {

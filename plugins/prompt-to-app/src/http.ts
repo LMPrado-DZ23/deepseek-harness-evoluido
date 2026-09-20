@@ -59,12 +59,6 @@ const correctionSchema = z.object({
   request_key: z.string().min(1).max(200).optional(),
 }).strict()
 const changeRequestSchema = z.object({ reason: z.string().trim().min(3).max(2_000) }).strict()
-/*
-  `/plan/slice` e `/plan/edit` continuam com o esquema SEM chave, de propósito:
-  esta fatia fechou os dois envios nomeados como pendência, e estender a
-  identidade aos outros sem medir o efeito de cada um seria trocar prova por
-  suposição. A pendência deles fica escrita no livro mestre, e não some.
-*/
 const changeRequestComChaveSchema = changeRequestSchema.extend({
   request_key: z.string().min(1).max(200).optional(),
 }).strict()
@@ -77,6 +71,11 @@ const changeRequestComChaveSchema = changeRequestSchema.extend({
   ao mesmo tempo — produza dois efeitos.
 */
 const chaveDeEnvio = z.string().min(16).max(128).optional()
+const planEditComChaveSchema = planEditSchema.extend({ request_key: chaveDeEnvio }).strict()
+const planSliceComChaveSchema = changeRequestSchema.extend({
+  request_key: chaveDeEnvio,
+  base_revision: z.number().int().positive().optional(),
+}).strict()
 const reviseSchema = z.object({ request: z.string().min(1).max(2_000), request_key: chaveDeEnvio }).strict()
 const perguntaSchema = z.object({ question: z.string().min(1).max(2_000), request_key: chaveDeEnvio }).strict()
 const undoSchema = z.object({ run_id: z.string().trim().min(1).max(96) }).strict()
@@ -621,7 +620,7 @@ async function atender(
         return json(response, 200, { design: await config.service.attachLogo(actor, projectId, logo) })
       }
       if (request.method === 'POST' && matched.suffix === '/plan') {
-        const project = config.service.project(actor, projectId)
+        const project = config.service.projectForMutation(actor, projectId)
         const spec = await config.service.latestSpec(actor, projectId)
         const previous = await optionalAsync(async () => config.service.plan(actor, projectId))
         // O inventário só é buscado quando há mudança a planejar: ler o disco
@@ -661,14 +660,15 @@ async function atender(
         // A pessoa descreve o que falta; quem escreve a etapa é o planejador.
         // `planned_files` é a autorização de escrita do gerador, e não um
         // campo de formulário.
-        const input = changeRequestSchema.parse(await readJson(request))
+        const input = planSliceComChaveSchema.parse(await readJson(request))
         const project = config.service.project(actor, projectId)
         return json(response, 200, {
-          plan: await config.service.addPlanSlice(actor, projectId, input.reason, config.planner, project.privacy),
+          plan: await config.service.addPlanSlice(actor, projectId, input.reason, config.planner, project.privacy, input.request_key, input.base_revision),
         })
       }
       if (request.method === 'POST' && matched.suffix === '/plan/edit') {
-        return json(response, 200, { plan: await config.service.editPlan(actor, projectId, planEditSchema.parse(await readJson(request))) })
+        const { request_key, ...edit } = planEditComChaveSchema.parse(await readJson(request))
+        return json(response, 200, { plan: await config.service.editPlan(actor, projectId, edit, request_key) })
       }
       if (request.method === 'POST' && matched.suffix === '/plan/approve') {
         return json(response, 200, { plan: await config.service.approvePlan(actor, projectId) })

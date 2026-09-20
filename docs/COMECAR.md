@@ -90,8 +90,9 @@ pnpm studio
 ```
 
 O comando confere tudo de novo antes de dar a partida — se faltar algo, ele
-explica e não sobe. Quando sobe, o endereço aparece no terminal. Abra no
-navegador. Para parar, `Ctrl+C`.
+explica e não sobe. Quando sobe, o endereço **FRIGG — abra este endereço** aparece no terminal.
+Ele aponta para `/studio/`, a interface do produto. Abra esse endereço no
+navegador; a interface técnica do Harness não é aberta automaticamente. Para parar, `Ctrl+C`.
 
 Tudo que o Studio guarda fica em `dsh-home/`, **dentro da pasta que você
 baixou**. Nada é espalhado pelo seu sistema, e apagar a pasta apaga tudo.
@@ -169,3 +170,30 @@ Honestidade sobre o alcance desta página:
   que este repositório se encontrava quando ele foi escrito. A **partida
   completa** depende de o Harness estar instalado e compilado na sua máquina, e
   é o passo que cada ambiente precisa fazer por si.
+
+## Quando um envio fica sem confirmacao
+
+Ao editar o plano ou acrescentar uma etapa, uma falha de rede pode acontecer
+quando o servidor ja guardou a mudanca. Confira o plano antes de tentar outra
+coisa. No mesmo perfil de navegador, reenviar o mesmo pedido pendente recupera
+a tentativa anterior, inclusive depois de fechar e reabrir a aba. O texto do
+rascunho nao fica salvo: se fechar a aba, sera preciso redigita-lo.
+
+Se o navegador nao conseguir preservar o envio, o FRIGG avisa e nao envia o
+pedido. Verifique as permissoes de armazenamento deste site. Alterar o texto
+inicia outra intencao; isso pode consumir modelo novamente. Sair da conta,
+limpar os dados do site ou usar outro navegador/aparelho perde os recibos
+locais. Essas garantias ainda nao se estendem aos demais tipos de envio.
+
+
+Se uma resposta do questionario ficar sem resultado confirmado, o FRIGG nao
+repete automaticamente a chamada do modelo. Confira a conversa antes de
+escrever uma nova resposta: uma nova tentativa pode gerar novo consumo.
+O mesmo cuidado vale para resposta digitada, que pode ser interpretada pelo modelo.
+
+
+Se a resposta de criar uma tarefa se perder, voce pode reabrir no mesmo perfil
+de navegador e repetir o mesmo pedido e opcoes para recuperar a tarefa.
+O texto nao fica salvo no aparelho; e preciso preenche-lo novamente. Depois
+da confirmacao, criar outro pedido igual inicia outra tarefa. Sair da conta,
+limpar os dados do site ou voltar a uma interface antiga perde essa garantia.

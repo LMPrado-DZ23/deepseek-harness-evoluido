@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -211,6 +211,15 @@ describe('governed Assistant Session launcher', () => {
 function fakedPath(): string { return process.platform === 'win32' ? 'C:\\outro' : '/outro' }
 
 describe('a pasta de trabalho PESSOAL: o agente geral sem repositório configurado', () => {
+  it('recusa a pasta do espaço quando ela é um link para outra pasta', async () => {
+    const raiz = await mkdtemp(join(tmpdir(), 'frigg-espacos-')); roots.push(raiz)
+    const fora = await mkdtemp(join(tmpdir(), 'frigg-outro-')); roots.push(fora)
+    await symlink(fora, pastaDoEspaco(raiz, 'org-1', 'tenant-1'), 'dir')
+    const f = await fixture({ repositories: [], workspaceRoot: raiz })
+    await expect(f.launcher.launch(identitySession())).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(f.create).not.toHaveBeenCalled()
+  })
+
   it('sem repositório e com raiz, a conversa nasce na pasta do espaço, criada 0700', async () => {
     const raiz = await mkdtemp(join(tmpdir(), 'frigg-espacos-')); roots.push(raiz)
     const f = await fixture({ repositories: [], workspaceRoot: raiz })
@@ -240,4 +249,3 @@ describe('a pasta de trabalho PESSOAL: o agente geral sem repositório configura
     expect(() => pastaDoEspaco('relativa', 'o', 't')).toThrow()
   })
 })
-

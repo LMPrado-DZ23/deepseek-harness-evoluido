@@ -178,16 +178,18 @@ contagem: uma linha nova exige atualizar os totais no fim do arquivo.
 
 ## 4. O que este projeto ainda não é
 
-Duas coisas, e nenhuma delas é código:
+Limites que permanecem; conferir sempre o registro datado no livro mestre:
 
 - **Ninguém que não programa jamais usou o produto** (`EB-02`). Nenhum dos
   milhares de testes substitui isso.
-- **Nenhum modelo real jamais escreveu um aplicativo aqui** (`EB-04`). O
-  caminho inteiro é provado contra dobro. Uma medição com Ollama real está
-  registrada em `EB-04`: o código que um modelo pequeno devolveu **passa** nas
-  guardas, mas o prompt real não completa em tempo utilizável em CPU.
+- **Uma jornada real não prova o produto inteiro.** `JORNADA-REAL-01` registra
+  em 20/09/2026 um contador criado com Mistral, aprovado e aberto na prévia;
+  alteração pela conversa e reinício do processo também foram registrados.
+  Ainda falta validar reinício do computador, demais jornadas, modelos e
+  plataformas. Os resultados antigos de `EB-04` são históricos, não o estado
+  atual dessa jornada.
 
-Não chame o produto de pronto enquanto essas duas linhas estiverem aqui.
+Não chame o produto de pronto com base numa única jornada ou só em testes.
 
 ---
 

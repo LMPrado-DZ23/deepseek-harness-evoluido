@@ -2,6 +2,22 @@ export const CURRENT_SESSION_ENDPOINT = '/api/studio/identity/session'
 
 export type CurrentSessionMode = 'authenticated' | 'personal' | 'unavailable'
 
+/** O escopo vem do servidor; nao e inferido de cookie, nome ou ultimo projeto. */
+export async function currentSessionScope(
+  fetchSession: (input: string, init: RequestInit) => Promise<Response> = (input, init) => window.fetch(input, init),
+): Promise<readonly [string, string, string] | null> {
+  try {
+    const response = await fetchSession(CURRENT_SESSION_ENDPOINT, { method: 'GET', credentials: 'same-origin' })
+    if (!response.ok) return null
+    const body = await response.json() as { principal?: { userId?: unknown; orgId?: unknown; tenantId?: unknown } }
+    const principal = body?.principal
+    if (typeof principal?.userId !== 'string' || principal.userId === ''
+      || typeof principal.orgId !== 'string' || principal.orgId === ''
+      || typeof principal.tenantId !== 'string' || principal.tenantId === '') return null
+    return [principal.userId, principal.orgId, principal.tenantId]
+  } catch { return null }
+}
+
 /**
  * Quem está na sessão, para o rodapé do trilho.
  *

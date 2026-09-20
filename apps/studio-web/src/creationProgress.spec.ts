@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attemptSentence, stageSentence } from './creationProgress'
+import { attemptSentence, stageSentence, generationSettled } from './creationProgress'
 import t from './i18n/pt-BR.json'
 
 describe('o que está acontecendo agora na criação', () => {
@@ -35,5 +35,23 @@ describe('o que está acontecendo agora na criação', () => {
     expect(attemptSentence({ stage: 'build', attempt: 1 })).toBeNull()
     expect(attemptSentence({ stage: 'build', attempt: 2 })).toContain('2')
     expect(attemptSentence({ stage: 'build', attempt: 3 })).toContain('3')
+  })
+})
+
+
+describe('conclusao da execucao e do projeto', () => {
+  it('aguarda o projeto sair dos estados de execucao', () => {
+    for (const project of ['GENERATING', 'BUILD_OK', 'TESTS_OK']) {
+      for (const run of ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED']) expect(generationSettled(project, run)).toBe(false)
+    }
+  })
+  it('aguarda tambem a conclusao da execucao', () => {
+    expect(generationSettled('VERIFIED_PROTOTYPE', 'PENDING')).toBe(false)
+    expect(generationSettled('VERIFIED_PROTOTYPE', 'RUNNING')).toBe(false)
+  })
+  it('conclui quando os dois registros terminaram', () => {
+    expect(generationSettled('VERIFIED_PROTOTYPE', 'PASSED')).toBe(true)
+    expect(generationSettled('BUILD_FAILED', 'FAILED')).toBe(true)
+    expect(generationSettled('PLAN_APPROVED', 'BLOCKED_EXTERNAL')).toBe(true)
   })
 })

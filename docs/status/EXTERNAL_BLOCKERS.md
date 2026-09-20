@@ -4,6 +4,29 @@ Cada item aqui precisa provar que **o trabalho interno já foi até onde dava**.
 "OAuth bloqueado porque não tenho credencial" quando o callback nem existe não é
 blocker externo: é trabalho interno pendente com nome errado.
 
+## Ambiente da auditoria de 20/09/2026
+
+`EB-AUDIT-ENV-01` — **BLOCKED_BY_EXTERNAL_DEPENDENCY nesta sessão**, não
+bloqueio universal do produto: Docker/PostgreSQL ausentes (`NOT_EXECUTED`);
+sockets Unix e montagens restritos; overlayfs e permissões de `/workspace`
+recusados pelas guardas existentes. Código, build, gates e regressões focadas
+foram executados; nenhuma guarda foi desativada. Repetir as suítes em ambiente
+suportado com Node 22.23.1, filesystem local e banco real. As 173 falhas da
+suíte da raiz não foram todas individualmente atribuídas ao ambiente.
+Detalhes e próximos passos: `audit/FRIGG-AUDIT-20260920.md`.
+
+A API autenticada do GitHub está acessível nesta auditoria. Os registros de
+acesso abaixo pertencem às sessões datadas que descrevem.
+
+A retomada confirmou `DESKTOP-PRADO` offline pelo conector disponível.
+Node 22.23.1 foi obtido e usado: não é mais bloqueio de runtime desta sessão.
+Instalar PostgreSQL via apt falhou por restrições de identidade do ambiente
+(`setgroups`/`seteuid`); nenhuma proteção foi contornada. Docker e provedor
+real permanecem indisponíveis. Classificação: `BLOCKED_BY_EXTERNAL_DEPENDENCY`
+para as provas que precisam deles, não para todo trabalho de produto.
+
+## Registros anteriores
+
 | ID | o que está bloqueado | evidência do bloqueio | trabalho interno já feito | ação humana mínima |
 | --- | --- | --- | --- | --- |
 | ~~EB-01~~ | ~~Push, PR e leitura da API do GitHub~~ | **RESOLVIDO em 12/09/2026.** A API do GitHub continua 403 para esta sessão (`add_repo` não existe aqui), mas o `desktop-commander` instalado na máquina do Prado EXECUTA comandos nela, e o `gh`/`git` de lá têm escrita (`"push": true`). Push provado: `4968cca..c7c6952 integ -> integ`, com `rev-parse` local conferido contra `ls-remote` | O bloqueio era meu, não do repositório: eu havia testado três caminhos (API, credential helper, shell da ponte — este último quebrado pela atualização do Windows de 08/09) e parado antes de procurar o quarto | Nenhuma. O envio passou a ser feito pela sessão, e o bundle vira redundância e não via única |
@@ -17,3 +40,9 @@ blocker externo: é trabalho interno pendente com nome errado.
 | EB-06 | Celular físico, TLS em domínio real, deploy de produção | Sem aparelho, sem domínio, sem infraestrutura | Borda autenticada, PWA, manifesto e service worker provados em Chromium real | Aparelho, domínio e autorização de deploy |
 | EB-07 | Confirmar que o teto do volume de dados da prévia é REALMENTE aplicado pelo kernel | Não há daemon Docker neste ambiente: nenhum `tmpfs` foi montado de verdade, e a opção `size` do driver `local` só é aplicada com tmpfs ou dispositivo próprio — num diretório comum o Docker aceita e IGNORA | `dataVolumeDriverOpts` emite `type=tmpfs,device=tmpfs,o=size=...`, o corpo da chamada à API está provado por teste com duas falsificações (sem teto, e teto sem tmpfs), e um valor fora da faixa é RECUSADO na construção em vez de ajustado em silêncio | Rodar uma prévia contra um daemon Docker real e confirmar que escrever além do teto falha com ENOSPC dentro do contêiner, e não no disco do host |
 | EB-08 | Conferência de ORIGEM do armazenamento de template (assinatura do manifesto) | `templateStoreSignatureVerdict` (`plugins/builder-supervisor/src/store-security.ts:158`) não tem chamador em produção, e nenhuma chave de publicador é configurada; `supervisor-config.ts:200-204` confere bytes canônicos, versão e `tree_sha256` — integridade, não origem | Assinar, forma canônica, exclusão da própria assinatura e veredito com quatro estados (`UNSIGNED`, `SIGNED`, `INVALID_SIGNATURE`, `UNKNOWN_PUBLISHER`) estão escritos e testados; a limitação está escrita no próprio arquivo, para ninguém ler o código e acreditar que a origem é conferida | Custódia de uma chave privada de publicação DZ23 (mesma dependência do P-02 — decisão do Prado, tem custo e é irreversível). Só depois disso a conferência pode ser ligada, e ela exige uma versão nova do envelope de configuração (T-31) |
+
+## CI revalidada no checkpoint d7de66c — 20/09/2026
+
+Run `35520291793`: Linux e Windows terminaram `failure`, sem etapas nem logs
+de job disponiveis. Causa especifica ainda nao confirmada. Provas locais nao
+substituem CI nem instalacao real; PR #1 permanece sem integracao a `integ`.

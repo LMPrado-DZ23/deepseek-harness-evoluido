@@ -1,0 +1,106 @@
+{
+  "date": "2026-09-20",
+  "requirement": "AUDIT-REVISION-RECOVERY-01",
+  "source_sha256": {
+    "plugins/prompt-to-app/src/model.ts": "16a77c45be47cffd0c7519fe38a8004525d2ce3e232e7bf80c60d04c174a61f0",
+    "plugins/prompt-to-app/src/service.ts": "b096ba11d93256c08b79226b472fc8a3e8ca11a438792fc1c3ad2452a94f17cd",
+    "plugins/prompt-to-app/src/http.ts": "f36a63085342f43060d429c6641007e88ee092e67b2faa56c55aebe81b5a96e2",
+    "plugins/prompt-to-app/tests/identidade-do-envio.spec.ts": "c44ba8448856da4eb072e3f7780cbaa423ecf49d50cde06e3548b98bb35c0dae",
+    "plugins/prompt-to-app/tests/http.spec.ts": "71ebd0e9423713894eecda0ff48e207a79e7918bedd0d16fac4d35a9c8f14808",
+    "plugins/prompt-to-app/i18n/pt-BR.json": "357aea56433027635a8274251c1fd45458a88b1468a3975992ad51f9b263147c",
+    "scripts/prove-plan-replay.mjs": "183ea2f2d29bdc20aa04d4ad3eed8565e96af22c3f930669eede79cfe66f7338"
+  },
+  "red_regressions": {
+    "partial_state_or_audit": 2,
+    "sparse_spec_versions": 1
+  },
+  "plugin_passed": 1429,
+  "mutations": [
+    {
+      "mutation": "lose_max_version",
+      "detected": true,
+      "test_failure": true,
+      "initial_survival": null
+    },
+    {
+      "mutation": "skip_recovery",
+      "detected": true,
+      "test_failure": true,
+      "initial_survival": null
+    },
+    {
+      "mutation": "skip_pending_guard",
+      "detected": true,
+      "test_failure": true,
+      "initial_survival": null
+    },
+    {
+      "mutation": "duplicate_audit",
+      "detected": true,
+      "test_failure": true,
+      "initial_survival": null
+    },
+    {
+      "mutation": "skip_marker_clear",
+      "detected": true,
+      "test_failure": true,
+      "initial_survival": null
+    },
+    {
+      "mutation": "lose_source_state",
+      "detected": true,
+      "test_failure": true,
+      "initial_survival": null
+    },
+    {
+      "mutation": "skip_project_mutex",
+      "detected": true,
+      "test_failure": true,
+      "initial_survival": "First test did not suspend the durable write; deterministic barrier added"
+    },
+    {
+      "mutation": "skip_early_plan_guard",
+      "detected": true,
+      "test_failure": true
+    }
+  ],
+  "gates_passed": 32,
+  "root": {
+    "numPassedTests": 4487,
+    "numFailedTests": 174,
+    "numPendingTests": 68
+  },
+  "new_failure_names": [],
+  "json_proof_node22": {
+    "proof": "PLAN_DURABLE_REPLAY",
+    "status": "PASS",
+    "storage": "Harness JSON + DomainPromptToAppRepository",
+    "separateProcesses": true,
+    "results": [
+      {
+        "phase": "write",
+        "status": "PASS",
+        "modelCalls": 5
+      },
+      {
+        "phase": "replay",
+        "status": "PASS",
+        "modelCalls": 5
+      }
+    ]
+  },
+  "json_faults": [
+    "after spec before state",
+    "after state before audit",
+    "after audit before marker clear"
+  ],
+  "limits": [
+    "Single service instance; no distributed CAS",
+    "New pending_revision field is rejected by old binaries while pending; finish recovery or restore consistent backup before downgrade",
+    "Legacy incomplete revision without marker/audit is refused, not guessed",
+    "Terminal states and sparse version histories seeded in JSON proof; no real model generation",
+    "Client revision request key still memory only",
+    "Native install and PostgreSQL not verified",
+    "Browser source snapshot for creation predates this backend change; backend verified separately"
+  ]
+}

@@ -5,6 +5,8 @@ const storedIdentityUserSchema = z.object({
     email: z.email(),
     display_name: z.string().min(1),
     bootstrap_owner: z.boolean().optional(),
+    /** Presente somente enquanto a criacao inicial do espaco ainda precisa terminar. */
+    bootstrap_provisioning_pending: z.literal(true).optional(),
     role: z.enum(['owner', 'admin', 'builder', 'viewer']).optional(),
     org_id: z.string().min(1),
     tenant_id: z.string().min(1),

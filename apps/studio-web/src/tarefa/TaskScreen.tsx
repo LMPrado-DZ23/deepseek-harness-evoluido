@@ -39,18 +39,18 @@ export interface TaskScreenProps {
   readonly rascunho: string
   setRascunho(valor: string): void
   /** Responde à pergunta de admissão aberta. */
-  responder(texto: string): Promise<void>
+  responder(texto: string): Promise<boolean>
   /** Pede mudança no plano — mesma tarefa, revisão nova. */
-  mudarPlano(texto: string): Promise<void>
+  mudarPlano(texto: string): Promise<boolean>
   /** Pede um ajuste depois de um resultado. Continua na MESMA tarefa. */
-  ajustar(texto: string): Promise<void>
+  ajustar(texto: string): Promise<boolean>
   /** PERGUNTA sobre a tarefa. Não escreve critério de aceite nem gasta tentativa. */
-  perguntar(texto: string): Promise<void>
+  perguntar(texto: string): Promise<boolean>
   /**
    * CORRIGE uma resposta do questionário, sem recomeçar. Ausente, a conversa
    * não oferece correção nenhuma — um botão sem destino seria mudo.
    */
-  corrigir?(perguntaId: string, texto: string): Promise<void>
+  corrigir?(perguntaId: string, texto: string): Promise<boolean>
   /** O painel contextual aberto, ou `null` quando a conversa está sozinha. */
   readonly painel: PainelAberto | null
   abrirPainel(painel: PainelAberto): void
@@ -105,6 +105,7 @@ export function TaskScreen(props: TaskScreenProps) {
   const situacao = {
     estado: props.detalhes.project.state,
     perguntaAberta: perguntaAbertaDe(props.detalhes),
+    revisaoPendente: props.detalhes.project.pending_revision !== undefined,
   }
   const padrao = intencaoPadrao(situacao)
   const [intencao, setIntencao] = useState<Intencao>(padrao)
@@ -127,14 +128,21 @@ export function TaskScreen(props: TaskScreenProps) {
   */
   const [corrigindo, setCorrigindo] = useState<{ readonly perguntaId: string; readonly pergunta: string } | null>(null)
   const campo = useRef<HTMLTextAreaElement | null>(null)
-  useEffect(() => { setCorrigindo(null) }, [props.detalhes.project.project_id, props.detalhes.project.state])
+  const draftVersion = useRef(0)
+  const activeProject = useRef(props.detalhes.project.project_id)
+  activeProject.current = props.detalhes.project.project_id
+  function alterarRascunho(value: string) {
+    draftVersion.current++
+    props.setRascunho(value)
+  }
+  useEffect(() => { setCorrigindo(null) }, [props.detalhes.project.project_id, props.detalhes.project.state, situacao.revisaoPendente])
   const fim = useRef<HTMLLIElement | null>(null)
   const podeEnviar = !enviando && (corrigindo !== null
     ? props.rascunho.trim() !== '' && props.corrigir !== undefined
     : envioDisponivel(destino, props.rascunho))
   function comecarCorrecao(lance: { readonly perguntaId: string; readonly pergunta: string; readonly texto: string }) {
     setCorrigindo({ perguntaId: lance.perguntaId, pergunta: lance.pergunta })
-    props.setRascunho(lance.texto)
+    alterarRascunho(lance.texto)
     campo.current?.focus()
   }
 
@@ -149,12 +157,15 @@ export function TaskScreen(props: TaskScreenProps) {
     evento.preventDefault()
     if (!podeEnviar) return
     const texto = props.rascunho
+    const version = draftVersion.current
+    const project = props.detalhes.project.project_id
     setEnviando(true)
     try {
-      if (corrigindo !== null && props.corrigir !== undefined) {
-        await props.corrigir(corrigindo.perguntaId, texto)
-        setCorrigindo(null)
-      } else await despachar(destino, texto, props)
+      const confirmed = corrigindo !== null && props.corrigir !== undefined
+        ? await props.corrigir(corrigindo.perguntaId, texto)
+        : await despachar(destino, texto, props)
+      if (!confirmed || draftVersion.current !== version || activeProject.current !== project) return
+      setCorrigindo(null)
       // O rascunho só é limpo DEPOIS que o envio deu certo: limpar antes
       // apagaria o texto de quem perdeu a rede, e reescrever é o que ninguém
       // faz — a pessoa desiste.
@@ -185,7 +196,7 @@ export function TaskScreen(props: TaskScreenProps) {
     acontecendo justamente de quem perguntou. O segundo é sobre o ENVIO: o que
     aquele botão vai fazer com o texto dela.
   */
-  const avisoDaTarefa = acaoDoEstado.tipo === 'aguardar'
+  const avisoDaTarefa = situacao.revisaoPendente ? tarefa.revisaoPendente : acaoDoEstado.tipo === 'aguardar'
     ? acaoDoEstado.motivo === 'execucao' ? tarefa.aguardandoTrabalho : tarefa.aguardandoAprovacao
     : null
   const avisoDoEnvio = destino.tipo === 'perguntar' ? tarefa.avisoPergunta
@@ -248,7 +259,7 @@ export function TaskScreen(props: TaskScreenProps) {
           </span>
           <div className="dz-lance-corpo">
             <LanceView lance={lance} abrir={props.abrirPainel}
-              corrigir={props.corrigir === undefined ? undefined : comecarCorrecao} />
+              corrigir={props.corrigir === undefined || situacao.revisaoPendente ? undefined : comecarCorrecao} />
           </div>
         </li>)}
         {/*
@@ -259,7 +270,7 @@ export function TaskScreen(props: TaskScreenProps) {
         */}
         <li ref={fim} className="dz-fim" aria-hidden="true" />
       </ol>
-      {props.acoesDoEstado === undefined ? null : <div className="dz-tarefa-acoes">{props.acoesDoEstado}</div>}
+      {props.acoesDoEstado === undefined || situacao.revisaoPendente ? null : <div className="dz-tarefa-acoes">{props.acoesDoEstado}</div>}
 
       {/*
         O compositor fica ABAIXO da conversa e reserva espaço real, em vez de
@@ -272,7 +283,7 @@ export function TaskScreen(props: TaskScreenProps) {
         {corrigindo !== null
           ? <p className="dz-compositor-aviso dz-compositor-aviso-neutro" role="status">
             {tarefa.corrigindo} <strong>{corrigindo.pergunta}</strong>{' '}
-            <button type="button" className="dz-lance-acao" onClick={() => { setCorrigindo(null); props.setRascunho('') }}>{tarefa.corrigirCancelar}</button>
+            <button type="button" className="dz-lance-acao" onClick={() => { setCorrigindo(null); alterarRascunho('') }}>{tarefa.corrigirCancelar}</button>
           </p>
           : avisoDoEnvio === null ? null : <p className="dz-compositor-aviso dz-compositor-aviso-neutro" role="status">{avisoDoEnvio}</p>}
         {/*
@@ -300,7 +311,7 @@ export function TaskScreen(props: TaskScreenProps) {
         <label className="sr-only" htmlFor="dz-continuar">{tarefa.compositorRotulo}</label>
         <textarea id="dz-continuar" ref={campo} rows={2} value={props.rascunho} maxLength={2000}
           placeholder={tarefa.compositorPlaceholder}
-          onChange={evento => props.setRascunho(evento.target.value)}
+          onChange={evento => alterarRascunho(evento.target.value)}
           /*
             ENVIAR pelo teclado. A condição é a MESMA do botão (`podeEnviar`):
             o atalho não é uma segunda porta, e quem decide se dá para enviar
@@ -375,7 +386,7 @@ export function TaskScreen(props: TaskScreenProps) {
  * @param texto - o que a pessoa escreveu.
  * @param props - as ações da tela.
  */
-async function despachar(destino: Destino, texto: string, props: TaskScreenProps): Promise<void> {
+async function despachar(destino: Destino, texto: string, props: TaskScreenProps): Promise<boolean> {
   if (destino.tipo === 'perguntar') return props.perguntar(texto)
   if (destino.tipo === 'responder') return props.responder(texto)
   if (destino.tipo === 'mudar-plano') return props.mudarPlano(texto)
@@ -383,6 +394,7 @@ async function despachar(destino: Destino, texto: string, props: TaskScreenProps
   // `aguardar` e `abrir-tarefa` não chegam aqui: o primeiro é barrado por
   // `envioDisponivel` e o segundo só existe quando não há tarefa — e sem tarefa
   // esta tela não é montada.
+  return false
 }
 
 /**

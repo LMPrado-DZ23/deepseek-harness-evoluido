@@ -94,7 +94,9 @@ export default defineConfig({
     ...(chromiumPath === undefined ? {} : { launchOptions: { executablePath: chromiumPath } }),
   },
   webServer: {
-    command: 'node ../../node_modules/tsx/dist/cli.mjs tests/server.ts', url: 'http://127.0.0.1:4179/healthz',
+    // O loader executa o mesmo servidor TypeScript sem o socket IPC privado
+    // do lançador tsx, indisponível em alguns ambientes de teste restritos.
+    command: 'node --import tsx tests/server.ts', url: 'http://127.0.0.1:4179/healthz',
     reuseExistingServer: false, timeout: 30_000,
   },
 })
