@@ -79,6 +79,12 @@
 # uma linha que ninguém pode consertar pela tela. O nome da variável aparece
 # uma vez só, aqui; o valor nunca passa por este arquivo. O primeiro modelo de
 # cada rota é o que as criações pedem (`modelosPorRota`).
+#
+# O `compat` de cada uma é MEDIDO, não suposto (19/09/2026, pela ponte, com
+# a sonda que manda cada campo que o pi-ai envia): a Mistral recusa `store`
+# (422), o papel `developer` (422) e `reasoning_effort` (400); o Gemini recusa
+# `store` e `prompt_cache_key` (400); o Groq recusa `prompt_cache_key` (400).
+# A primeira criação real pela Mistral parou no 422 do `store`.
 - id: llm-pi-ai
   config:
     providers: !!js >-
@@ -100,14 +106,17 @@
         },
       }, Object.fromEntries([
         ['chave-mistral', 'Mistral (chave)', 'https://api.mistral.ai/v1', 'MISTRAL_API_KEY',
-          [['codestral-latest', 'Codestral', 256000, 16384], ['mistral-small-latest', 'Mistral Small', 131072, 16384]]],
+          [['codestral-latest', 'Codestral', 256000, 16384], ['mistral-small-latest', 'Mistral Small', 131072, 16384]],
+          { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, supportsLongCacheRetention: false }],
         ['chave-groq', 'Groq (chave)', 'https://api.groq.com/openai/v1', 'GROQ_API_KEY',
-          [['openai/gpt-oss-120b', 'GPT-OSS 120B', 131072, 32768]]],
+          [['openai/gpt-oss-120b', 'GPT-OSS 120B', 131072, 32768]],
+          { supportsLongCacheRetention: false }],
         ['chave-gemini', 'Google Gemini (chave)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'GEMINI_API_KEY',
-          [['gemini-2.5-flash', 'Gemini 2.5 Flash', 1048576, 65536]]],
+          [['gemini-2.5-flash', 'Gemini 2.5 Flash', 1048576, 65536]],
+          { supportsStore: false, supportsLongCacheRetention: false }],
       ].filter(([, , , chave]) => (process.env[chave] ?? '').trim() !== '')
-        .map(([id, displayName, baseURL, apiKeyEnv, modelos]) => [id, {
-          displayName, api: 'openai-completions', baseURL, apiKeyEnv, retryPolicy: { mode: 'normal', maxRetries: 0 },
+        .map(([id, displayName, baseURL, apiKeyEnv, modelos, compat]) => [id, {
+          displayName, api: 'openai-completions', baseURL, apiKeyEnv, compat, retryPolicy: { mode: 'normal', maxRetries: 0 },
           models: modelos.map(([mid, name, contextWindow, maxTokens]) => ({ id: mid, name, contextWindow, maxTokens })),
         }])))
 

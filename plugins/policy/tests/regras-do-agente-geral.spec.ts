@@ -114,6 +114,13 @@ describe('as rotas declaradas no perfil', () => {
     expect(com['chave-mistral']!.models[0]!.id).toBe('codestral-latest')
     expect(JSON.stringify(com)).not.toContain('segredo-')
   })
+
+  it('cada rota por chave leva o compat MEDIDO: nada do que o provedor recusa sai', () => {
+    const com = avaliar({ MISTRAL_API_KEY: 'a', GROQ_API_KEY: 'b', GEMINI_API_KEY: 'c' }) as unknown as Record<string, { compat: Record<string, unknown> }>
+    expect(com['chave-mistral']!.compat).toMatchObject({ supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, supportsLongCacheRetention: false })
+    expect(com['chave-gemini']!.compat).toMatchObject({ supportsStore: false, supportsLongCacheRetention: false })
+    expect(com['chave-groq']!.compat).toMatchObject({ supportsLongCacheRetention: false })
+  })
 })
 
 describe('os lembretes agendados', () => {
