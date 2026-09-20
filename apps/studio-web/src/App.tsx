@@ -1,3 +1,4 @@
+import { generationSettled } from './creationProgress'
 import { LogOut, Settings, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, csrfToken, type HealthState } from './api'
@@ -20,7 +21,7 @@ import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointL
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
 import { currentSessionMode, currentSessionPrincipal, currentSessionScope } from './session/currentSession'
-import { confirmPlanIntent, preparePlanIntent, prepareCreationIntent, type PendingIntent, type PendingPlanIntent } from './plan/pendingIntent'
+import { confirmPlanIntent, preparePlanIntent, prepareCreationIntent, prepareRevisionIntent, type PendingIntent, type PendingPlanIntent } from './plan/pendingIntent'
 import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
 import { TAREFAS_MUDARAM, WorkspaceShell } from './shell/WorkspaceShell'
 import { HomeScreen } from './home/HomeScreen'
@@ -61,7 +62,7 @@ type RunDetails = { run_id: string; operation_id: string; state: 'PENDING' | 'RU
   conversa parecer impossível sem um diário à parte.
 */
 type ProjectDetails = {
-  project: { project_id: string; name: string; state: ProjectUiState; original_brief: string; created_at?: string }
+  project: { project_id: string; name: string; state: ProjectUiState; original_brief: string; created_at?: string; pending_revision?: { spec_id: string; requested_by: string } }
   turns?: Array<{ turn_id: string; question_id: string; question: string; answer: string; recommended: boolean; created_at: string }>
   plan?: Plan | null
   runs?: RunDetails[]
@@ -307,7 +308,6 @@ export function App() {
     mesma mensagem, em vez da segunda.
   */
   const intencaoDaPergunta = useRef<IntencaoDeCriacao | null>(null)
-  const intencaoDaRevisao = useRef<IntencaoDeCriacao | null>(null)
   /*
     Os dois últimos envios que faltavam ter identidade de intenção.
 
@@ -434,17 +434,38 @@ export function App() {
    */
   async function ajustar(texto: string) {
     if (projectId === null) return false
-    const envio = intencaoPorImpressao(intencaoDaRevisao.current, impressaoDoEnvioLocal('revisao', projectId, texto))
-    intencaoDaRevisao.current = envio
     return safelyWithResult(async () => {
-      await api(`/projects/${projectId}/revise`, {
-        method: 'POST', body: JSON.stringify({ request: texto, request_key: envio.chave }),
-      })
+      const scope = await currentSessionScope()
+      if (scope === null) throw new Error(enviosTexto.identidade)
+      let envio: PendingIntent
+      try { envio = await prepareRevisionIntent(scope, projectId, texto) }
+      catch (cause) {
+        throw new Error(cause instanceof Error && cause.message === 'REVISION_INTENT_MISMATCH'
+          ? enviosTexto.revisaoOriginal : enviosTexto.indisponivel)
+      }
+      try {
+        const response = await apiResponse<{ error?: string }>(`/projects/${projectId}/revise`, {
+          method: 'POST', body: JSON.stringify({ request: texto, request_key: envio.key }),
+        })
+        if (response.status !== 200 || response.body === null) {
+          if (response.status === 400 || response.status === 409) {
+            const latest = await api<ProjectDetails>(`/projects/${projectId}`)
+            // Recusa confirmada sem escrita pendente permite corrigir o pedido.
+            if (latest.project.pending_revision === undefined) await acknowledgePlanIntent(envio)
+          }
+          throw new Error(response.body?.error ?? `HTTP ${response.status}`)
+        }
+      } catch (cause) {
+        // A escrita pode ter parado entre especificacao e auditoria. Mostre o marcador do servidor.
+        await refreshDetalhes()
+        throw cause
+      }
       setResult(null); setRunReport(null); setCheckpoints(null)
       if (!await refreshDetalhes()) return false
-      if (intencaoDaRevisao.current?.chave === envio.chave) intencaoDaRevisao.current = null
+      await acknowledgePlanIntent(envio)
     })
   }
+
   /**
    * PERGUNTA sobre a tarefa, sem mexer em nada.
    *
@@ -624,7 +645,7 @@ export function App() {
         conversa os lê de lá. Duas cópias do mesmo fato é como a tela e o
         registro passam a discordar.
       */
-      if (current?.operation_id === runId && ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED'].includes(current.state)) {
+      if (generationSettled(details.project.state, current.state)) {
         const finished = resultOfRun(details)!
         const state = finished.state
         setResult(finished)

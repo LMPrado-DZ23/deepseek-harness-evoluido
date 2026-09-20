@@ -18,6 +18,23 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Revisao duravel e transicao final — VALIDADAS LOCALMENTE, 20/09/2026
+
+Revisao agora conserva chave no navegador, orienta retomada e preserva o recibo
+quando o servidor ainda tem escrita pendente. Recusa confirmada sem marcador
+permite corrigir texto invalido. Quatro casos focados passaram.
+A validacao revelou GENERATING com execucao PASSED: acompanhamento encerrava
+cedo e deixava Enviar desabilitado. Regressao controlada e correcao passaram.
+Suite intermediaria: 4.486 PASS/175 FAIL/68 SKIP, com timeout de teste.
+Depois de controlar o relogio desse teste: raiz 4.487 PASS/174 FAIL/68 SKIP,
+mesmos nomes de falha da base; sem aumentar timeout de producao.
+Interface: 1.111 PASS; navegador completo: 183 PASS/3 SKIP/0 FAIL;
+32 portoes PASS. Dez mutacoes da revisao, duas da transicao e uma do relogio
+foram detectadas.
+Ultimo checkpoint: `50a120fab8d7e9ee931e3c147ff367e88aa0f6d5`.
+CI 35526814805 falhou sem etapas/logs. DESKTOP-PRADO offline em 17:41 UTC.
+Pergunta duravel em andamento; instalacao, CI e demais funcionalidades pendentes.
+
 ## Compositor e continuidade — VALIDADO LOCALMENTE, 20/09/2026
 
 Tres perdas de texto reproduzidas e corrigidas: envio falho, releitura falha

@@ -243,3 +243,30 @@ registrado em audit/evidence/20260920/composer-retry-verification.json.
 concorrente ou instalacao nativa. Regressao da chave de revisao apos fechar
 a aba ja escrita; AUDIT-REVISION-CLIENT-01 iniciada, nao entregue neste checkpoint.
 CI 35525657270 falhou sem etapas/logs; DESKTOP-PRADO offline em 17:41 UTC.
+
+
+## 2026-09-20 — revisao duravel, transicao final e relogio do teste
+
+**Acao.** AUDIT-REVISION-CLIENT-01: fechamento da aba gerava outra chave e
+409; revisao interrompida nao tinha orientacao. IndexedDB conserva metadados,
+recusa texto diferente enquanto ha intencao pendente e libera recusa 400/409
+somente depois de ler ausencia de marcador no servidor. A tela oferece retomada.
+Quatro cenarios de navegador incluem resposta perdida/nula, erro 500/409,
+armazenamento negado e texto invalido corrigido; dez mutacoes detectadas.
+
+**Achado real.** Um caso parou com Enviar desabilitado. O trace mostrou
+projeto GENERATING e execucao PASSED no mesmo GET. AUDIT-GENERATION-SETTLE-01
+reproduziu a leitura parcial de forma controlada; a tela agora continua lendo
+ate os dois registros concluirem. Navegador e duas mutacoes passaram.
+
+**Validacao adicional.** A raiz apresentou uma falha extra no teste de capacidade
+de empacotamento: exportacao saudavel excedeu 300 ms sob carga. Passou isolado.
+AUDIT-PACKAGING-CLOCK-01 controla o relogio depois que os trabalhos entram no
+empacotador e mantem filesystem real; nao aumentou timeout de producao. Mutacao
+que vaza vaga apos timeout continuou reprovando. Resultado global final e limites
+em audit/evidence/20260920/revision-client-verification.json.
+
+**Continuidade.** Perguntas ainda perdem chave ao fechar aba; regressao escrita
+em question-retry.spec.ts, ainda fora deste checkpoint. CI nao executa etapas,
+computador alvo offline, PostgreSQL/instalacao real e demais funcionalidades
+continuam pendentes. Missao EXECUTING, sem merge ou release.

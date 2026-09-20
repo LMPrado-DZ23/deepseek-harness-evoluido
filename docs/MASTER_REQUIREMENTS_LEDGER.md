@@ -502,21 +502,27 @@ declarada.
 
 | AUDIT-COMPOSER-RETRY-01 | Compositor preserva rascunho e identidade quando envio ou releitura falham | Auditoria da conversa, 20/09/2026 | v1.0 | BETA | apps/studio-web/src/App.tsx, src/tarefa/TaskScreen.tsx, tests/composer-retry.spec.ts | Tres perdas reproduzidas; tres casos de navegador e quatro mutacoes detectadas | execucao: sucesso explicito antes de limpar; chave mantida ate releitura; resposta antiga preserva texto digitado durante envio | Rascunho ainda em memoria; navegador focado cobre questionario, demais rotas usam mesmo contrato; navegacao concorrente e reabertura dos demais envios ainda pendentes | persistir revisao e orientar retomada no cliente |
 
+| AUDIT-REVISION-CLIENT-01 | Revisao conserva chave ao fechar aba e orienta recuperacao de escrita parcial | Continuidade de reenvios, 20/09/2026 | v1.0 | BETA | apps/studio-web/src/plan/pendingIntent.ts, src/App.tsx, src/tarefa/compositor.ts, src/tarefa/TaskScreen.tsx, tests/revision-retry.spec.ts | Chave nova e ausencia de orientacao reproduzidas; quatro cenarios focados de navegador; falhas 500/409, resposta nula e armazenamento negado | execucao: reserva antes de POST, escopo completo e hash sem texto; texto diferente nao descarta revisao pendente; 400/409 so liberam chave apos leitura sem marcador; tela aguarda recuperacao antes de planejar | Mesmo perfil e conta, texto original deve ser repetido; sem migracao de recibos perdidos ou fila automatica; limpar dados/logout perde chave; computador real e CAS pendentes | validar instalacao e persistir demais envios |
+
+| AUDIT-GENERATION-SETTLE-01 | Acompanhamento espera execucao e estado do projeto antes de terminar | Falha real durante validacao da revisao, 20/09/2026 | v1.0 | BETA | apps/studio-web/src/App.tsx, src/creationProgress.ts, tests/generation-settle.spec.ts | Trace real mostrou GENERATING com execucao PASSED; regressao controlada reprovou; correcao continua lendo e habilita envio | execucao: fim exige estado terminal da execucao e projeto fora de GENERATING/BUILD_OK/TESTS_OK; duas mutacoes detectadas | Se a persistencia do servidor nunca completar, acompanhamento ainda depende do limite de tempo; nao resolve navegacao concorrente nem queda de energia | validar jornada no computador alvo |
+
+| AUDIT-PACKAGING-CLOCK-01 | Teste de devolucao de capacidade nao depende da velocidade do filesystem | Falha adicional de timeout na suite de 20/09/2026 | v1.0 | BETA | plugins/integration-hub/tests/service.spec.ts | Falhou na suite completa e passou isolado; relogio controlado apos entrada no empacotador; mutacao de vazamento de vaga detectada | execucao: filesystem real; somente timers do teste sao controlados; limite de producao nao foi aumentado | Teste de contrato, nao benchmark de latencia de exportacao | repetir CI quando runners executarem etapas |
+
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 261 |
+| `BETA` | 264 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 372.**
+**Total de requisitos rastreados: 375.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 335 |
+| v1.0 | 338 |
 | v1.x | 34 |
 | v2 | 3 |

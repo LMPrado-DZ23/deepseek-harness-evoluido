@@ -118,3 +118,15 @@ describe('perguntar não é pedir alteração', () => {
     expect(intencaoPadrao({ estado: null, perguntaAberta: null })).toBe('agir')
   })
 })
+
+describe('retomada de revisao interrompida', () => {
+  it('oferece retomar a revisao mesmo com outra pergunta ou plano na tela', () => {
+    const situation = { estado: 'PLAN_PROPOSED', perguntaAberta: 'audience', revisaoPendente: true }
+    expect(destinoDoEnvio(situation, 'agir')).toEqual({ tipo: 'ajustar' })
+    expect(intencaoPadrao(situation)).toBe('agir')
+  })
+  it('perguntar permanece uma escolha explicita durante a retomada', () => {
+    const situation = { estado: 'SPEC_READY', perguntaAberta: null, revisaoPendente: true }
+    expect(destinoDoEnvio(situation, 'perguntar')).toEqual({ tipo: 'perguntar' })
+  })
+})

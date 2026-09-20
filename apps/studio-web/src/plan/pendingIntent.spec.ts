@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPendingIntent, isPendingPlanIntent, resolvePendingPlanIntent, resolvePendingCreationIntent } from './pendingIntent'
+import { isPendingIntent, isPendingPlanIntent, resolvePendingPlanIntent, resolvePendingCreationIntent, resolvePendingRevisionIntent } from './pendingIntent'
 
 const receipt = { slot: 'a'.repeat(64), digest: 'b'.repeat(64), key: 'c'.repeat(32), baseRevision: 3 }
 
@@ -48,5 +48,22 @@ describe('criacao duravel sem revisao de plano', () => {
   })
   it.each([{ ...creation, slot: 'f'.repeat(64) }, { ...creation, text: 'privado' }, { ...creation, key: 'curta' }])('recusa metadados invalidos: %#', value => {
     expect(() => resolvePendingCreationIntent(value, creation.slot, creation.digest)).toThrow('PLAN_INTENT_STORAGE_CORRUPTED')
+  })
+})
+
+
+describe('revisao pendente nao perde sua identidade', () => {
+  const pending = { ...receipt, baseRevision: null }
+  it('recupera a mesma intencao', () => {
+    expect(resolvePendingRevisionIntent(pending, pending.slot, pending.digest)).toBe(pending)
+  })
+  it('reserva antes do primeiro envio', () => {
+    expect(resolvePendingRevisionIntent(undefined, receipt.slot, receipt.digest, () => receipt.key)).toEqual(pending)
+  })
+  it('texto diferente nao substitui a chave necessaria para recuperar revisao incompleta', () => {
+    expect(() => resolvePendingRevisionIntent(pending, pending.slot, 'f'.repeat(64))).toThrow('REVISION_INTENT_MISMATCH')
+  })
+  it.each([receipt, { ...pending, slot: 'f'.repeat(64) }, { ...pending, key: 'curta' }])('recusa metadados invalidos: %#', value => {
+    expect(() => resolvePendingRevisionIntent(value, pending.slot, pending.digest)).toThrow('PLAN_INTENT_STORAGE_CORRUPTED')
   })
 })

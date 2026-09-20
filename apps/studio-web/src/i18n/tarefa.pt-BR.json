@@ -79,5 +79,6 @@
   "corrigindo": "Corrigindo a resposta de:",
   "corrigirCancelar": "Cancelar correção",
   "corrigirRotulo": "Corrigir resposta: {pergunta}",
-  "operacaoDemorada": "A operação demorou demais. Recarregue a página para ver o estado atual."
+  "operacaoDemorada": "A operação demorou demais. Recarregue a página para ver o estado atual.",
+  "revisaoPendente": "Uma revisão está aguardando confirmação. Para retomar, reenvie o texto original neste navegador e com a mesma conta. O FRIGG conserva a chave do envio, mas não guarda seu rascunho."
 }

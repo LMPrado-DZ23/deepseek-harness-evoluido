@@ -99,6 +99,7 @@
   "envios": {
     "indisponivel": "No pude conservar este envío en el dispositivo. La solicitud no se envió. Revisa la conversación y los permisos de almacenamiento del navegador antes de intentarlo de nuevo.",
     "identidade": "No pude confirmar tu espacio de trabajo. Actualiza la página antes de enviar. La solicitud no se envió.",
-    "confirmacaoPendente": "La solicitud se guardó en el servidor, pero este dispositivo no pudo guardar la confirmación. Si la reenvías, FRIGG intentará recuperar el mismo resultado."
+    "confirmacaoPendente": "La solicitud se guardó en el servidor, pero este dispositivo no pudo guardar la confirmación. Si la reenvías, FRIGG intentará recuperar el mismo resultado.",
+    "revisaoOriginal": "Vuelve a enviar el texto original para completar la revisión pendiente. Este texto diferente no se envió y se conservó la clave anterior."
   }
 }

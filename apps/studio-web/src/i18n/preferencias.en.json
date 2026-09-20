@@ -99,6 +99,7 @@
   "envios": {
     "indisponivel": "I could not preserve this submission on this device. The request was not sent. Check the conversation and your browser's site storage permissions before trying again.",
     "identidade": "I could not confirm your workspace. Refresh the page before sending. The request was not sent.",
-    "confirmacaoPendente": "The request was saved on the server, but this device could not save its confirmation. If you resend it, FRIGG will try to retrieve the same result."
+    "confirmacaoPendente": "The request was saved on the server, but this device could not save its confirmation. If you resend it, FRIGG will try to retrieve the same result.",
+    "revisaoOriginal": "Resend the original text to finish the pending revision. This different text was not sent and the previous key was preserved."
   }
 }

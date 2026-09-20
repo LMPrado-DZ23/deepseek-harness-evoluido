@@ -105,6 +105,7 @@ export function TaskScreen(props: TaskScreenProps) {
   const situacao = {
     estado: props.detalhes.project.state,
     perguntaAberta: perguntaAbertaDe(props.detalhes),
+    revisaoPendente: props.detalhes.project.pending_revision !== undefined,
   }
   const padrao = intencaoPadrao(situacao)
   const [intencao, setIntencao] = useState<Intencao>(padrao)
@@ -134,7 +135,7 @@ export function TaskScreen(props: TaskScreenProps) {
     draftVersion.current++
     props.setRascunho(value)
   }
-  useEffect(() => { setCorrigindo(null) }, [props.detalhes.project.project_id, props.detalhes.project.state])
+  useEffect(() => { setCorrigindo(null) }, [props.detalhes.project.project_id, props.detalhes.project.state, situacao.revisaoPendente])
   const fim = useRef<HTMLLIElement | null>(null)
   const podeEnviar = !enviando && (corrigindo !== null
     ? props.rascunho.trim() !== '' && props.corrigir !== undefined
@@ -195,7 +196,7 @@ export function TaskScreen(props: TaskScreenProps) {
     acontecendo justamente de quem perguntou. O segundo é sobre o ENVIO: o que
     aquele botão vai fazer com o texto dela.
   */
-  const avisoDaTarefa = acaoDoEstado.tipo === 'aguardar'
+  const avisoDaTarefa = situacao.revisaoPendente ? tarefa.revisaoPendente : acaoDoEstado.tipo === 'aguardar'
     ? acaoDoEstado.motivo === 'execucao' ? tarefa.aguardandoTrabalho : tarefa.aguardandoAprovacao
     : null
   const avisoDoEnvio = destino.tipo === 'perguntar' ? tarefa.avisoPergunta
@@ -258,7 +259,7 @@ export function TaskScreen(props: TaskScreenProps) {
           </span>
           <div className="dz-lance-corpo">
             <LanceView lance={lance} abrir={props.abrirPainel}
-              corrigir={props.corrigir === undefined ? undefined : comecarCorrecao} />
+              corrigir={props.corrigir === undefined || situacao.revisaoPendente ? undefined : comecarCorrecao} />
           </div>
         </li>)}
         {/*
@@ -269,7 +270,7 @@ export function TaskScreen(props: TaskScreenProps) {
         */}
         <li ref={fim} className="dz-fim" aria-hidden="true" />
       </ol>
-      {props.acoesDoEstado === undefined ? null : <div className="dz-tarefa-acoes">{props.acoesDoEstado}</div>}
+      {props.acoesDoEstado === undefined || situacao.revisaoPendente ? null : <div className="dz-tarefa-acoes">{props.acoesDoEstado}</div>}
 
       {/*
         O compositor fica ABAIXO da conversa e reserva espaço real, em vez de

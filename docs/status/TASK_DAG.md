@@ -27,7 +27,10 @@ Atualização da auditoria de 20/09/2026 (base `997fa20`):
 | AUDIT-CREATE-CLIENT-01 | P1 | Criacao recupera mesma tarefa depois de fechar a aba | AUDIT-CLIENT-REPLAY-01 | REVIEW — 1.100 testes de interface, 175 de navegador, quatro mutacoes e 32 portoes; instalacao pendente |
 | AUDIT-REVISION-RECOVERY-01 | P1 | Retomar revisao entre especificacao, estado e trilha | AUDIT-REPLAY-01 | REVIEW — JSON em dois processos, oito mutacoes e 32 portoes; cliente ainda pendente |
 | AUDIT-COMPOSER-RETRY-01 | P1 | Preservar texto e chave apos falha de envio/releitura | AUDIT-INTAKE-REPLAY-01 | REVIEW — tres regressoes, quatro mutacoes, 178 testes de navegador e 32 portoes; instalacao pendente |
-| AUDIT-REVISION-CLIENT-01 | P1 | Conservar revisao ao fechar aba e orientar retomada | AUDIT-REVISION-RECOVERY-01 | RUNNING — regressao de reabertura escrita |
+| AUDIT-REVISION-CLIENT-01 | P1 | Conservar revisao ao fechar aba e orientar retomada | AUDIT-REVISION-RECOVERY-01 | REVIEW — quatro casos focados, dez mutacoes, navegador completo 183 PASS/3 SKIP e 32 portoes |
+| AUDIT-GENERATION-SETTLE-01 | P1 | Esperar projeto e execucao concluirem antes de encerrar acompanhamento | — | REVIEW — falha real reproduzida, navegador e duas mutacoes |
+| AUDIT-PACKAGING-CLOCK-01 | P2 | Remover dependencia do relogio real no teste de capacidade | — | REVIEW — falha sob carga investigada, relogio controlado e mutacao detectada |
+| AUDIT-QUESTION-CLIENT-01 | P1 | Recuperar pergunta depois de fechar a aba | AUDIT-CLIENT-REPLAY-01 | RUNNING — regressao de reabertura escrita |
 | ABRIR-03-R | P1 | Recuperar cadastro interrompido sem emitir sessao antes de criar o espaco | ABRIR-03 | REVIEW — prova JSON em tres processos e quatro mutacoes; PC real pendente |
 | AUDIT-ENTRY-01 | P1 | Abrir o FRIGG pelo launcher e manter a admissão | — | REVIEW — runtime real e nove destinos; criação ainda bloqueada |
 | AUDIT-MOBILE-01 | P2 | Manter campo e envio acessíveis em telas móveis estreitas | — | REVIEW — 8 testes Chromium; aparelhos reais pendentes |

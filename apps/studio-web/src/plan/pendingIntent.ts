@@ -45,6 +45,13 @@ export function resolvePendingCreationIntent(previous: unknown, slot: string, fi
   return { slot, digest: fingerprint, key: generate(), baseRevision: null }
 }
 
+/** Revisao interrompida pode bloquear o projeto: nunca descarte sua chave por texto novo. */
+export function resolvePendingRevisionIntent(previous: unknown, slot: string, fingerprint: string, generate: () => string = novaChave): PendingCreationIntent {
+  const candidate = resolvePendingCreationIntent(previous, slot, fingerprint, generate)
+  if (previous !== undefined && candidate !== previous) throw new Error('REVISION_INTENT_MISMATCH')
+  return candidate
+}
+
 /** Mesma intencao conserva a revisao antiga; texto corrigido e outra intencao. */
 export function resolvePendingPlanIntent(previous: unknown, slot: string, fingerprint: string, baseRevision: number, generate: () => string = novaChave): PendingPlanIntent {
   if (previous !== undefined && (!isPendingPlanIntent(previous) || previous.slot !== slot)) {
@@ -83,17 +90,19 @@ function open(factory: IDBFactory): Promise<IDBDatabase> {
 }
 
 /** A transacao nativa serializa abas: ler e reservar a chave sao um unico efeito. */
-async function transact<T>(factory: IDBFactory, action: (store: IDBObjectStore, setResult: (value: T) => void) => void): Promise<T> {
+async function transact<T>(factory: IDBFactory, action: (store: IDBObjectStore, setResult: (value: T) => void, fail: (error: unknown) => void) => void): Promise<T> {
   const database = await open(factory)
   try {
     return await new Promise<T>((resolve, reject) => {
       const transaction = database.transaction(STORE, 'readwrite', { durability: 'strict' })
       let result: T
+      let failure: unknown
+      const fail = (error: unknown) => { failure = error; transaction.abort() }
       transaction.oncomplete = () => resolve(result)
-      transaction.onabort = () => reject(transaction.error ?? new Error('PLAN_INTENT_STORAGE_ABORTED'))
+      transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('PLAN_INTENT_STORAGE_ABORTED'))
       transaction.onerror = () => reject(transaction.error ?? new Error('PLAN_INTENT_STORAGE_FAILED'))
-      try { action(transaction.objectStore(STORE), value => { result = value }) }
-      catch (error) { transaction.abort(); reject(error) }
+      try { action(transaction.objectStore(STORE), value => { result = value }, fail) }
+      catch (error) { fail(error) }
     })
   } finally { database.close() }
 }
@@ -110,24 +119,30 @@ export async function prepareCreationIntent(scope: readonly [string, string, str
   return prepareIntent({ scope, projectId: '@new-project', kind: 'create', material, baseRevision: null }, factory)
 }
 
-async function prepareIntent(input: PlanIntentInput | { scope: readonly [string, string, string]; projectId: string; kind: 'create'; material: string; baseRevision: null }, factory: IDBFactory): Promise<PendingIntent> {
+/** Reserva revisao por projeto e pessoa; texto diferente conserva o recibo anterior. */
+export async function prepareRevisionIntent(scope: readonly [string, string, string], projectId: string, material: string, factory: IDBFactory = window.indexedDB): Promise<PendingIntent> {
+  return prepareIntent({ scope, projectId, kind: 'revision', material: material.trim().replace(/\s+/gu, ' '), baseRevision: null }, factory)
+}
+
+async function prepareIntent(input: PlanIntentInput | { scope: readonly [string, string, string]; projectId: string; kind: 'create' | 'revision'; material: string; baseRevision: null }, factory: IDBFactory): Promise<PendingIntent> {
   if ((input.baseRevision !== null && (!Number.isSafeInteger(input.baseRevision) || input.baseRevision < 1)) || input.scope.some(value => value === '') || input.projectId === '') {
     throw new Error('PLAN_INTENT_INPUT_INVALID')
   }
   const slot = await digest(JSON.stringify([input.scope, input.projectId, input.kind]))
   const fingerprint = await digest(JSON.stringify([slot, input.material]))
-  return transact(factory, (store, done) => {
+  return transact(factory, (store, done, fail) => {
     const read = store.get(slot)
     read.onsuccess = () => {
       const previous: unknown = read.result
       try {
-        const intent = input.baseRevision === null ? resolvePendingCreationIntent(previous, slot, fingerprint)
+        const intent = input.kind === 'revision' ? resolvePendingRevisionIntent(previous, slot, fingerprint)
+          : input.baseRevision === null ? resolvePendingCreationIntent(previous, slot, fingerprint)
           : resolvePendingPlanIntent(previous, slot, fingerprint, input.baseRevision)
         if (intent !== previous) store.put(intent)
         done(intent)
-      } catch {
+      } catch (error) {
         // Dado corrompido nao vira chave nova silenciosamente: poderia repetir custo.
-        store.transaction.abort()
+        fail(error)
       }
     }
   })
