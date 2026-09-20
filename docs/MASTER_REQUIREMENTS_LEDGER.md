@@ -481,22 +481,24 @@ declarada.
 | AUDIT-START-01 | Comandos de partida e provisionamento executam em caminhos com espacos, acentos, # e % | Retomada da meta de usuario final, 20/09/2026 | v1.0 | BETA | scripts/studio-start.mjs, scripts/preview-edge.mjs, scripts/builder-doctor.mjs, scripts/provision-builder.mjs, scripts/provision-preview.mjs, scripts/startup-paths.test.mjs | CLI em subprocessos reais; antes retornava 0 sem fazer nada; depois executa e preserva importacao sem efeitos | execucao: pathToFileURL faz a conversao correta, em vez de concatenar file://; regressao na CI Linux e Windows | Autotestes de provisionamento nao instalam Docker nem provam Windows nativo nesta sessao | validar instalacao na maquina do titular |
 | AUDIT-ENTRY-01 | A partida leva a interface FRIGG em /studio/ e preserva a admissao | Retomada da meta de usuario final, 20/09/2026 | v1.0 | BETA | scripts/studio-start.mjs, scripts/studio-start.spec.mjs, scripts/startup-paths.test.mjs, docs/COMECAR.md | Launcher real com Node 22.23.1, Harness original e Chromium; homepage FRIGG e nove destinos HTTP 200 | execucao: antes abria DeepSeek Harness / Internal Testing Notice; agora anuncia FRIGG e impede autoabertura da tela tecnica; linhas divididas em chunks testadas | Navegacao real nao prova criacao por modelo, Docker, reinicio da maquina nem mobile nativo | fechar jornada real de criacao, alteracao, exportacao e recuperacao |
 
+| AUDIT-PLAN-01 | Edicoes, aprovacao e respostas tardias do planejador preservam a revisao mais recente | Auditoria de concorrencia de 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, plugins/prompt-to-app/tests/service-intake-planner.spec.ts | Sete regressoes falham na base; 179 testes de servico e HTTP passam; cinco mutacoes detectadas | execucao: gravacoes serializadas por projeto e escopo; resposta do modelo confere identidade, revisao e estado antes de gravar; revisoes novas seguem o maximo existente | Trava por instancia, sem CAS entre processos; reenvio duravel de plan/edit e plan/slice ainda pendente; modelo real nao exercitado | provar concorrencia distribuida e identidade duravel dos envios |
+
 
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 251 |
+| `BETA` | 252 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 362.**
+**Total de requisitos rastreados: 363.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 325 |
+| v1.0 | 326 |
 | v1.x | 34 |
 | v2 | 3 |

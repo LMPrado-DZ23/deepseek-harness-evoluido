@@ -86,3 +86,34 @@ sob carga permanece `NEEDS_REVALIDATION`, sem aumento arbitrário de timeout.
   uso por pessoas leigas nas plataformas prometidas.
 
 Não há base para chamar o produto de finalizado nem superior ao Manus.
+
+## Continuação: integridade do plano
+
+`AUDIT-PLAN-01` fecha duas falhas adicionais. Uma resposta lenta do planejador
+podia sobrescrever edições, pedidos de mudança e até a aprovação já concluída.
+Além disso, contar registros para numerar propostas fazia uma proposta nova
+receber revisão inferior à do plano editado e desaparecer da leitura corrente.
+
+As gravações agora são serializadas por escopo/projeto nesta instância. O modelo
+responde fora da trava: a pessoa continua podendo editar e aprovar. Antes da
+gravação, identidade, revisão e estado são relidos; resposta desatualizada vira
+conflito com orientação para recarregar. Plano indisponível é recusado antes de
+chamar o modelo. Novas propostas avançam a maior revisão existente.
+
+Evidência: sete regressões falham no código anterior; 179 testes de serviço,
+edição, reenvio existente, leitura, revisão e HTTP passam. Cinco mutações
+(remover serialização, revisão atual, estado atual, recusa antes do modelo e
+numeração monotônica) são detectadas. Typecheck e build do pacote passam.
+Isso não prova CAS entre processos, idempotência durável de `plan/edit` e
+`plan/slice`, nem integração com modelo real.
+
+A CI do checkpoint f554fb3 também falhou antes de executar etapas: run
+35515702641, jobs Linux e Windows sem runner atribuído. Não foi possível obter
+a causa específica pelo endpoint de checks; não há declaração de CI verde.
+
+Após recompilar o pacote alterado, as 13 jornadas de `journey.spec.ts` passaram
+no Chromium (28,3 s). Usam o servidor de teste e não certificam modelo real.
+
+A rodada focada também passou com Node 22.23.1 (179 testes). Os 32 portões
+e a constituição passaram após as correções. Evidência estruturada em
+[evidência do plano](evidence/20260920/plan-verification.json).

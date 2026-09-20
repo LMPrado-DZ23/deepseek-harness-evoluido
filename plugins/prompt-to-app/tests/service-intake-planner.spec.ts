@@ -45,6 +45,80 @@ function fixture() {
   return { repository, service }
 }
 
+describe('concorrência do plano', () => {
+  const slice = { slice_id: 'slice-1', title: 'Serviços', description: 'Listar serviços', acceptance_criteria: ['Serviços visíveis'], planned_files: ['src/GeneratedApp.tsx'] }
+  async function ready() {
+    const { service, repository } = fixture()
+    const project = await service.createProject(ownerA, { name: 'Site', original_brief: 'Quero apresentar meus serviços.', category: 'landing-page', privacy: 'any' })
+    await service.saveSpec(ownerA, project.project_id, validSpec, 'intake')
+    await service.proposePlan(ownerA, project.project_id, [slice])
+    return { service, repository, id: project.project_id }
+  }
+  function delayedPlanner() {
+    let started!: () => void; let finish!: () => void
+    const entered = new Promise<void>(resolve => { started = resolve })
+    const pending = new Promise<void>(resolve => { finish = resolve })
+    const planner = { slice: vi.fn(async () => { started(); await pending; return { slice: { ...slice, slice_id: 'slice-2', title: 'Contato', planned_files: ['src/Contato.tsx'] } } }) }
+    return { planner, entered, finish }
+  }
+  for (const operation of ['editar', 'aprovar', 'pedir alteração'] as const) {
+    it(`preserva a decisão de ${operation} durante uma resposta lenta do modelo`, async () => {
+      const { service, id, repository } = await ready()
+      const { planner, entered, finish } = delayedPlanner()
+      const pending = service.addPlanSlice(ownerA, id, 'Adicionar contato', planner, 'any')
+      const rejected = expect(pending).rejects.toMatchObject({ code: 'REPLAY' })
+      await entered
+      if (operation === 'editar') await service.editPlan(ownerA, id, { base_revision: 1, slices: [{ slice_id: 'slice-1', title: 'Título escolhido' }], removed: [] })
+      else if (operation === 'aprovar') await service.approvePlan(ownerA, id)
+      else await service.requestPlanChange(ownerA, id, 'Reorganizar o plano')
+      const expected = await service.plan(ownerA, id)
+      const approvals = repository.approvalRows.length
+      finish()
+      await rejected
+      expect(await service.plan(ownerA, id)).toEqual(expected)
+      expect(repository.approvalRows).toHaveLength(approvals)
+    })
+  }
+  it('aceita apenas uma edição concorrente da mesma revisão', async () => {
+    const { service, id } = await ready()
+    const results = await Promise.allSettled(['Primeiro título', 'Segundo título'].map(title => service.editPlan(ownerA, id, { base_revision: 1, slices: [{ slice_id: 'slice-1', title }], removed: [] })))
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { code: 'REPLAY' } })
+    expect((await service.plan(ownerA, id)).revision).toBe(2)
+  })
+  it('seleciona a nova proposta depois de várias edições da anterior', async () => {
+    const { service, id } = await ready()
+    for (let revision = 1; revision <= 3; revision++) {
+      await service.editPlan(ownerA, id, { base_revision: revision, slices: [{ slice_id: 'slice-1', title: `Título ${revision}` }], removed: [] })
+    }
+    await service.requestPlanChange(ownerA, id, 'Reorganizar o plano')
+    const proposed = await service.proposePlan(ownerA, id, [{ ...slice, title: 'Nova proposta' }])
+    expect(proposed.revision).toBe(5)
+    expect(await service.plan(ownerA, id)).toEqual(proposed)
+    expect((await service.approvePlan(ownerA, id)).plan_id).toBe(proposed.plan_id)
+  })
+  it('preserva a primeira etapa quando duas respostas usam a mesma revisão', async () => {
+    const { service, id } = await ready()
+    const first = delayedPlanner(); const second = delayedPlanner()
+    const pendingFirst = service.addPlanSlice(ownerA, id, 'Adicionar contato', first.planner, 'any')
+    const pendingSecond = service.addPlanSlice(ownerA, id, 'Adicionar depoimentos', second.planner, 'any')
+    const rejected = expect(pendingSecond).rejects.toMatchObject({ code: 'REPLAY' })
+    await Promise.all([first.entered, second.entered])
+    first.finish()
+    const expected = await pendingFirst
+    second.finish()
+    await rejected
+    expect(await service.plan(ownerA, id)).toEqual(expected)
+  })
+  it('não gasta modelo para acrescentar etapa ao plano aprovado', async () => {
+    const { service, id } = await ready()
+    await service.approvePlan(ownerA, id)
+    const planner = { slice: vi.fn(async () => ({ slice: { ...slice, slice_id: 'slice-2' } })) }
+    await expect(service.addPlanSlice(ownerA, id, 'Adicionar contato', planner, 'any')).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(planner.slice).not.toHaveBeenCalled()
+  })
+})
+
 describe('PromptToAppService', () => {
   it('keeps every route scoped and prevents tenant B from reading or changing tenant A', async () => {
     const { repository, service } = fixture()

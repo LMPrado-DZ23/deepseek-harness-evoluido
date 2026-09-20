@@ -16,6 +16,7 @@ da árvore atual. A auditoria de 20/09 encontrou novos achados abaixo.
 | --- | --- | --- | --- |
 | AUDIT-OCI-01 | HIGH | CLI de download calculava, mas não comparava, o digest de camadas e configuração. Reprodução anunciou sucesso com conteúdo adulterado | CORREÇÃO CANDIDATA — ver audit/FRIGG-AUDIT-20260920.md |
 | AUDIT-FILES-01 | HIGH | 20 uploads concorrentes deixaram dois arquivos; um link em enviados redirecionou gravação para fora; download reabria caminho após validá-lo | CORREÇÃO CANDIDATA — testes reais de filesystem; paridade nativa fora de Linux/WSL pendente |
+| AUDIT-PLAN-01 | HIGH | Resposta tardia do modelo sobrescrevia edicao/aprovacao; nova proposta podia ficar abaixo da revisao antiga | CORREÇÃO CANDIDATA — sete regressoes, cinco mutacoes; serializacao por instancia, CAS distribuido pendente |
 
 A aprovação completa depende das quatro suítes e das limitações nomeadas no
 relatório. Não reduzir os achados a zero apenas por existirem alterações.

@@ -106,3 +106,19 @@ privados isolados, sem alterar as guardas. Raiz continua com falhas; Docker,
 PostgreSQL real, modelo e computador do titular seguem bloqueando provas.
 Estado e limites: `audit/FRIGG-USER-READINESS-20260920.md`. Missão permanece
 EXECUTING; nenhum merge, release nem prontidão universal declarada.
+
+## 2026-09-20 — AUDIT-PLAN-01, preservar decisões durante planejamento
+
+**Ação.** Reproduzir sete cenários antes de corrigir: resposta tardia após
+edição, aprovação ou pedido de mudança; duas edições; duas etapas concorrentes;
+modelo chamado após aprovação; nova proposta após várias edições.
+
+**Resultado.** Sete falhas na base e nenhuma após serializar gravações por
+escopo/projeto, conferir o plano depois do modelo e incrementar a maior revisão.
+179 testes integrados aprovados. Cinco retiradas intencionais das proteções
+fizeram os testes falharem; fontes restaurados. Typecheck e build passaram.
+
+**Limite.** Uma instância de serviço, sem transação/CAS distribuído. O modelo
+é controlado nos testes. Reenvio durável das duas rotas não foi declarado pronto.
+CI do commit anterior f554fb3 falhou sem etapas e sem runner atribuído
+(run 35515702641); causa específica segue sem confirmação.

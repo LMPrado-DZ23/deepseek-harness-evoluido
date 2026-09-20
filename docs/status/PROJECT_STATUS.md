@@ -14,9 +14,20 @@
 - `mission_intent`: evoluir o repositório para um Engineering OS sobre o DeepSeek Harness, preservando o motor e a compatibilidade com o upstream
 - `state`: `EXECUTING`
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
-- `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
+- `head`: base canônica `997fa20d897a95061db6da17981c0713dce5f8a3`; correções da auditoria no PR #1, branch `codex/audit-frigg-20260920`, ainda não integradas a `integ`
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
+
+## Proteção do plano — 20/09/2026
+
+`AUDIT-PLAN-01`: sete regressões reproduziram perda concorrente, chamada de
+modelo desnecessária após aprovação e seleção da proposta antiga após várias
+edições. Serialização das gravações e conferência da revisão depois da resposta
+do modelo corrigem esses casos numa instância do serviço. Novas propostas usam
+a maior revisão existente mais um. 179 testes de serviço/HTTP passaram; cinco
+mutações foram detectadas. Typecheck e build do pacote passaram.
+A proteção não é CAS entre processos nem idempotência durável de `plan/edit`
+e `plan/slice`. A meta do produto continua aberta.
 
 ## Retomada da meta de usuário final — 20/09/2026
 
