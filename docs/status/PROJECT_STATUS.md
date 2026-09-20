@@ -18,6 +18,18 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Questionario e consumo incerto — VALIDADO LOCALMENTE, 20/09/2026
+
+AUDIT-INTAKE-REPLAY-01 reproduziu quatro cenarios de chamada repetida depois de
+perder resultado externo ou falhar ao gravar o turno. Resposta digitada tambem
+pode chamar o modelo; todas as reservas sem turno passam a falhar sem repetir.
+Resultado completo ainda e recuperado; nova intencao explicita pode prosseguir.
+1.418 testes do plugin, cinco mutacoes e JSON em dois processos passaram.
+32 portoes PASS; raiz Node 22: 4.476 PASS/174 FAIL/68 SKIP, sem falhas novas.
+Inclui reserva legada sem identificador do resultado. Sintese posterior e respostas inferidas ainda
+nao sao uma operacao atomica; cliente e CAS continuam pendentes.
+Checkpoint anterior publicado: `e36c3553c3dc29464336720186f0d7ac84fb9605`.
+
 ## Pedido antigo de alteracao — VALIDADO LOCALMENTE, 20/09/2026
 
 AUDIT-CHANGE-REPLAY-01 reproduziu reenvio antigo alterando uma nova proposta.

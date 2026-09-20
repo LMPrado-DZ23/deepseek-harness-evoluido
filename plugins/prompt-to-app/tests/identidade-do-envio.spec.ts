@@ -324,17 +324,57 @@ describe('responder o intake com identidade de envio', () => {
     expect(repository.turnRows).toHaveLength(2)
   })
 
-  it('a queda entre a reserva e o turno termina o efeito com o MESMO identificador', async () => {
+  for (const recommended of [false, true]) {
+    for (const failure of ['provider', 'storage'] as const) {
+      it(`nao repete consumo incerto apos ${failure}, recommended=${recommended}`, async () => {
+        const { service, repository, produzir, chamadas } = comModelo()
+        const input = { ...pergunta, recommended }
+        const put = repository.putTurn
+        if (failure === 'storage') repository.putTurn = async () => { throw new Error('resultado perdido') }
+        const attempt = async () => {
+          const answer = await produzir()
+          if (failure === 'provider') throw new Error('resultado perdido')
+          return answer
+        }
+        await expect(service.answerIntakeTurn(ana, 'proj-1', input, attempt, CHAVE)).rejects.toThrow('resultado perdido')
+        repository.putTurn = put
+        const restarted = new PromptToAppService({ repository })
+        await expect(restarted.answerIntakeTurn(ana, 'proj-1', input, produzir, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+        expect(chamadas()).toBe(1)
+        expect(repository.turnRows).toHaveLength(0)
+        expect(repository.keyRows).toHaveLength(1)
+      })
+    }
+  }
+
+  it('nova intencao explicita apos incerteza pode produzir outra resposta', async () => {
+    const { service, produzir, chamadas } = comModelo()
+    await expect(service.answerIntakeTurn(ana, 'proj-1', pergunta, async () => {
+      await produzir(); throw new Error('resultado perdido')
+    }, CHAVE)).rejects.toThrow('resultado perdido')
+    const recovered = await service.answerIntakeTurn(ana, 'proj-1', { ...pergunta, digitada: 'pacientes e acompanhantes' }, produzir, 'nova-intencao-0001')
+    expect(recovered.answer).toBe('pacientes da clínica')
+    expect(chamadas()).toBe(2)
+  })
+
+  it('recusa envio com chave sem armazenamento de recibos antes de chamar modelo', async () => {
+    const { repository, produzir, chamadas } = comModelo()
+    const broken = Object.assign(Object.create(repository), { creationKeys: undefined, putCreationKey: undefined }) as PromptToAppRepository
+    const service = new PromptToAppService({ repository: broken })
+    await expect(service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)).rejects.toMatchObject({ code: 'INVALID' })
+    expect(chamadas()).toBe(0)
+  })
+
+  it.each([undefined, 'turno-reservado'])('reserva legada sem turno permanece incerta, resultado=%s', async resultId => {
     const { service, repository, produzir } = comModelo()
     // A reserva ficou; o turno, não — é o que uma queda no meio deixa.
     repository.keyRows = [{
       request_key: CHAVE, org_id: ana.orgId, tenant_id: ana.tenantId, user_id: ana.userId,
       fingerprint: impressaoDoEnvio({ tipo: 'resposta', projectId: 'proj-1', texto: 'pacientes da clínica' }),
-      project_id: 'proj-1', kind: 'resposta', result_id: 'turno-reservado', created_at: AGORA,
+      project_id: 'proj-1', kind: 'resposta', ...(resultId === undefined ? {} : { result_id: resultId }), created_at: AGORA,
     }]
-    const turno = await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)
-    expect(turno.turn_id).toBe('turno-reservado')
-    expect(repository.turnRows).toHaveLength(1)
+    await expect(service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(repository.turnRows).toHaveLength(0)
   })
 })
 
@@ -417,11 +457,11 @@ describe('pedir ALTERAÇÃO NO PLANO com identidade de envio', () => {
     expect(repository.planRowsInternos).toEqual(before)
   })
 
-  it('recibo legado com identificador aleatorio nao altera nova proposta', async () => {
+  it.each([undefined, 'legacy-unlinked-id'])('recibo legado nao altera nova proposta, resultado=%s', async resultId => {
     const { service, repository } = comPlano()
     repository.keyRows.push({ request_key: CHAVE, org_id: ana.orgId, tenant_id: ana.tenantId, user_id: ana.userId,
       fingerprint: impressaoDoEnvio({ tipo: 'mudanca', projectId: 'proj-1', texto: PEDIDO }), project_id: 'proj-1',
-      kind: 'mudanca', result_id: 'legacy-unlinked-id', created_at: AGORA })
+      kind: 'mudanca', ...(resultId === undefined ? {} : { result_id: resultId }), created_at: AGORA })
     await expect(service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
     expect((await service.plan(ana, 'proj-1')).status).toBe('PROPOSED')
   })
@@ -565,11 +605,12 @@ describe('edição e etapa com recibo durável', () => {
     expect(await restart(repository).addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)).toEqual(first)
     expect(calls).toBe(1)
   })
-  it('não repete automaticamente chamada de modelo cujo resultado ficou incerto', async () => {
+  it.each([false, true])('não repete modelo incerto, reserva sem id=%s', async withoutId => {
     const { service, repository } = await ready()
     let calls = 0
     const planner = { slice: async (): Promise<never> => { calls++; throw new Error('resposta perdida') } }
     await expect(service.addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)).rejects.toThrow('resposta perdida')
+    if (withoutId) delete repository.keyRows[0]!.result_id
     await expect(restart(repository).addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)).rejects.toMatchObject({ code: 'REPLAY' })
     expect(calls).toBe(1)
   })

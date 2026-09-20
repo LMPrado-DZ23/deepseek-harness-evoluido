@@ -18,6 +18,8 @@ const pluginRequire = createRequire(new URL('../plugins/prompt-to-app/package.js
 const { Context } = await import(pathToFileURL(pluginRequire.resolve('@deepseek-ai/cordis')).href)
 const actor = { userId: 'replay-test-user', orgId: 'replay-test-org', tenantId: 'replay-test-tenant', role: 'owner' }
 const edit = { base_revision: 1, slices: [{ slice_id: 'initial', title: 'Título preservado' }], removed: [] }
+const intakeInput = { questionId: 'audience', question: 'Para quem?', recommended: true, digitada: '' }
+const intakeKey = 'intake-completed-0001'; const intakeLostKey = 'intake-lost-0001'; const intakeWriteKey = 'intake-write-0001'
 const changeKey = 'plan-change-restart-0001'; const changeReason = 'Destacar os serviços principais'
 const editKey = 'plan-edit-restart-0001'; const sliceKey = 'plan-slice-restart-0001'; const uncertainKey = 'plan-uncertain-0001'
 
@@ -42,6 +44,10 @@ async function phase(root, mode) {
       await writeFile(counterPath, JSON.stringify((await count()) + 1), { mode: 0o600 })
       return { slice: { slice_id: 'contact', title: 'Contato', description: 'Como falar conosco', acceptance_criteria: ['Contato visível'], planned_files: ['src/Contato.tsx'] } }
     } }
+    const produceIntake = async () => {
+      await writeFile(counterPath, JSON.stringify((await count()) + 1), { mode: 0o600 })
+      return { answer: 'Clientes locais', route: 'controlled', model: 'controlled' }
+    }
     if (mode === 'write') {
       await writeFile(counterPath, '0', { mode: 0o600 })
       const project = await service.createProject(actor, { name: 'Prova de recuperação', original_brief: 'Página para apresentar serviços.', category: 'landing-page', privacy: 'local-only' })
@@ -58,8 +64,24 @@ async function phase(root, mode) {
       await assert.rejects(service.addPlanSlice(actor, id, 'Adicionar endereço', uncertain, 'local-only', uncertainKey, 4), /Resposta externa perdida/u)
       const changed = await service.requestPlanChange(actor, id, changeReason, changeKey)
       const proposed = await service.proposePlan(actor, id, latest.slices)
-      await writeFile(join(root, 'expected.json'), JSON.stringify({ id, edited, added, latest: proposed, changed, approvals: repository.approvals().length }), { mode: 0o600 })
-      assert.equal(await count(), 2)
+      const intakeProject = await service.createProject(actor, { name: 'Questionário recuperável', original_brief: 'Página para apresentar serviços.', category: 'landing-page', privacy: 'local-only' })
+      const intakeId = intakeProject.project_id
+      await assert.rejects(service.answerIntakeTurn(actor, intakeId, intakeInput, async () => {
+        await produceIntake(); throw new Error('Resposta do modelo perdida')
+      }, intakeLostKey), /Resposta do modelo perdida/u)
+      // Exercita também o formato legado, cujo schema aceita reserva sem result_id.
+      const lostReceipt = repository.creationKeys().find(row => row.request_key === intakeLostKey)
+      assert.ok(lostReceipt)
+      const { result_id: _legacyResultId, ...legacyReceipt } = lostReceipt
+      await repository.putCreationKey(legacyReceipt)
+      const originalPutTurn = repository.putTurn.bind(repository)
+      repository.putTurn = async () => { throw new Error('Disco indisponível') }
+      try {
+        await assert.rejects(service.answerIntakeTurn(actor, intakeId, { ...intakeInput, recommended: false, digitada: 'Clientes locais' }, produceIntake, intakeWriteKey), /Disco indisponível/u)
+      } finally { repository.putTurn = originalPutTurn }
+      const intakeCompleted = await service.answerIntakeTurn(actor, intakeId, intakeInput, produceIntake, intakeKey)
+      await writeFile(join(root, 'expected.json'), JSON.stringify({ id, edited, added, latest: proposed, changed, intakeId, intakeCompleted, approvals: repository.approvals().length }), { mode: 0o600 })
+      assert.equal(await count(), 5)
     } else {
       const expected = JSON.parse(await readFile(join(root, 'expected.json'), 'utf8'))
       assert.deepEqual(await service.editPlan(actor, expected.id, edit, editKey), expected.edited)
@@ -68,7 +90,11 @@ async function phase(root, mode) {
       assert.deepEqual(await service.requestPlanChange(actor, expected.id, changeReason, changeKey), expected.changed)
       assert.deepEqual(await service.plan(actor, expected.id), expected.latest)
       assert.equal(repository.approvals().length, expected.approvals)
-      assert.equal(await count(), 2, 'reenvio não pode consumir o modelo novamente')
+      assert.deepEqual(await service.answerIntakeTurn(actor, expected.intakeId, intakeInput, produceIntake, intakeKey), expected.intakeCompleted)
+      await assert.rejects(service.answerIntakeTurn(actor, expected.intakeId, intakeInput, produceIntake, intakeLostKey), { code: 'REPLAY' })
+      await assert.rejects(service.answerIntakeTurn(actor, expected.intakeId, { ...intakeInput, recommended: false, digitada: 'Clientes locais' }, produceIntake, intakeWriteKey), { code: 'REPLAY' })
+      assert.equal((await service.intakeTurns(actor, expected.intakeId)).length, 1)
+      assert.equal(await count(), 5, 'reenvio não pode consumir o modelo novamente')
     }
     return { phase: mode, status: 'PASS', modelCalls: await count() }
   } finally {

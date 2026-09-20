@@ -182,3 +182,18 @@ perder o resultado. O recibo agora identifica outra versao preservada. Uma
 reserva sem resultado nao escolhe o plano corrente por suposicao. Recibos
 legados sem vinculo falham com orientacao para conferir o plano. 1.409 testes
 do plugin e prova JSON real em processos separados passaram; 32 portoes PASS; quatro mutacoes detectadas.
+
+
+## 2026-09-20 — consumo incerto no questionario
+
+Quatro regressoes demonstraram nova chamada de modelo apos falha externa ou
+falha de escrita, com recomendacao e com resposta digitada. Reserva sem turno
+agora recusa repeticao; resposta completa e relida, nova intencao explicita
+continua possivel. 1.418 testes passaram. Sintese e inferencias posteriores
+ao fazem parte desta garantia. 32 portoes PASS; raiz Node 22: 4.476 PASS/174 FAIL/68 SKIP, sem falhas novas.
+
+Tres regressoes adicionais provaram que reserva legada sem result_id ignorava
+a politica de incerteza no questionario, mudanca e etapa. A correcao cobre
+tambem esse formato; cinco mutacoes validas foram detectadas. A tentativa
+inicial da quinta mutacao atingiu outra funcao e foi excluida, depois refeita
+no alvo correto. A prova JSON inclui recibo legado sem identificador.

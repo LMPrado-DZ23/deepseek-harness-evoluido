@@ -307,15 +307,15 @@ export class PromptToAppService {
       )
       const desfecho = desfechoDoEnvio(reserva, fingerprint)
       if (desfecho.kind === 'CONFLITO') throw new PromptToAppError('CONFLICT', t('errors.creationKeyConflict'))
-      if (desfecho.kind === 'REUSAR' && desfecho.resultId !== undefined) {
+      if (desfecho.kind === 'REUSAR') {
         // A releitura passa pela MESMA autorização: recuperar a resposta não
         // pode virar atalho para ler o que é de outra pessoa.
-        const existente = await reler(desfecho.resultId)
+        const existente = desfecho.resultId === undefined ? undefined : await reler(desfecho.resultId)
         if (existente !== undefined) return existente
         if (!retryMissingResult) throw new PromptToAppError('REPLAY', uncertainMessage)
         // A reserva ficou e o efeito não: o processo caiu entre as duas
         // escritas. Termina com o MESMO identificador.
-        return (await executar(desfecho.resultId)).valor
+        if (desfecho.resultId !== undefined) return (await executar(desfecho.resultId)).valor
       }
       const idReservado = this.#createId()
       await this.#repository.putCreationKey!({
@@ -427,7 +427,8 @@ export class PromptToAppService {
    *
    * `produzir` é passado de fora porque quem sabe falar com o modelo é o
    * motor de intake, e ele não mora aqui. O importante é a ORDEM: com chave,
-   * `produzir` só é chamado quando o envio é novo.
+   * `produzir` só é chamado quando o envio é novo. Reserva sem turno fica
+   * incerta: até resposta digitada pode acionar leitura pelo modelo na rota.
    *
    * A impressão é feita SÓ do que o cliente mandou: a resposta digitada, ou a
    * marca de recomendação quando é o modelo que vai escrever.
@@ -524,6 +525,7 @@ export class PromptToAppService {
     requestKey?: string,
   ): Promise<StudioIntakeTurn> {
     this.#authorize(actor, 'project.write'); this.project(actor, projectId)
+    this.#requireReceipts(requestKey)
     const marca = entrada.recommended ? '@recomendado' : entrada.digitada
     return this.#comChaveDeEnvio(
       actor, projectId, 'resposta', marca, requestKey,
@@ -536,6 +538,7 @@ export class PromptToAppService {
         return { id: turno.turn_id, valor: turno }
       },
       async resultId => (await this.intakeTurns(actor, projectId)).find(turno => turno.turn_id === resultId),
+      false, t('errors.intakeUncertain'),
     )
   }
 
@@ -759,7 +762,7 @@ export class PromptToAppService {
     return value
   }
 
-  #requirePlanReceipts(requestKey: string | undefined): void {
+  #requireReceipts(requestKey: string | undefined): void {
     if (requestKey !== undefined && (this.#repository.creationKeys === undefined || this.#repository.putCreationKey === undefined)) {
       throw new PromptToAppError('INVALID', t('errors.planReceiptUnavailable'))
     }
@@ -813,7 +816,7 @@ export class PromptToAppService {
     const texto = reason.trim()
     if (texto.length < 3 || texto.length > 2_000) throw new PromptToAppError('INVALID', t('errors.planChangeLength'))
     this.project(actor, projectId)
-    this.#requirePlanReceipts(requestKey)
+    this.#requireReceipts(requestKey)
     // Cada recibo aponta para a versão preservada, nunca para o plano corrente.
     // Reservas antigas/incompletas não autorizam aplicar a intenção a outra versão.
     return this.#comChaveDeEnvio(
@@ -858,7 +861,7 @@ export class PromptToAppService {
    */
   async editPlan(actor: PromptToAppActor, projectId: string, edit: PlanEdit, requestKey?: string): Promise<StudioPlan> {
     this.#authorize(actor, 'project.write'); this.project(actor, projectId)
-    this.#requirePlanReceipts(requestKey)
+    this.#requireReceipts(requestKey)
     return this.#comChaveDeEnvio(actor, projectId, 'edicao-plano', JSON.stringify(edit), requestKey,
       async id => { const value = await this.#editPlan(actor, projectId, edit, id); return { id: value.plan_id, valor: value } },
       id => this.#replayPlan(actor, projectId, id),
@@ -921,7 +924,7 @@ export class PromptToAppService {
     this.#authorize(actor, 'project.write'); this.project(actor, projectId)
     const text = request.trim()
     if (text.length < 3 || text.length > 2_000) throw new PromptToAppError('INVALID', t('errors.sliceUnusable'))
-    this.#requirePlanReceipts(requestKey)
+    this.#requireReceipts(requestKey)
     return this.#comChaveDeEnvio(actor, projectId, 'etapa-plano', JSON.stringify([text, baseRevision ?? null]), requestKey,
       async id => { const value = await this.#addPlanSlice(actor, projectId, text, planner, privacy, id, baseRevision); return { id: value.plan_id, valor: value } },
       id => this.#replayPlan(actor, projectId, id),

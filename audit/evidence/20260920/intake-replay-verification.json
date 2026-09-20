@@ -1,0 +1,73 @@
+{
+  "date": "2026-09-20",
+  "requirement": "AUDIT-INTAKE-REPLAY-01",
+  "source_snapshot": "9425c8c1ef45da4eb36356a379b9f10d70958953",
+  "red_regressions": {
+    "uncertain_provider_or_storage": 4,
+    "legacy_without_result_id": 3
+  },
+  "plugin_passed": 1418,
+  "gates_passed": 32,
+  "mutations": [
+    {
+      "mutation": "repeat_all",
+      "detected": true,
+      "assertion_or_test_failure": true
+    },
+    {
+      "mutation": "repeat_typed",
+      "detected": true,
+      "assertion_or_test_failure": true
+    },
+    {
+      "mutation": "ignore_receipts",
+      "detected": true,
+      "assertion_or_test_failure": true
+    },
+    {
+      "mutation": "lose_saved_reply",
+      "detected": true,
+      "assertion_or_test_failure": true
+    },
+    {
+      "mutation": "ignore_idless_receipt",
+      "detected": true,
+      "assertion_or_test_failure": true,
+      "initial_attempt_excluded": "Wrong occurrence in createProject was targeted; not a valid mutation of the intended function"
+    }
+  ],
+  "json_proof_node22": {
+    "proof": "PLAN_DURABLE_REPLAY",
+    "status": "PASS",
+    "storage": "Harness JSON + DomainPromptToAppRepository",
+    "separateProcesses": true,
+    "results": [
+      {
+        "phase": "write",
+        "status": "PASS",
+        "modelCalls": 5
+      },
+      {
+        "phase": "replay",
+        "status": "PASS",
+        "modelCalls": 5
+      }
+    ]
+  },
+  "root": {
+    "numPassedTests": 4476,
+    "numFailedTests": 174,
+    "numPendingTests": 68
+  },
+  "new_failure_names": [],
+  "browser_and_frontend": "NOT_REPEATED: backend-only change",
+  "limits": [
+    "No guarantee for keyless legacy requests",
+    "Later synthesis and inferred answers are not one atomic operation",
+    "Client intake key remains in memory",
+    "No distributed CAS; provider controlled",
+    "DESKTOP-PRADO offline at recheck 2026-09-20T16:44Z",
+    "CI previous e36c355 run 35523163966 failed without steps or logs; cause unknown",
+    "PR not merged; native installation and PostgreSQL not verified"
+  ]
+}

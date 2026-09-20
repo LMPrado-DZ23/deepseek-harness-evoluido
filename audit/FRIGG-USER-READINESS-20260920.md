@@ -215,3 +215,8 @@ AUDIT-CLIENT-REPLAY-01 validado localmente: IndexedDB confirma metadados antes d
 ## 20/09 — pedido antigo de alteracao
 
 AUDIT-CHANGE-REPLAY-01: duas regressoes demonstraram reenvio alterando proposta posterior. Resultado passa a ter versao preservada ligada ao recibo; reserva sem resultado falha sem reaplicar. 1.409 testes do plugin, quatro mutacoes, JSON real em dois processos e 32 portoes passaram. Raiz: 4.467 PASS/174 FAIL/68 SKIP, sem falhas novas. Recibos legados sem vinculo nao sao migrados por suposicao. Cliente dessa rota e CAS seguem pendentes. Evidencia: `audit/evidence/20260920/plan-change-replay-verification.json`.
+
+
+## 20/09 — consumo incerto no questionario
+
+AUDIT-INTAKE-REPLAY-01: sete regressoes cobrem resultado externo perdido, falha de escrita e recibo legado sem result_id. Questionario, mudanca e etapa recusam repeticao incerta. 1.418 testes do plugin, cinco mutacoes, JSON reaberto e 32 portoes passaram. Raiz: 4.476 PASS/174 FAIL/68 SKIP, sem novas falhas. Sintese posterior, agrupamento das inferencias e persistencia do cliente continuam pendentes. Evidencia: `audit/evidence/20260920/intake-replay-verification.json`.

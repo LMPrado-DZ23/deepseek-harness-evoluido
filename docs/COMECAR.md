@@ -184,3 +184,9 @@ pedido. Verifique as permissoes de armazenamento deste site. Alterar o texto
 inicia outra intencao; isso pode consumir modelo novamente. Sair da conta,
 limpar os dados do site ou usar outro navegador/aparelho perde os recibos
 locais. Essas garantias ainda nao se estendem aos demais tipos de envio.
+
+
+Se uma resposta do questionario ficar sem resultado confirmado, o FRIGG nao
+repete automaticamente a chamada do modelo. Confira a conversa antes de
+escrever uma nova resposta: uma nova tentativa pode gerar novo consumo.
+O mesmo cuidado vale para resposta digitada, que pode ser interpretada pelo modelo.

@@ -494,21 +494,23 @@ declarada.
 
 | AUDIT-CHANGE-REPLAY-01 | Pedido antigo de alteracao recupera a versao original sem alterar proposta posterior | Auditoria de reenvios, 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, tests/identidade-do-envio.spec.ts, scripts/prove-plan-replay.mjs | Duas regressoes reproduzidas; nova versao ligada ao recibo; JSON real em dois processos | execucao: leitura pelo identificador reservado, sem gerar auditoria de edicao; reserva incompleta ou legada sem resultado e recusada | Uma instancia; cliente dessa rota ainda em memoria; recibos antigos sem vinculo nao podem recuperar resposta original; nao ha migracao por suposicao | validar instalacao real e persistir intencao do cliente |
 
+| AUDIT-INTAKE-REPLAY-01 | Questionario nao repete consumo de modelo sem resultado confirmado | Auditoria de reenvios, 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, tests/identidade-do-envio.spec.ts, scripts/prove-plan-replay.mjs | Quatro regressoes reproduzidas com resposta recomendada/digitada e falhas de provedor/gravação; 1.418 testes do plugin | execucao: reserva sem turno fica incerta; resultado concluido recuperado; nova intencao explicita permitida; falta de recibos impede chamada | Nao resolve sintese posterior ao turno nem agrupamento de respostas inferidas; cliente ainda em memoria; keyless legado sem garantia; sem CAS distribuido e sem provedor real | validar instalacao real; ampliar demais reenvios |
+
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 257 |
+| `BETA` | 258 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 368.**
+**Total de requisitos rastreados: 369.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 331 |
+| v1.0 | 332 |
 | v1.x | 34 |
 | v2 | 3 |
