@@ -18,6 +18,19 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-19
 
+## PRIMEIRO APLICATIVO DE MODELO REAL APROVADO — 20/09/2026, madrugada (JORNADA-REAL-01)
+
+No computador do titular, pela TELA, com a Mistral (chave): o contador de
+copos (projeto `9c4bfbe9…`) chegou a **VERIFIED_PROTOTYPE** — compilado,
+testado, e2e, acessibilidade, exportado, importado e atestado. Onze defeitos
+que só apareciam com modelo, construtor e computador reais foram consertados
+no caminho (ver o livro mestre, de LLM-CHAVE-01 a A11Y-REPARO-01).
+
+Estado de EB-04 / ABRIR-05 / ABRIR-08: **a criação real funciona até a
+aprovação.** FALTA provar: abrir a prévia (PREVIA-PESSOAL-01 acabou de
+consertar a primeira recusa), pedir uma alteração na mesma conversa e
+retomar depois de reiniciar.
+
 ## A JORNADA PELA MISTRAL — 20/09/2026, madrugada
 
 Projeto `9c4bfbe9…` (contador de copos, perfil "Melhor qualidade", só a

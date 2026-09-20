@@ -128,12 +128,12 @@ export async function apply(ctx: Context, config: PreviewPluginConfig = {}): Pro
         const artifactPath = `${selected.run_directory}/${PREVIEW_ARTIFACT_RELATIVE_PATH}`
         const currentSha256 = await hashTree(artifactPath)
         if (currentSha256 !== selected.artifact_sha256) throw new PreviewError('CONFLICT', t('plugin.prototypeChanged'))
-        const owner = identity.userRecords().find(user => user.user_id === actor.userId && user.org_id === actor.orgId && user.tenant_id === actor.tenantId)
-        if (owner === undefined) throw new PreviewError('UNAUTHENTICATED', t('plugin.ownerMissing'))
+        const ownerEmail = emailDoDono(identity.userRecords(), actor)
+        if (ownerEmail === undefined) throw new PreviewError('UNAUTHENTICATED', t('plugin.ownerMissing'))
         return {
           projectId, runId: selected.run_id, artifactPath,
           artifactSha256: selected.artifact_sha256,
-          ownerEmail: owner.email,
+          ownerEmail,
         }
       },
     },
@@ -217,4 +217,33 @@ function requiredSecret(reference: string): string {
 export function localPreviewFrameSource(publicPort: number): string {
   if (!Number.isInteger(publicPort) || publicPort < 1 || publicPort > 65_535) throw new Error(t('plugin.invalidPublicPort'))
   return `http://*.${DOMINIO_DA_PREVIA}${publicPort === 80 ? '' : `:${publicPort}`}`
+}
+
+/** O endereço do dono na instalação PESSOAL, onde ninguém se cadastrou. */
+export const EMAIL_DO_DONO_PESSOAL = 'voce@frigg.local'
+
+/**
+ * O e-mail do dono da prévia.
+ *
+ * Na instalação pessoal não há cadastro nenhum — é o que a faz pessoal —, e a
+ * prévia recusava com "a pessoa responsável não foi encontrada" o PRIMEIRO
+ * aplicativo que um modelo real escreveu e o construtor aprovou (medido em
+ * 20/09/2026). O dono ali é a pessoa do computador, com um endereço local
+ * fixo, e só enquanto não existe cadastro: com qualquer usuário registrado a
+ * regra volta a exigir o registro.
+ * @param usuarios - os cadastrados.
+ * @param actor - quem pediu.
+ * @param actor.userId - a pessoa.
+ * @param actor.orgId - a organização.
+ * @param actor.tenantId - o espaço.
+ * @returns o e-mail, ou `undefined`.
+ */
+export function emailDoDono(
+  usuarios: readonly { readonly user_id: string, readonly org_id: string, readonly tenant_id: string, readonly email: string }[],
+  actor: { readonly userId: string, readonly orgId: string, readonly tenantId: string },
+): string | undefined {
+  const registrado = usuarios.find(user => user.user_id === actor.userId && user.org_id === actor.orgId && user.tenant_id === actor.tenantId)
+  if (registrado !== undefined) return registrado.email
+  const pessoal = usuarios.length === 0 && actor.userId === 'user_local' && actor.orgId === 'org_local' && actor.tenantId === 'tenant_local'
+  return pessoal ? EMAIL_DO_DONO_PESSOAL : undefined
 }
