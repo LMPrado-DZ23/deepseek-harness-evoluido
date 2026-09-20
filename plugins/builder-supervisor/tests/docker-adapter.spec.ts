@@ -370,14 +370,14 @@ describe('server-authoritative Docker builder adapter', () => {
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
       expect(eventos).toEqual([
         { evento: 'exportador-saiu-com-erro', status: 1, saida: 'Error: EXPORT_SOURCE_INVALID' },
-        { evento: 'exportacao-falhou', etapa: 'exportador', codigo: 'EXPORT_INVALID' },
+        { evento: 'exportacao-falhou', etapa: 'exportador', codigo: 'EXPORT_INVALID', onde: expect.stringMatching(/^docker-adapter\.ts:\d+$/u) },
       ])
       eventos.length = 0; engine.exportExitCode = 0; engine.downloadPayload = Buffer.from('bad')
       await expect(adapter.exportArtifact(buildRef, signal)).rejects.toThrow('EXPORT_INVALID')
-      expect(eventos).toEqual([{ evento: 'exportacao-falhou', etapa: 'publicar', codigo: 'EXPORT_INVALID' }])
+      expect(eventos).toEqual([{ evento: 'exportacao-falhou', etapa: 'publicar', codigo: 'EXPORT_INVALID', onde: expect.stringMatching(/^export-artifact\.ts:\d+$/u) }])
       eventos.length = 0
       await expect(new DockerBuilderAdapter({ engine, imageDigest: image, installationId, scopeId, exportRoot: root, templateStoreVersion: templateVersion, templateStoreSha256, diagnostico: evento => { eventos.push({ ...evento }) } }).exportArtifact(buildRef, signal)).rejects.toThrow('BUILD_NOT_FOUND')
-      expect(eventos).toEqual([{ evento: 'exportacao-falhou', etapa: 'construcao-conhecida', codigo: 'BUILD_NOT_FOUND' }])
+      expect(eventos).toEqual([{ evento: 'exportacao-falhou', etapa: 'construcao-conhecida', codigo: 'BUILD_NOT_FOUND', onde: expect.stringMatching(/^docker-adapter\.ts:\d+$/u) }])
     } finally { await rm(root, { recursive: true, force: true }) }
   })
 

@@ -352,7 +352,7 @@ export class DockerBuilderAdapter implements BuilderExecutionPort {
       }
     } catch (error) {
       operationError = error
-      this.options.diagnostico?.({ evento: 'exportacao-falhou', etapa, codigo: error instanceof BuilderSupervisorError ? error.code : error instanceof Error ? error.message.slice(0, 200) : 'desconhecido' })
+      this.options.diagnostico?.({ evento: 'exportacao-falhou', etapa, codigo: error instanceof BuilderSupervisorError ? error.code : error instanceof Error ? error.message.slice(0, 200) : 'desconhecido', onde: ondeRecusou(error) })
     }
     const cleanupErrors: unknown[] = []
     try {
@@ -434,3 +434,18 @@ function sanitized(value: Buffer, maximumBytes: number): string {
   return result
 }
 
+/**
+ * A linha que RECUSOU, tirada da pilha do erro: o leitor do arquivo recusa
+ * em trinta lugares com o mesmo código, e o código sozinho não diz qual.
+ * Só arquivo e linha do nosso próprio código — nenhum conteúdo.
+ * @param error - o erro.
+ * @returns `arquivo.js:linha`, ou vazio.
+ */
+export function ondeRecusou(error: unknown): string {
+  const pilha = error instanceof Error && typeof error.stack === 'string' ? error.stack.split('\n').slice(1) : []
+  for (const linha of pilha) {
+    const achado = /([\w.-]+\.[cm]?[jt]s):(\d+):\d+\)?$/u.exec(linha.trim())
+    if (achado !== null && !/\binvalid\b|\bmismatch\b/u.test(linha)) return `${achado[1]}:${achado[2]}`
+  }
+  return ''
+}
