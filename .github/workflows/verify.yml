@@ -112,7 +112,9 @@ jobs:
         run: pnpm prove:plan-replay
 
       - name: Preserve personal work after first registration
-        run: pnpm prove:personal-adoption
+        run: |
+          pnpm prove:personal-adoption
+          pnpm prove:personal-adoption:recovery
 
       - name: Static and policy gates
         run: |

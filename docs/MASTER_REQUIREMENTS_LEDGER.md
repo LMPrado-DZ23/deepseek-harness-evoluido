@@ -488,21 +488,23 @@ declarada.
 
 | ABRIR-03 | Primeiro titular local preserva a identidade do trabalho pessoal ao registrar a conta | Continuidade do usuario final, 20/09/2026 | v1.0 | BETA | plugins/identity/src/service.ts, plugins/identity/tests/service.spec.ts, scripts/prove-personal-adoption.mjs | 188 testes de identidade e tenancy; seis mutacoes detectadas; backend JSON real em dois processos, projeto e arquivo preservados, escopo alheio recusado | execucao: codigo vinculado ao escopo pessoal; mesmo usuario, organizacao e tenant no cadastro; convite nao herda dados pessoais; mudanca de escopo invalida codigo; acesso anonimo encerrado | Primeiro cadastro local apenas; instalacoes ja cadastradas nao sao migradas; email capturado sem SMTP; conversas sinteticas ainda nao transferidas; validacao no PC pendente | provar cadastro real e continuidade das conversas, sem ampliar acesso |
 
+| ABRIR-03-R | Cadastro retoma a criacao do espaco interrompida antes de emitir sessao | Auditoria da continuidade, 20/09/2026 | v1.0 | BETA | plugins/identity/src/service.ts, src/model.ts, tests/service.spec.ts, scripts/prove-personal-adoption.mjs | 190 testes de identidade/tenancy; quatro mutacoes detectadas; JSON real com falha de escrita, recuperacao e nova reabertura em tres processos | execucao: marcador persistido antes do provisionamento; removido somente depois de concluir; logins completos nao repetem provisionamento; falha ao confirmar nao emite sessao | Email capturado, sem SMTP; binario antigo nao aceita registro pendente com campo novo; sem CAS distribuido; conversas pessoais ainda em memoria | validar no computador alvo e continuar continuidade do cliente |
+
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 254 |
+| `BETA` | 255 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 365.**
+**Total de requisitos rastreados: 366.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 328 |
+| v1.0 | 329 |
 | v1.x | 34 |
 | v2 | 3 |

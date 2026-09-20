@@ -986,3 +986,46 @@ describe('adotar o espaço pessoal no primeiro registro local', () => {
     expect(h.repository.audits().at(-1)).toMatchObject({ event_type: 'login_failed', outcome: 'failure' })
   })
 })
+
+describe('recuperar o provisionamento interrompido do primeiro titular', () => {
+  it('repete apenas o provisionamento pendente antes de emitir a sessão', async () => {
+    const h = makeHarness()
+    h.service.setBindHost('127.0.0.1')
+    let calls = 0
+    let hasWorkspace = false
+    h.service.setUserProvisioner(async () => {
+      calls += 1
+      if (calls === 1) throw new Error('disco temporariamente indisponível')
+      hasWorkspace = true
+    })
+    await expect(login(h)).rejects.toThrow('disco temporariamente indisponível')
+    expect(h.repository.users()).toHaveLength(1)
+    expect(h.repository.sessions()).toHaveLength(0)
+    const issued = await login(h)
+    expect(hasWorkspace).toBe(true)
+    expect(calls).toBe(2)
+    expect(issued.session.user_id).toBe('user_local')
+    await login(h)
+    expect(calls).toBe(2)
+  })
+  it('mantém a pendência se gravar a conclusão falha e não emite sessão prematura', async () => {
+    const h = makeHarness()
+    let calls = 0
+    h.service.setUserProvisioner(async () => { calls += 1 })
+    const putUser = h.repository.putUser.bind(h.repository)
+    let failCompletion = true
+    h.repository.putUser = async user => {
+      if (user.bootstrap_provisioning_pending !== true && failCompletion) {
+        failCompletion = false
+        throw new Error('falha ao confirmar provisionamento')
+      }
+      await putUser(user)
+    }
+    await expect(login(h)).rejects.toThrow('falha ao confirmar provisionamento')
+    expect(h.repository.users()[0]?.bootstrap_provisioning_pending).toBe(true)
+    expect(h.repository.sessions()).toHaveLength(0)
+    await login(h)
+    expect(h.repository.users()[0]).not.toHaveProperty('bootstrap_provisioning_pending')
+    expect(calls).toBe(2)
+  })
+})

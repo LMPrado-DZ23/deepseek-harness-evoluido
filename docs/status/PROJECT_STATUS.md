@@ -18,6 +18,21 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Recuperacao do cadastro interrompido — 20/09/2026
+
+Checkpoint anterior no PR #1: `d7de66c09a8f2c341b88ec2a33593244e6f925c4`,
+ainda separado de `integ`. `ABRIR-03-R` corrige falha adicional reproduzida:
+usuario era salvo, criacao do espaco falhava, e proximo login ignorava a etapa
+pendente. Um marcador duravel agora exige concluir o provisionamento antes da
+sessao. Matriculas concluidas nao sao reprovisionadas no login.
+190 testes passaram e quatro mutacoes foram detectadas; 32 portoes PASS,
+interface 1.075 PASS, navegador 174 PASS/3 SKIP/0 FAIL. Raiz Node 22 segue
+reprovada: 4.461 PASS/174 FAIL/68 SKIP, sem falhas novas. Prova JSON real injeta
+falha na escrita do espaco, reabre o processo, conclui o cadastro e reabre de
+novo, preservando projeto/arquivo e isolamento. SMTP e PC reais permanecem
+pendentes. Campo pendente novo nao e aceito por binario antigo; downgrade requer
+conclusao ou backup consistente, nunca remocao manual do marcador.
+
 ## Verificacao mais recente — reenvios e primeiro cadastro
 
 32 portoes PASS; interface 1.075 PASS; navegador em copia limpa 174 PASS/3 SKIP/0 FAIL.

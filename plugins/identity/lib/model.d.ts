@@ -5,6 +5,7 @@ export declare const identityUserSchema: z.ZodPipe<z.ZodObject<{
     email: z.ZodEmail;
     display_name: z.ZodString;
     bootstrap_owner: z.ZodOptional<z.ZodBoolean>;
+    bootstrap_provisioning_pending: z.ZodOptional<z.ZodLiteral<true>>;
     role: z.ZodOptional<z.ZodEnum<{
         owner: "owner";
         admin: "admin";
@@ -22,6 +23,7 @@ export declare const identityUserSchema: z.ZodPipe<z.ZodObject<{
     tenant_id: string;
     created_at: string;
     bootstrap_owner?: boolean | undefined;
+    bootstrap_provisioning_pending?: true | undefined;
 }, {
     user_id: string;
     email: string;
@@ -30,6 +32,7 @@ export declare const identityUserSchema: z.ZodPipe<z.ZodObject<{
     tenant_id: string;
     created_at: string;
     bootstrap_owner?: boolean | undefined;
+    bootstrap_provisioning_pending?: true | undefined;
     role?: "owner" | "admin" | "builder" | "viewer" | undefined;
 }>>;
 export declare const passkeyCredentialSchema: z.ZodObject<{
@@ -150,6 +153,7 @@ export declare const identityUsersDomainSpec: {
             tenant_id: string;
             created_at: string;
             bootstrap_owner?: boolean | undefined;
+            bootstrap_provisioning_pending?: true | undefined;
         }>;
         magic_codes: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<IdentityKey, {
             magic_code_id: string;

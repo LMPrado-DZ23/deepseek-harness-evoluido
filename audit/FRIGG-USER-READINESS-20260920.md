@@ -184,3 +184,24 @@ Raiz em Node 22: 4.459 PASS/174 FAIL/68 SKIP, mesmos nomes de falha da rodada
 anterior. PostgreSQL novamente NOT_EXECUTED, sem Docker/servidor. Nenhuma
 protecao de runtime, sistema de arquivos ou proxy foi desligada.
 Evidencia consolidada: `audit/evidence/20260920/replay-adoption-verification.json`.
+
+## Recuperacao de provisionamento interrompido (ABRIR-03-R)
+
+O cadastro salvava o usuario antes de criar seu espaco. Se a criacao falhasse,
+o proximo login pulava o provisionamento. Marcador persistido agora diferencia
+cadastro pendente de concluido; so o pendente repete a etapa, antes de emitir
+sessao. Uma segunda falha ao gravar a conclusao tambem conserva a pendencia.
+190 testes PASS e quatro mutacoes detectadas. A variante
+`prove:personal-adoption:recovery` injeta falha na escrita do espaco apos gravar
+usuario/organizacao/membership, encerra o processo, retoma e reabre novamente.
+O projeto e o arquivo continuam acessiveis, com recusa do escopo alheio.
+Email local capturado; sem SMTP nem computador do titular. Registros antigos
+sao aceitos. Binario antigo recusa o novo campo quando ainda pendente; rollback
+exige concluir ou restaurar backup consistente, nao apagar o marcador.
+
+Verificacao da recuperacao: 32 portoes e constituicao PASS; 190 testes focados,
+1.075 testes da interface e 174 testes de navegador PASS (3 SKIP). Raiz Node 22:
+4.461 PASS/174 FAIL/68 SKIP, sem novos nomes de falha. Banco novamente
+NOT_EXECUTED. A prova em tres processos tambem passou em Node 22.23.1.
+Evidencias: `audit/evidence/20260920/provision-recovery-verification.json`.
+CI do checkpoint d7de66c: run 35520291793, ambos jobs falharam sem etapas.

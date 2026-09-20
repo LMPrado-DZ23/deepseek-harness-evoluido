@@ -19,6 +19,7 @@ da árvore atual. A auditoria de 20/09 encontrou novos achados abaixo.
 | AUDIT-PLAN-01 | HIGH | Resposta tardia do modelo sobrescrevia edicao/aprovacao; nova proposta podia ficar abaixo da revisao antiga | CORREÇÃO CANDIDATA — sete regressoes, cinco mutacoes; serializacao por instancia, CAS distribuido pendente |
 | AUDIT-REPLAY-01 | HIGH | Reenvios nao tinham recibo; falha na rede descartava o rascunho; falha de leitura ficava invisivel | CORREÇÃO CANDIDATA — recibos, revisoes preservadas, auditoria recuperavel e regressao no navegador |
 | ABRIR-03 | HIGH | Cadastro escondia projetos e arquivos pessoais | CORREÇÃO CANDIDATA — identidade preservada e JSON reaberto; continuidade de conversas pessoais permanece aberta |
+| ABRIR-03-R | HIGH | Cadastro incompleto era ignorado no proximo login | CORREÇÃO CANDIDATA — marcador duravel e recuperacao antes da sessao; falha de escrita e reinicio exercitados |
 
 A aprovação completa depende das quatro suítes e das limitações nomeadas no
 relatório. Não reduzir os achados a zero apenas por existirem alterações.

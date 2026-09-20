@@ -283,19 +283,31 @@ export class StudioIdentityService {
                 throw new IdentityError('invalid', t('auth.codeInvalidOrExpired'));
             }
         }
-        const user = existing ?? {
+        let user = existing ?? {
             user_id: personal?.userId ?? this.#createId(),
             email: normalized,
             display_name: normalized.split('@')[0],
             bootstrap_owner: source === 'bootstrap',
+            ...(source === 'bootstrap' ? { bootstrap_provisioning_pending: true } : {}),
             org_id: candidate.org_id,
             tenant_id: candidate.tenant_id,
             created_at: now.toISOString(),
         };
-        if (existing === undefined) {
+        const pendingBootstrap = user.bootstrap_owner === true && user.bootstrap_provisioning_pending === true;
+        if (existing === undefined)
             await this.#repository.putUser(user);
-            await this.#userProvisioner(user, source);
-            if (source === 'bootstrap') {
+        if (existing === undefined || pendingBootstrap) {
+            // O marcador pertence a esta matricula, nao a um convite posterior. So
+            // removemos depois do provisionamento; falha de disco permite retomar
+            // no proximo login sem repetir matriculas ja concluidas ou papeis alterados.
+            const provisioningSource = pendingBootstrap ? 'bootstrap' : source;
+            await this.#userProvisioner(user, provisioningSource);
+            if (pendingBootstrap) {
+                const { bootstrap_provisioning_pending: _pending, ...completed } = user;
+                await this.#repository.putUser(completed);
+                user = completed;
+            }
+            if (provisioningSource === 'bootstrap') {
                 await this.#audit('personal_mode_disabled', user.user_id, null, user.org_id, user.tenant_id, 'success', t('auth.firstAccessRegistered'));
                 await this.#audit('enrollment_closed', user.user_id, null, user.org_id, user.tenant_id, 'success', t('auth.bootstrapClosedAfterOwner'));
             }

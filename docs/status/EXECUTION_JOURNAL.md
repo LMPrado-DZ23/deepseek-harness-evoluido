@@ -153,3 +153,12 @@ passaram; seis mutacoes foram detectadas. Projeto e arquivo continuaram
 acessiveis apos cadastro e reabertura em outro processo, sem acesso ao tenant
 alheio. SMTP capturado, sem entrega externa. Vinculos das conversas sinteticas
 continuam em memoria; esta parte da continuidade segue aberta.
+
+## 2026-09-20 — recuperacao do cadastro interrompido
+
+A proxima falha foi reproduzida antes de corrigir: usuario persistia, espaco
+falhava, novo login emitia sessao sem repetir a etapa que faltava. Marcador de
+provisionamento pendente agora acompanha o usuario ate concluir. Falha ao gravar
+a conclusao tambem impede sessao prematura. Matriculas completas nao repetem
+a etapa. 190 testes PASS, quatro mutacoes detectadas, prova JSON real em tres
+processos preservando trabalho e isolamento depois de falha de escrita.

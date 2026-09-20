@@ -79,7 +79,7 @@ async function phase(root, mode) {
     await mkdir(workspaceRoot, { recursive: true, mode: 0o700 })
     const files = await AssistantSessionLauncher.create({ identity, tenancy, sessions: {}, repositories: [], workspaceRoot })
     let expected; let authenticated
-    if (mode === 'write') {
+    if (mode === 'write' || mode === 'interrupt') {
       const personal = identity.personalSession()
       assert.ok(personal)
       const actor = tenancy.authorizationFor(...scopeOf(personal))
@@ -88,8 +88,21 @@ async function phase(root, mode) {
       const foreign = await projects.createProject({ userId: 'other-user', orgId: 'other-org', tenantId: 'other-tenant', role: 'owner' }, { name: 'Outro espaço', original_brief: 'Projeto isolado.', category: 'landing-page', privacy: 'local-only' })
       const directory = await files.pastaDeTrabalho(personal, 'project.write')
       await writeFile(join(directory, 'personal-note.txt'), 'Trabalho preservado.', { mode: 0o600 })
+      if (mode === 'interrupt') {
+        tenancyRepository.putWorkspace = async () => { throw new Error('injected workspace write failure') }
+      }
       await identity.requestMagicCode('owner@example.test')
       assert.equal(typeof receivedCode, 'string')
+      if (mode === 'interrupt') {
+        await assert.rejects(identity.verifyMagicCode('owner@example.test', receivedCode, { label: 'proof', userAgent: 'proof', ipTruncated: '127.0.0.0/24' }), /injected workspace write failure/)
+        assert.equal(identityRepository.users()[0].bootstrap_provisioning_pending, true)
+        assert.equal(identityRepository.sessions().length, 0)
+        assert.equal(tenancyRepository.workspaces().length, 0)
+        assert.equal(tenancyRepository.memberships().length, 1)
+        expected = { projectId: project.project_id, foreignId: foreign.project_id, directory }
+        await writeFile(join(root, 'expected.json'), JSON.stringify(expected), { mode: 0o600 })
+        return { phase: mode, status: 'PASS', partialProvisioningPersisted: true, sessionIssued: false }
+      }
       const issued = await identity.verifyMagicCode('owner@example.test', receivedCode, { label: 'proof', userAgent: 'proof', ipTruncated: '127.0.0.0/24' })
       authenticated = await identity.authenticate(issued.token)
       assert.deepEqual(scopeOf(authenticated), scopeOf(personal), 'o registro não pode trocar o dono nem o espaço do trabalho')
@@ -98,8 +111,16 @@ async function phase(root, mode) {
       await writeFile(join(root, 'expected.json'), JSON.stringify(expected), { mode: 0o600 })
     } else {
       expected = JSON.parse(await readFile(join(root, 'expected.json'), 'utf8'))
+      if (mode === 'recover') {
+        assert.equal(identityRepository.users()[0].bootstrap_provisioning_pending, true)
+        await identity.requestMagicCode('owner@example.test')
+        const issued = await identity.verifyMagicCode('owner@example.test', receivedCode, { label: 'proof', userAgent: 'proof', ipTruncated: '127.0.0.0/24' })
+        expected.token = issued.token
+        await writeFile(join(root, 'expected.json'), JSON.stringify(expected), { mode: 0o600 })
+      }
       authenticated = await identity.authenticate(expected.token)
     }
+    assert.equal(identityRepository.users()[0].bootstrap_provisioning_pending, undefined)
     assert.equal(identity.personalSession(), undefined, 'acesso anônimo deve terminar após o registro')
     const actor = tenancy.authorizationFor(...scopeOf(authenticated))
     assert.equal(actor.role, 'owner')
@@ -118,13 +139,13 @@ async function phase(root, mode) {
 }
 
 if (process.argv[2] === '--phase') {
-  assert.ok(['write', 'reopen'].includes(process.argv[3])); assert.ok(process.argv[4])
+  assert.ok(['write', 'interrupt', 'recover', 'reopen'].includes(process.argv[3])); assert.ok(process.argv[4])
   console.log(JSON.stringify(await phase(process.argv[4], process.argv[3])))
 } else {
   const root = await mkdtemp(join(tmpdir(), 'frigg-personal-adoption-'))
   try {
     const results = []
-    for (const mode of ['write', 'reopen']) {
+    for (const mode of process.argv.includes('--interrupt-provisioning') ? ['interrupt', 'recover', 'reopen'] : ['write', 'reopen']) {
       const child = spawnSync(process.execPath, [script, '--phase', mode, root], { encoding: 'utf8', timeout: 30_000 })
       assert.equal(child.status, 0, child.stderr || child.error?.message)
       results.push(JSON.parse(child.stdout))
