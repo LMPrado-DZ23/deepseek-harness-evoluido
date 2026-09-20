@@ -178,6 +178,26 @@ test('confirma a instalação sem nunca dizer que está sem internet', async ({ 
   await expect(page.locator('.pwa-install')).toBeHidden()
 })
 
+test('a oferta de instalação pode ser dispensada, e continua dispensada neste aparelho', async ({ context, page }) => {
+  // Medido no Chrome do titular: o botão fixo cobria o protótipo aberto na prévia, sem como tirá-lo.
+  await signIn(context)
+  await page.goto('/studio/')
+  const oferecer = () => page.evaluate(() => {
+    const evento = new Event('beforeinstallprompt', { cancelable: true })
+    Object.assign(evento, { prompt: async () => undefined, userChoice: Promise.resolve({ outcome: 'dismissed' }) })
+    window.dispatchEvent(evento)
+  })
+  await oferecer()
+  await expect(page.locator('.pwa-install')).toBeVisible()
+  await page.getByRole('button', { name: 'Não oferecer mais a instalação neste aparelho' }).click()
+  await expect(page.locator('.pwa-install')).toBeHidden()
+  await expect(page.locator('.pwa-install-dismiss')).toBeHidden()
+  await page.reload()
+  await oferecer()
+  await expect(page.locator('.pwa-install')).toBeHidden()
+  await expect(page.locator('.pwa-install-dismiss')).toBeHidden()
+})
+
 test('mostra notificação local quando a criação termina com a aba em segundo plano', async ({ context, page }) => {
   await signIn(context)
   await context.grantPermissions(['notifications'], { origin })

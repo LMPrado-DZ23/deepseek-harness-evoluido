@@ -1,6 +1,7 @@
 import t from '../i18n/pwa.pt-BR.json'
 import { attachGenerationNotifications, browserNotificationPort, notificationPortFor, type NotificationPort } from './notifications'
 import { SHELL_CLEARED_MESSAGE, SHELL_LOGOUT_MESSAGE, SHELL_SOURCE_ANSWER, SHELL_SOURCE_REQUEST, SW_CACHE_PREFIX, type ShellSource } from './policy'
+import { dispensarInstalacao, instalacaoDispensada, type ArmazenamentoDaOferta } from './instalacao'
 import './pwa.css'
 
 interface BeforeInstallPromptEvent extends Event {
@@ -14,6 +15,7 @@ export interface PwaEnvironment {
   navigator: Navigator
   notifications?: NotificationPort | undefined
   caches?: CacheStorage | undefined
+  storage?: ArmazenamentoDaOferta | undefined
 }
 
 /**
@@ -85,13 +87,18 @@ async function deleteShellCaches(store: CacheStorage | undefined): Promise<void>
   } catch { /* a browser that refuses Cache Storage has nothing saved to forget */ }
 }
 
+/** The device storage, or nothing: reading `localStorage` itself throws when site data is blocked. */
+function armazenamentoDoAparelho(): ArmazenamentoDaOferta | undefined {
+  try { return window.localStorage } catch { return undefined }
+}
+
 /**
  * Registers the service worker (offline shell only), shows an offline banner
  * driven by the browser's online/offline events, offers the install prompt
  * when the browser exposes it, and wires local notifications. Everything is
  * additive: the interface works exactly the same when any of it is missing.
  */
-export function registerStudioPwa(env: PwaEnvironment = { window, document, navigator, notifications: browserNotificationPort() }): () => void {
+export function registerStudioPwa(env: PwaEnvironment = { window, document, navigator, notifications: browserNotificationPort(), storage: armazenamentoDoAparelho() }): () => void {
   const disposers: Array<() => void> = []
   const banner = env.document.createElement('div')
   banner.className = 'pwa-offline-banner'
@@ -141,20 +148,38 @@ export function registerStudioPwa(env: PwaEnvironment = { window, document, navi
   installButton.addEventListener('click', () => {
     if (deferredPrompt === undefined) return
     void deferredPrompt.prompt()
-    void deferredPrompt.userChoice.then(() => { deferredPrompt = undefined; installButton.hidden = true })
+    void deferredPrompt.userChoice.then(() => { deferredPrompt = undefined; installButton.hidden = true; dismissButton.hidden = true })
   })
-  env.document.body.append(installButton)
-  const onBeforeInstall = (event: Event) => { event.preventDefault(); deferredPrompt = event as BeforeInstallPromptEvent; installButton.hidden = false }
+  const dismissButton = env.document.createElement('button')
+  dismissButton.className = 'pwa-install-dismiss'
+  dismissButton.type = 'button'
+  dismissButton.hidden = true
+  dismissButton.textContent = t.install.dismiss
+  dismissButton.setAttribute('aria-label', t.install.dismissLabel)
+  dismissButton.addEventListener('click', () => {
+    dispensarInstalacao(env.storage)
+    installButton.hidden = true
+    dismissButton.hidden = true
+  })
+  env.document.body.append(installButton, dismissButton)
+  const onBeforeInstall = (event: Event) => {
+    event.preventDefault()
+    deferredPrompt = event as BeforeInstallPromptEvent
+    const oferecer = !instalacaoDispensada(env.storage)
+    installButton.hidden = !oferecer
+    dismissButton.hidden = !oferecer
+  }
   const onInstalled = () => {
     deferredPrompt = undefined
     installButton.hidden = true
+    dismissButton.hidden = true
     banner.textContent = t.install.installed
     banner.hidden = false
     env.window.setTimeout(sync, 4_000)
   }
   env.window.addEventListener('beforeinstallprompt', onBeforeInstall)
   env.window.addEventListener('appinstalled', onInstalled)
-  disposers.push(() => { env.window.removeEventListener('beforeinstallprompt', onBeforeInstall); env.window.removeEventListener('appinstalled', onInstalled); installButton.remove() })
+  disposers.push(() => { env.window.removeEventListener('beforeinstallprompt', onBeforeInstall); env.window.removeEventListener('appinstalled', onInstalled); installButton.remove(); dismissButton.remove() })
 
   // The port is bound to whatever is available now; once the worker is ready it is
   // rebound to the registration, which is the only path that works on Android.

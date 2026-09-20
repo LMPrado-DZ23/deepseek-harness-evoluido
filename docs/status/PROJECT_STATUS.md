@@ -33,8 +33,12 @@ revisão 2 (execução `37438b09`, tentativa 2 PASSOU); na prévia nova, três
 cliques → 3 e "Faltam: 7 copos", "Zerar" → 0, "Meta: 10 copos".
 Defeitos vistos: o modelo copia frases da especificação para a tela e uma
 ficou velha ("meta de 8 copos"); o painel embutido do app Claude não recebe o
-READY do iframe (no Chrome funciona). FALTA provar: retomar depois de
-reiniciar.
+READY do iframe (no Chrome funciona). **Retomada medida:** a atualização
+seguinte derrubou e subiu o estúdio; a tarefa voltou com a conversa inteira e
+a prévia abriu "Disponível". Foi o reinício do PROCESSO, não do computador.
+Consertados depois disso: seção vira título curto (SECOES-TITULO-01) e a
+oferta de instalar pode ser dispensada (INSTALAR-DISPENSAR-01).
+FALTA: reinício do computador inteiro; medir SECOES-TITULO-01 numa tarefa nova.
 
 ## A JORNADA PELA MISTRAL — 20/09/2026, madrugada
 

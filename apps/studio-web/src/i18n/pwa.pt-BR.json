@@ -14,6 +14,8 @@
   },
   "install": {
     "prompt": "Instalar o FRIGG neste aparelho",
+    "dismiss": "Agora não",
+    "dismissLabel": "Não oferecer mais a instalação neste aparelho",
     "installed": "O FRIGG foi instalado neste aparelho."
   },
   "notifications": {
