@@ -6,6 +6,7 @@ import {
   EmergencyStopPanel,
   MIN_RESUME_REASON_LENGTH,
   StopOutcome,
+  classeDaParada,
   browserEmergencyStopPort,
   formatMoment,
   isEmergencyStopState,
@@ -196,5 +197,25 @@ describe('a tela conversa com a rota', () => {
       const port = browserEmergencyStopPort(async () => 'csrf-token')
       await expect(port.read()).rejects.toThrow('Não foi possível ler o estado')
     } finally { vi.unstubAllGlobals() }
+  })
+})
+
+describe('a parada cabe junto da conversa, sem nunca esconder uma parada', () => {
+  it('compacta só enquanto funciona e ninguém confirma', () => {
+    expect(classeDaParada(true, running, false)).toBe('emergency-stop emergency-stop-compacto')
+    expect(classeDaParada(false, running, false)).toBe('emergency-stop')
+  })
+
+  it('parada, confirmando ou ainda carregando: o cartão inteiro', () => {
+    expect(classeDaParada(true, stopped, false)).toBe('emergency-stop')
+    expect(classeDaParada(true, running, true)).toBe('emergency-stop')
+    expect(classeDaParada(true, null, false)).toBe('emergency-stop')
+  })
+
+  it('a seção desenhada usa a mesma decisão, e o botão de parar continua lá', () => {
+    const compacta = panel({ compacto: true })
+    expect(compacta).toContain('emergency-stop-compacto')
+    expect(compacta).toContain('emergency-danger')
+    expect(panel({ compacto: true, state: stopped })).not.toContain('emergency-stop-compacto')
   })
 })

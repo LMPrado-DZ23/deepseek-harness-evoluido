@@ -468,6 +468,7 @@ declarada.
 | PREVIA-PESSOAL-01 | A previa abre na instalacao PESSOAL, onde ninguem se cadastrou | 'Ver meu prototipo' do primeiro VERIFIED_PROTOTYPE real respondeu 'A pessoa responsavel pela previa nao foi encontrada' | v1.0 | BETA | plugins/preview/src/index.ts (emailDoDono, EMAIL_DO_DONO_PESSOAL, sessaoAtiva), tests/email-do-dono.spec.ts, tests/sessao-ativa.spec.ts | Segunda recusa, medida em seguida: a admissao (troca do bilhete) conferia so sessoes GRAVADAS e a pessoal e sintetica — "Previa indisponivel". Agora a pessoal vale enquanto a identidade a oferece. A previa exigia o registro do dono para passar o e-mail ao aplicativo; na instalacao pessoal nao ha registro — e o que a faz pessoal. Agora o dono ali e a pessoa do computador, com um endereco local fixo, so enquanto nao ha cadastro. Sabotagens: 4, pegas | execucao: com qualquer pessoa cadastrada a regra volta a exigir o registro; outro ator nao vira dono | NAO medido ainda no computador do titular | abrir a previa |
 | SECOES-TITULO-01 | A especificacao pede as secoes como TITULO curto, e nao como frase que a tela e obrigada a exibir | Na previa real depois de 'Mude a meta para 10 copos por dia.' a tela dizia 'Mostra a meta de 8 copos e quantos faltam.' ao lado de 'Meta: 10 copos' | v1.0 | BETA | plugins/prompt-to-app/src/intake.ts (instrucao spec.sections), i18n prompts.specSecoes, tests/service-intake-planner.spec.ts | Causa medida no computador do titular: cada item de pages[].sections vira texto EXIGIDO na tela (acceptance.ts, conferencia section:); a Mistral escreveu descricoes com numeros; a alteracao entra como criterio novo e nao reescreve a secao; o e2e entao exigia a frase velha. Agora a sintese recebe, como INSTRUCAO (nao cai por falta de espaco), que secao e titulo de uma a quatro palavras, sem numero que possa mudar. Sabotagens: 2 (tirar a instrucao; trocar o texto da regra), pegas | a conferencia section: continua exigindo o texto exato | Regra de prompt: o modelo pode desobedecer, e nada recusa uma secao longa (apertar o esquema invalidaria especificacoes ja gravadas, que a revisao revalida); especificacoes antigas continuam com frases; NAO medido ainda com modelo real | medir numa tarefa nova |
 | INSTALAR-DISPENSAR-01 | A oferta 'Instalar o FRIGG neste aparelho' pode ser dispensada e continua dispensada no aparelho | No Chrome do titular o botao fixo no canto cobria o prototipo aberto na previa, sem como tira-lo | v1.0 | BETA | apps/studio-web/src/pwa/instalacao.ts (+ spec), src/pwa/register.ts (botao 'Agora nao'), src/pwa/pwa.css, i18n pwa.pt-BR.json, tests/pwa.spec.ts | Botao 'Agora nao' ao lado da oferta; a recusa fica gravada no aparelho e a oferta nao volta depois de recarregar (e2e com o evento beforeinstallprompt). Armazenamento recusado nao quebra nem inventa recusa. Sabotagens: 4 (ignorar a recusa; nao grava-la; aceitar qualquer valor; o botao de instalar ficar), pegas | execucao: a oferta ainda aparece para quem nunca recusou | MEDIDO no Chrome do titular depois da instalacao de dec2701: 'Agora nao' escondeu a oferta e ela continuou escondida depois de recarregar (a marca foi apagada em seguida, para a escolha ficar com o titular). A oferta continua fixa no canto ate ser dispensada | ver com uma pessoa leiga (EB-02) se "Agora nao" e entendido |
+| TELA-BAIXA-01 | Numa tela baixa a conversa continua legivel, o compositor nao sai da tela e a parada de emergencia continua ao alcance | O titular abriu a tarefa no Chrome dele e achou a tela 'desproporcional': notebook com escala de 150%, 1280x495 uteis, e a conversa ficava com 32px | v1.0 | BETA | apps/studio-web/src/EmergencyStop.tsx (classeDaParada, prop compacto), src/App.tsx, src/styles.css, src/tarefa/tarefa.css, src/shell/shell.css, tests/overflow.spec.ts, src/EmergencyStop.spec.tsx | Medido no Chrome do titular: botoes de acao, o cartao inteiro da parada e o compositor (caixa de 116px herdada da home) ficavam fixos abaixo da conversa. Agora: na tarefa a parada e uma linha enquanto nada esta parado (parada, confirmando ou carregando ela volta inteira); a conversa tem altura minima; a coluna rola e o compositor fica preso embaixo; o compositor da tarefa comeca com duas linhas; o trilho perdeu a barra horizontal. e2e em 1280x495: conversa >= 150px, compositor dentro da tela, e o botao de parar alcancavel pela RODA do mouse e sem nada por cima. Sabotagens: 6; 5 pegas; a caixa alta (116px) sobrevive DECLARADA, porque com a coluna rolando ela nao esconde nada | execucao: parada nunca encolhe | NAO medido ainda no Chrome do titular depois da instalacao; a home nao foi revista nessa altura | medir no Chrome do titular |
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
@@ -476,16 +477,16 @@ declarada.
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 244 |
+| `BETA` | 245 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 4 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 354.**
+**Total de requisitos rastreados: 355.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 318 |
+| v1.0 | 319 |
 | v1.x | 33 |
 | v2 | 3 |

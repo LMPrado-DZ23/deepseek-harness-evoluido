@@ -41,3 +41,58 @@ test('nenhuma tela do fluxo rola para os lados', async ({ context, page }) => {
   await expect(page.getByRole('heading', { name: 'Ajuda do FRIGG' })).toBeVisible()
   await overflow('ajuda')
 })
+
+/**
+ * A conversa não pode ser espremida para fora da tela.
+ *
+ * Medido em 20/09/2026 no Chrome do titular: notebook com escala de 150%,
+ * 1280×495 de área útil. As ações, o cartão da parada de emergência e o
+ * compositor ficavam fixos abaixo da conversa, e ela ficava com 32px.
+ */
+test.describe('tela baixa', () => {
+// O worker da casca responderia antes da rota simulada: aqui ele fica de fora.
+test.use({ serviceWorkers: 'block' })
+
+test('numa tela baixa a conversa continua legível', async ({ context, page }) => {
+  await page.setViewportSize({ width: 1280, height: 495 })
+  await context.addCookies([
+    { name: 'dz23_studio_session', value: 'e2e', url: origin },
+    { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+  ])
+  await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+  // O servidor de e2e não monta a parada; aqui ela responde "funcionando",
+  // que é o estado de todo dia — e o único em que o cartão encolhe.
+  await page.route('**/api/studio/apps/emergency-stop', rota => rota.fulfill({ json: { emergency_stop: {
+    stopped: false, engaged_by: null, engaged_at: null, reason: null, released_by: null, released_at: null, release_reason: null,
+  } } }))
+  await page.goto('/studio/')
+  await page.getByRole('button', { name: 'Página de apresentação' }).click()
+  await page.getByRole('button', { name: 'Continuar' }).click()
+  const conversa = page.getByLabel('Conversa desta tarefa')
+  await expect(conversa).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.emergency-stop')).toBeVisible()
+  const altura = await conversa.evaluate(elemento => elemento.getBoundingClientRect().height)
+  expect(altura, `a conversa ficou com ${Math.round(altura)}px`).toBeGreaterThanOrEqual(150)
+  // O compositor nunca sai da tela: é por ele que a pessoa continua.
+  const compositor = await page.locator('#dz-continuar').evaluate(elemento => {
+    const caixa = elemento.getBoundingClientRect()
+    return { topo: caixa.top, base: caixa.bottom, tela: window.innerHeight }
+  })
+  expect(compositor.base, 'o compositor saiu da tela').toBeLessThanOrEqual(compositor.tela)
+  expect(compositor.topo).toBeGreaterThan(0)
+  // O botão de parar continua ao alcance, na versão de uma linha.
+  // Rolando com a RODA do mouse, como a pessoa faz — rolar por código passaria
+  // mesmo numa coluna que não rola.
+  const parar = page.locator('.emergency-stop-compacto .emergency-danger')
+  const caixa = (await page.locator('.dz-compositor-inferior').boundingBox())!
+  await page.mouse.move(caixa.x + caixa.width / 2, caixa.y + 10)
+  await page.mouse.wheel(0, 2_000)
+  await expect(parar).toBeInViewport()
+  // Estar na tela não basta: o compositor preso embaixo pode estar POR CIMA.
+  await expect.poll(() => parar.evaluate(botao => {
+    const caixa = botao.getBoundingClientRect()
+    const noPonto = document.elementFromPoint(caixa.left + caixa.width / 2, caixa.top + caixa.height / 2)
+    return noPonto !== null && botao.contains(noPonto)
+  })).toBe(true)
+})
+})

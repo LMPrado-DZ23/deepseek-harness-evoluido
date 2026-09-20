@@ -31,8 +31,13 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* A conversa rola; o compositor não sai da tela. */
-  overflow: hidden;
+  /*
+    A conversa rola por dentro. Numa tela BAIXA (notebook com escala de 150%:
+    495px úteis) conversa + ações + compositor não cabem juntos; aí a coluna
+    inteira rola e o compositor fica preso embaixo — nada é cortado.
+  */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /*
@@ -57,7 +62,9 @@
 
 .dz-conversa {
   flex: 1 1 auto;
-  min-height: 0;
+  /* A conversa nunca some: numa tela baixa (notebook com escala de 150%)
+     ela chegou a ficar com 32px, espremida pelas ações e pelo compositor. */
+  min-height: min(12rem, 38vh);
   overflow-y: auto;
   list-style: none;
   margin: 0;
@@ -220,6 +227,9 @@
 /* O compositor inferior. Reserva espaço real; nunca cobre o último lance. */
 .dz-compositor-inferior {
   flex: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   margin: 0 auto;
   padding: var(--dz-3) var(--dz-5) var(--dz-5);
 }
@@ -819,4 +829,21 @@
   overflow: auto;
   max-height: 24rem;
   font-size: 0.8125rem;
+}
+
+/* As ações ocupam o que precisam: com a parada em uma linha, elas cabem. */
+.dz-tarefa-acoes { flex: none; }
+
+/*
+  O compositor da TAREFA começa com duas linhas. O da home herdava 116px de
+  altura mínima (home.css), e numa tela baixa essa caixa vazia tomava o lugar
+  da conversa. Ele cresce com o texto até um terço da tela.
+*/
+.dz-compositor-inferior textarea {
+  /* Sabotar para 116px SOBREVIVE de propósito: com a coluna rolando, uma
+     caixa mais alta não esconde nada — só desperdiça espaço. É gosto, não
+     defeito que um teste deva prender. */
+  min-height: 3.2em;
+  max-height: 33vh;
+  field-sizing: content;
 }

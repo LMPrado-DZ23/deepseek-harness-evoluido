@@ -140,6 +140,25 @@ export interface EmergencyStopPanelProps {
   readonly onResumeReason: (value: string) => void
   readonly onEngage: () => void
   readonly onRelease: () => void
+  /** Uma linha só enquanto nada está parado — para caber junto da conversa. */
+  readonly compacto?: boolean | undefined
+}
+
+/**
+ * A classe da seção. Compacta SÓ enquanto o FRIGG funciona e ninguém está
+ * confirmando: parado, a tela precisa mostrar quem parou, por quê e como
+ * voltar, e isso nunca encolhe.
+ *
+ * Medido em 20/09/2026 no computador do titular (tela de 1280×672 com escala
+ * de 150%): o cartão inteiro, fixo abaixo da conversa, deixava para a conversa
+ * 32 pixels de altura.
+ * @param compacto - se o lugar pede a versão de uma linha.
+ * @param state - o estado lido, ou nada enquanto carrega.
+ * @param confirming - se a pessoa está confirmando a parada.
+ * @returns as classes da seção.
+ */
+export function classeDaParada(compacto: boolean, state: EmergencyStopState | null, confirming: boolean): string {
+  return compacto && state !== null && !state.stopped && !confirming ? 'emergency-stop emergency-stop-compacto' : 'emergency-stop'
 }
 
 /**
@@ -150,7 +169,7 @@ export interface EmergencyStopPanelProps {
  */
 export function EmergencyStopPanel(props: EmergencyStopPanelProps) {
   const { state, busy } = props
-  return <section className="emergency-stop" aria-labelledby="emergency-title">
+  return <section className={classeDaParada(props.compacto === true, state, props.confirming)} aria-labelledby="emergency-title">
     <h2 id="emergency-title"><OctagonX aria-hidden="true" />{t.emergency.title}</h2>
     {state === null
       ? <p className="context-note" role="status">{props.error === '' ? t.emergency.loading : props.error}</p>
@@ -233,7 +252,7 @@ function StoppedView(props: EmergencyStopPanelProps & { readonly state: Emergenc
  * @param props - o acesso à rota.
  * @returns a seção da tela.
  */
-export function EmergencyStop({ port }: { readonly port: EmergencyStopPort }) {
+export function EmergencyStop({ port, compacto }: { readonly port: EmergencyStopPort; readonly compacto?: boolean }) {
   const [state, setState] = useState<EmergencyStopState | null>(null)
   const [surfaces, setSurfaces] = useState<readonly StopSurfaceOutcome[]>([])
   const [confirming, setConfirming] = useState(false)
@@ -287,5 +306,6 @@ export function EmergencyStop({ port }: { readonly port: EmergencyStopPort }) {
     onCancelConfirm={() => { setConfirming(false) }}
     onReason={setReason} onResumeReason={setResumeReason}
     onEngage={() => { void engage() }} onRelease={() => { void release() }}
+    compacto={compacto}
   />
 }

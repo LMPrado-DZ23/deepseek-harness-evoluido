@@ -29,6 +29,9 @@
     a especificação avisa: "conta/controles não são sobrepostos pela lista".
   */
   overflow-y: auto;
+  /* Só vertical: com `overflow-y` o navegador faz o x virar `auto` também, e
+     aparecia uma barra horizontal embaixo do trilho. */
+  overflow-x: hidden;
   position: sticky;
   top: 0;
   height: 100vh;

@@ -858,8 +858,9 @@ export function App() {
     </div>
     {error === '' ? null : <p className="error" role="alert">{error}</p>}
     {/* O botão de emergência fica VISÍVEL o tempo todo, e não escondido em
-        configurações: quem precisa dele está com pressa. */}
-    <EmergencyStop port={emergencyPort} />
+        configurações: quem precisa dele está com pressa. Na tarefa ele é uma
+        linha só enquanto nada está parado: a conversa precisa do espaço. */}
+    <EmergencyStop port={emergencyPort} compacto />
   </>
 
   /*
