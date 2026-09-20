@@ -500,21 +500,23 @@ declarada.
 
 | AUDIT-REVISION-RECOVERY-01 | Revisao retoma especificacao, estado e trilha sem repetir ou desfazer progresso posterior | Auditoria de recuperacao, 20/09/2026 | v1.0 | BETA | plugins/prompt-to-app/src/service.ts, src/model.ts, src/http.ts, tests/identidade-do-envio.spec.ts, tests/http.spec.ts, scripts/prove-plan-replay.mjs | Tres regressoes reproduzidas; 1.429 testes; oito mutacoes; tres pontos de falha reabertos em JSON real; 32 portoes PASS | execucao: marcador duravel antes da especificacao, auditoria deterministica e limpeza por ultimo; serializacao de estado/especificacao; maior versao + 1; planejamento pendente recusado antes do modelo | Uma instancia, sem CAS; binario antigo recusa marcador pendente; legado incompleto sem trilha recusa sem inferir; chave de revisao ainda em memoria no cliente; sem modelo/PC real | persistir intencao de revisao no cliente e orientar retomada na tela |
 
+| AUDIT-COMPOSER-RETRY-01 | Compositor preserva rascunho e identidade quando envio ou releitura falham | Auditoria da conversa, 20/09/2026 | v1.0 | BETA | apps/studio-web/src/App.tsx, src/tarefa/TaskScreen.tsx, tests/composer-retry.spec.ts | Tres perdas reproduzidas; tres casos de navegador e quatro mutacoes detectadas | execucao: sucesso explicito antes de limpar; chave mantida ate releitura; resposta antiga preserva texto digitado durante envio | Rascunho ainda em memoria; navegador focado cobre questionario, demais rotas usam mesmo contrato; navegacao concorrente e reabertura dos demais envios ainda pendentes | persistir revisao e orientar retomada no cliente |
+
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 260 |
+| `BETA` | 261 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
 | `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 371.**
+**Total de requisitos rastreados: 372.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 334 |
+| v1.0 | 335 |
 | v1.x | 34 |
 | v2 | 3 |

@@ -18,6 +18,16 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Compositor e continuidade — VALIDADO LOCALMENTE, 20/09/2026
+
+Tres perdas de texto reproduzidas e corrigidas: envio falho, releitura falha
+e novo texto digitado enquanto a resposta chegava. Quatro mutacoes detectadas.
+Interface: 1.100 PASS. Navegador em copia isolada: 178 PASS/3 SKIP/0 FAIL.
+32 portoes PASS; raiz 4.487 PASS/174 FAIL/68 SKIP, sem falhas novas.
+Proxima frente iniciada: chave duravel da revisao e orientacao de retomada.
+Ultimo checkpoint remoto: `ecd47927aefbf86c2b9d2bce9fae5204446e4e9b`.
+CI 35525657270: Linux e Windows falharam sem etapas/logs; causa nao confirmada.
+
 ## Recuperacao da revisao — VALIDADA LOCALMENTE, 20/09/2026
 
 AUDIT-REVISION-RECOVERY-01 reproduziu especificacao salva com estado antigo,

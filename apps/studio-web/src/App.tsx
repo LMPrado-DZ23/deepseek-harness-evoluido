@@ -288,9 +288,9 @@ export function App() {
   async function safely(action: () => Promise<void>, call: ApiCallKind = 'mutation') {
     await safelyWithResult(action, call)
   }
-  async function safelyWithResult(action: () => Promise<void>, call: ApiCallKind = 'mutation'): Promise<boolean> {
+  async function safelyWithResult(action: () => Promise<void | boolean>, call: ApiCallKind = 'mutation'): Promise<boolean> {
     setError('')
-    try { await action(); return true } catch (cause) {
+    try { return (await action()) !== false } catch (cause) {
       setError(apiFailureText(cause, navigator.onLine, call, t.health.attention))
       return false
     }
@@ -376,7 +376,7 @@ export function App() {
    * resposta vazia, e não esta tela.
    */
   async function submitAnswer(recommend: boolean, confirmSensitive?: boolean, texto?: string) {
-    if (projectId === null) return
+    if (projectId === null) return false
     /*
       A impressão local carrega o que a PESSOA mandou, e não a pergunta aberta:
       o servidor calcula a pergunta a partir do que já foi respondido, então o
@@ -390,15 +390,15 @@ export function App() {
     const material = [recommend ? '@recomendado' : (texto ?? ''), String(confirmSensitive ?? '')].join('|')
     const envio = intencaoPorImpressao(intencaoDaResposta.current, impressaoDoEnvioLocal('resposta', projectId, material))
     intencaoDaResposta.current = envio
-    await safely(async () => {
+    return safelyWithResult(async () => {
       const response = await api<{ next?: Question | null; spec?: unknown; blocked?: boolean; message?: string }>(`/projects/${projectId}/intake/answer`, {
         method: 'POST', body: JSON.stringify({ answer: texto ?? '', recommend, request_key: envio.chave, ...(confirmSensitive === undefined ? {} : { confirm_sensitive: confirmSensitive }) }),
       })
-      intencaoDaResposta.current = null
-      if (response.blocked === true) { setError(response.message ?? t.health.attention); return }
+      if (response.blocked === true) { setError(response.message ?? t.health.attention); return false }
       setQuestion(response.next ?? null)
       if (response.next == null) setProjectState('SPEC_READY')
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      if (intencaoDaResposta.current?.chave === envio.chave) intencaoDaResposta.current = null
     })
   }
   /**
@@ -411,15 +411,17 @@ export function App() {
    * diz, e de nada mais.
    */
   async function refreshDetalhes(id: string | null = projectId) {
-    if (id === null) return
+    if (id === null) return false
     try {
       const lido = await api<ProjectDetails>(`/projects/${id}`)
       setDetalhes(lido)
       setProjectState(lido.project.state)
       setPlan(lido.plan ?? null)
       setQuestion(lido.next ?? null)
+      return true
     } catch (cause) {
       setError(apiFailureText(cause, navigator.onLine, 'read', t.health.attention))
+      return false
     }
   }
   /**
@@ -431,16 +433,16 @@ export function App() {
    * isso que o aceite VIS-03 confere.
    */
   async function ajustar(texto: string) {
-    if (projectId === null) return
+    if (projectId === null) return false
     const envio = intencaoPorImpressao(intencaoDaRevisao.current, impressaoDoEnvioLocal('revisao', projectId, texto))
     intencaoDaRevisao.current = envio
-    await safely(async () => {
+    return safelyWithResult(async () => {
       await api(`/projects/${projectId}/revise`, {
         method: 'POST', body: JSON.stringify({ request: texto, request_key: envio.chave }),
       })
-      intencaoDaRevisao.current = null
       setResult(null); setRunReport(null); setCheckpoints(null)
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      if (intencaoDaRevisao.current?.chave === envio.chave) intencaoDaRevisao.current = null
     })
   }
   /**
@@ -453,17 +455,17 @@ export function App() {
    * @param texto - a pergunta, como a pessoa escreveu.
    */
   async function perguntar(texto: string) {
-    if (projectId === null) return
+    if (projectId === null) return false
     const envio = intencaoPorImpressao(intencaoDaPergunta.current, impressaoDoEnvioLocal('pergunta', projectId, texto))
     intencaoDaPergunta.current = envio
-    await safely(async () => {
+    return safelyWithResult(async () => {
       await api(`/projects/${projectId}/ask`, {
         method: 'POST', body: JSON.stringify({ question: texto, request_key: envio.chave }),
       })
       // A mensagem existe: a intenção terminou. A próxima pergunta leva chave
       // nova — senão a segunda seria recusada por conflito com a primeira.
-      intencaoDaPergunta.current = null
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      if (intencaoDaPergunta.current?.chave === envio.chave) intencaoDaPergunta.current = null
     })
   }
   /**
@@ -476,28 +478,28 @@ export function App() {
    * @param texto - a resposta nova.
    */
   async function corrigirResposta(perguntaId: string, texto: string) {
-    if (projectId === null) return
+    if (projectId === null) return false
     const material = ['correcao', perguntaId, texto.trim()].join('|')
     const envio = intencaoPorImpressao(intencaoDaResposta.current, impressaoDoEnvioLocal('resposta', projectId, material))
     intencaoDaResposta.current = envio
-    await safely(async () => {
+    return safelyWithResult(async () => {
       await api(`/projects/${projectId}/intake/correct`, {
         method: 'POST', body: JSON.stringify({ question_id: perguntaId, answer: texto.trim(), request_key: envio.chave }),
       })
-      intencaoDaResposta.current = null
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      if (intencaoDaResposta.current?.chave === envio.chave) intencaoDaResposta.current = null
     })
   }
   /** Pede mudança no plano proposto, com o texto do compositor. */
   async function mudarPlanoPelaConversa(texto: string) {
-    if (projectId === null) return
+    if (projectId === null) return false
     const envio = intencaoPorImpressao(intencaoDaMudanca.current, impressaoDoEnvioLocal('mudanca', projectId, texto.trim()))
     intencaoDaMudanca.current = envio
-    await safely(async () => {
+    return safelyWithResult(async () => {
       await api(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: texto.trim(), request_key: envio.chave }) })
-      intencaoDaMudanca.current = null
       setPlan(null)
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      if (intencaoDaMudanca.current?.chave === envio.chave) intencaoDaMudanca.current = null
     })
   }
   async function preparePlan() {
@@ -965,7 +967,7 @@ export function App() {
  * `button-row` trazem junto a moldura azul-marinho e o título gigante da tela
  * que saiu — reusá-las repintaria o wizard em vez de trocá-lo.
  */
-function AcoesDaPergunta({ question, submit }: { question: Question; submit(recommend: boolean, confirm?: boolean): Promise<void> }) {
+function AcoesDaPergunta({ question, submit }: { question: Question; submit(recommend: boolean, confirm?: boolean): Promise<unknown> }) {
   if (question.id === 'sensitive-confirmation') {
     return <div className="dz-acao">
       <PendingButton className="dz-acao-botao" label={t.questions.confirm} busyLabel={t.questions.confirmBusy} action={() => submit(false, true)} />
@@ -990,7 +992,7 @@ function AcoesDaPergunta({ question, submit }: { question: Question; submit(reco
  * a conversa, onde a tentativa em curso é contada. Desenhá-las nos dois
  * lugares punha a mesma informação duas vezes na tela.
  */
-function Action({ title, detail, button, busyButton, action }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<void> }) {
+function Action({ title, detail, button, busyButton, action }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<unknown> }) {
   return <div className="dz-acao">
     <div className="dz-acao-texto"><strong>{title}</strong><span>{detail}</span></div>
     {button === undefined || action === undefined ? null : <PendingButton className="dz-acao-botao" label={button} busyLabel={busyButton ?? button} action={action} />}

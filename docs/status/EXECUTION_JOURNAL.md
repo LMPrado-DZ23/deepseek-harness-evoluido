@@ -224,3 +224,22 @@ Oito mutacoes detectadas: remover mutex sobreviveu ao teste inicial; uma
 barreira na primeira escrita tornou a corrida deterministica e detectou a
 mutacao. 1.429 testes, 32 portoes e JSON real com tres pontos de falha passaram.
 Raiz: 4.487 PASS/174 FAIL/68 SKIP, sem falhas novas. Cliente ainda em memoria.
+
+
+## 2026-09-20 — AUDIT-COMPOSER-RETRY-01
+
+**Acao.** Reproduzidas tres perdas do rascunho: POST falho, POST gravado com
+GET posterior falho e texto novo digitado enquanto o envio anterior chega.
+O compositor agora exige sucesso explicito e conserva texto alterado durante
+a espera; cinco callbacks retornam confirmacao e conservam chave ate releitura.
+
+**Prova.** Tres casos focados passaram; quatro mutacoes falharam nas assercoes
+de texto/chave, com builds validos. Interface: 1.100 PASS; 32 portoes PASS.
+Raiz Node 22: 4.487 PASS/174 FAIL/68 SKIP, mesmos nomes de falha da base anterior.
+PostgreSQL: NOT_EXECUTED, sem servidor e Docker ENOENT. Navegador completo
+registrado em audit/evidence/20260920/composer-retry-verification.json.
+
+**Limite e proximo passo.** Rascunho em memoria, sem prova de navegacao
+concorrente ou instalacao nativa. Regressao da chave de revisao apos fechar
+a aba ja escrita; AUDIT-REVISION-CLIENT-01 iniciada, nao entregue neste checkpoint.
+CI 35525657270 falhou sem etapas/logs; DESKTOP-PRADO offline em 17:41 UTC.
