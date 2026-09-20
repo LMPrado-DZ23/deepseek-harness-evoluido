@@ -12,6 +12,18 @@ avaliação/observabilidade · **P4** polimento.
 
 ## Ordem escolhida, e por quê
 
+Atualização da auditoria de 20/09/2026 (base `997fa20`):
+
+| ID | P | tarefa | depende de | estado |
+| --- | --- | --- | --- | --- |
+| AUDIT-OCI-01 | P0 | Verificação real de digest no CLI e temporários isolados | — | REVIEW — correção e testes locais; repetir CI/registro real |
+| AUDIT-FILES-01 | P0 | Impedir perda concorrente e desvios por links na pasta de trabalho | — | REVIEW — regressões com filesystem real; validação global limitada pelo ambiente |
+| AUDIT-MOBILE-01 | P2 | Manter campo e envio acessíveis em telas móveis estreitas | — | REVIEW — 8 testes Chromium; aparelhos reais pendentes |
+| BENCHMARK-JOURNEYS-01 | P3 | Executar protocolo pareado por jornada e plataforma | AUDIT-OCI-01, AUDIT-FILES-01 | PENDING — protocolo escrito, comparação externa não executada |
+
+Evidências e limites: `audit/FRIGG-AUDIT-20260920.md`. Estas entradas não
+reabrem decisões do produto nem substituem o livro mestre.
+
 A missão pede catorze motores. Construí-los na ordem em que aparecem no texto
 seria errado: **Context Engine e Memory Engine são a fundação de todos os
 outros** — um Spec Engine sem contexto governado produz especificação a partir

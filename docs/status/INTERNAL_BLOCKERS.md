@@ -7,7 +7,18 @@ trabalhar nele é a forma mais comum de esconder trabalho.
 
 Meta: `CRITICAL = 0` e `HIGH = 0`.
 
-Estado em 17/09/2026: **CRITICAL = 0, HIGH = 0.**
+Estado histórico em 17/09/2026: **CRITICAL = 0, HIGH = 0.** Não é certificação
+da árvore atual. A auditoria de 20/09 encontrou novos achados abaixo.
+
+## Achados da auditoria de 20/09/2026
+
+| ID | severidade | causa e evidência | estado |
+| --- | --- | --- | --- |
+| AUDIT-OCI-01 | HIGH | CLI de download calculava, mas não comparava, o digest de camadas e configuração. Reprodução anunciou sucesso com conteúdo adulterado | CORREÇÃO CANDIDATA — ver audit/FRIGG-AUDIT-20260920.md |
+| AUDIT-FILES-01 | HIGH | 20 uploads concorrentes deixaram dois arquivos; um link em enviados redirecionou gravação para fora; download reabria caminho após validá-lo | CORREÇÃO CANDIDATA — testes reais de filesystem; paridade nativa fora de Linux/WSL pendente |
+
+A aprovação completa depende das quatro suítes e das limitações nomeadas no
+relatório. Não reduzir os achados a zero apenas por existirem alterações.
 
 ## Abertos
 

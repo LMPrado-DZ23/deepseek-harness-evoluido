@@ -4,6 +4,22 @@ Cada item aqui precisa provar que **o trabalho interno já foi até onde dava**.
 "OAuth bloqueado porque não tenho credencial" quando o callback nem existe não é
 blocker externo: é trabalho interno pendente com nome errado.
 
+## Ambiente da auditoria de 20/09/2026
+
+`EB-AUDIT-ENV-01` — **BLOCKED_BY_EXTERNAL_DEPENDENCY nesta sessão**, não
+bloqueio universal do produto: Docker/PostgreSQL ausentes (`NOT_EXECUTED`);
+sockets Unix e montagens restritos; overlayfs e permissões de `/workspace`
+recusados pelas guardas existentes. Código, build, gates e regressões focadas
+foram executados; nenhuma guarda foi desativada. Repetir as suítes em ambiente
+suportado com Node 22.23.1, filesystem local e banco real. As 173 falhas da
+suíte da raiz não foram todas individualmente atribuídas ao ambiente.
+Detalhes e próximos passos: `audit/FRIGG-AUDIT-20260920.md`.
+
+A API autenticada do GitHub está acessível nesta auditoria. Os registros de
+acesso abaixo pertencem às sessões datadas que descrevem.
+
+## Registros anteriores
+
 | ID | o que está bloqueado | evidência do bloqueio | trabalho interno já feito | ação humana mínima |
 | --- | --- | --- | --- | --- |
 | ~~EB-01~~ | ~~Push, PR e leitura da API do GitHub~~ | **RESOLVIDO em 12/09/2026.** A API do GitHub continua 403 para esta sessão (`add_repo` não existe aqui), mas o `desktop-commander` instalado na máquina do Prado EXECUTA comandos nela, e o `gh`/`git` de lá têm escrita (`"push": true`). Push provado: `4968cca..c7c6952 integ -> integ`, com `rev-parse` local conferido contra `ls-remote` | O bloqueio era meu, não do repositório: eu havia testado três caminhos (API, credential helper, shell da ponte — este último quebrado pela atualização do Windows de 08/09) e parado antes de procurar o quarto | Nenhuma. O envio passou a ser feito pela sessão, e o bundle vira redundância e não via única |

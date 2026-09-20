@@ -502,6 +502,11 @@
 /* O compositor da tarefa usa a MESMA pílula da home: um só compositor visual. */
 .dz-compositor-inferior {
   border: 1px solid var(--dz-border);
+  /* A coluna implícita do grid herdado da home usava o mínimo intrínseco
+     do textarea. Em 320/390px isso cortava o campo e o envio, mesmo sem
+     rolagem horizontal no documento. O conteúdo deve caber na coluna real. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   border-radius: var(--dz-radius-lg);
   background: var(--dz-surface);
   padding: var(--dz-3) var(--dz-4);
@@ -510,6 +515,7 @@
 
 .dz-compositor-inferior textarea {
   background: none;
+  min-width: 0;
   border: none;
   border-radius: 0;
   padding: 0;

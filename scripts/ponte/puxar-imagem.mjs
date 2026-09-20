@@ -19,8 +19,8 @@
  */
 import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
@@ -90,7 +90,7 @@ export function conferirBytes(digest, bytes) {
  */
 export async function gravarBlobConferido(blobs, digest, bytes) {
   conferirBytes(digest, bytes)
-  await writeFile(join(blobs, hexDoDigest(digest)), bytes)
+  await gravarConferido([bytes], join(blobs, hexDoDigest(digest)), digest)
 }
 
 /**
@@ -102,14 +102,22 @@ export async function gravarBlobConferido(blobs, digest, bytes) {
  * @param {string} digest - o digest esperado.
  */
 export async function gravarConferido(corpo, destino, digest) {
+  hexDoDigest(digest)
   const hash = createHash('sha256')
-  const parcial = `${destino}.parcial`
-  const fluxo = Readable.from(corpo)
-  fluxo.on('data', pedaco => hash.update(pedaco))
-  await pipeline(fluxo, createWriteStream(parcial))
-  const obtido = `sha256:${hash.digest('hex')}`
-  if (obtido !== digest) { await rm(parcial, { force: true }); throw new Error(`camada ${digest} veio como ${obtido}`) }
-  await rename(parcial, destino)
+  // Diretório exclusivo no mesmo volume: downloads concorrentes não dividem
+  // um .parcial, e a promoção por rename só ocorre depois da conferência.
+  const temporario = await mkdtemp(join(dirname(destino), `.${basename(destino)}-`))
+  const parcial = join(temporario, 'conteudo')
+  try {
+    const fluxo = Readable.from(corpo)
+    fluxo.on('data', pedaco => hash.update(pedaco))
+    await pipeline(fluxo, createWriteStream(parcial, { flags: 'wx', mode: 0o600 }))
+    const obtido = `sha256:${hash.digest('hex')}`
+    if (obtido !== digest) throw new Error(`camada ${digest} veio como ${obtido}`)
+    await rename(parcial, destino)
+  } finally {
+    await rm(temporario, { recursive: true, force: true })
+  }
 }
 
 async function principal([registro, repositorio, digestPedido, pasta, plataforma = 'linux/amd64']) {
@@ -144,14 +152,7 @@ async function principal([registro, repositorio, digestPedido, pasta, plataforma
     const existente = await stat(destino).catch(() => undefined)
     if (existente?.size === tamanhoEsperado && digestDe(await readFile(destino)) === digest) return 'ja-estava'
     const resposta = await pedir(`${base}/blobs/${digest}`, '*/*')
-    const hash = createHash('sha256')
-    const parcial = `${destino}.parcial`
-    const corpo = Readable.fromWeb(resposta.body)
-    corpo.on('data', pedaco => hash.update(pedaco))
-    await pipeline(corpo, createWriteStream(parcial))
-    const obtido = `sha256:${hash.digest('hex')}`
-    
-    await rename(parcial, destino)
+    await gravarConferido(Readable.fromWeb(resposta.body), destino, digest)
     return 'baixada'
   }
   const topo = await manifestoBruto(digestPedido)

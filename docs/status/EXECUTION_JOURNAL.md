@@ -71,3 +71,26 @@ divergências, zero mais frouxas. E compilou o código gerado de verdade, com
 **Próximo passo.** T-06 (`trace_id`) só começa com um produtor real: metade dele
 — schema e resolver sem quem preencha — seria exatamente a API morta que
 removi hoje de manhã.
+
+
+## 2026-09-20 — auditoria independente Codex, base GitHub 997fa20
+
+**Ação.** Confirmado o HEAD de `integ` pela API; ZIP conferido por SHA-256 e
+6.167 blobs comparados com a árvore remota. Checkout shallow reconstruído com
+OID exato; pin upstream preservado. Corrigidos digest não comparado no CLI,
+perda em uploads concorrentes, caminhos de arquivos sujeitos a links e
+compositor cortado em telas de 320/390 px. Launcher de gates/E2E passa pelo
+loader Node, mantendo os mesmos scripts.
+
+**Evidência.** Relatório `audit/FRIGG-AUDIT-20260920.md`, capturas antes/depois,
+regressões reais de filesystem e CLI, quatro mutações detectadas. 32 gates,
+build e testes focados aprovados; 173 falhas na suíte da raiz e PostgreSQL
+não executado impedem declaração de aprovação global. O relatório concentra
+os resultados finais e as limitações, inclusive navegador e Node diferente
+do fixado para entrega.
+
+**Decisão e próximo passo.** Entregar correções candidatas para revisão em PR
+com destino `integ`; repetir CI e dependências reais antes de promover. O
+protocolo `docs/plans/FRIGG-JOURNEY-BENCHMARKS.md` separa doze jornadas e onze
+dimensões; comparação externa permanece `NOT_EXECUTED`. Não declarar vantagem
+sobre Manus, paridade nativa nem auditoria de segurança exaustiva.

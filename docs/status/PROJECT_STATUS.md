@@ -18,6 +18,23 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-20
 
+## Auditoria adicional em 20/09/2026 — base GitHub `997fa20`
+
+Correções candidatas `AUDIT-OCI-01` e `AUDIT-FILES-01`: o CLI baixava blobs sem
+comparar o digest calculado; uploads simultâneos sobrescreviam arquivos; links
+na pasta de trabalho podiam redirecionar operações. Testes e limites estão em
+`audit/FRIGG-AUDIT-20260920.md`. O upstream permanece no pin original.
+`AUDIT-MOBILE-01` corrige o campo e envio cortados em 320/390 px; oito testes
+de overflow e envio passaram. A suíte geral da raiz teve 173 falhas e o banco
+não pôde ser executado; não há certificação global de aprovação.
+
+O README e a orientação ativa em `CLAUDE.md` foram reconciliados com a jornada
+real já registrada abaixo; essa jornada não foi repetida nesta auditoria.
+O protocolo em `docs/plans/FRIGG-JOURNEY-BENCHMARKS.md` define a comparação,
+mas não há resultado comparativo nem declaração de superioridade.
+
+Os registros cronológicos seguintes são preservados como histórico.
+
 ## PRIMEIRO APLICATIVO DE MODELO REAL APROVADO — 20/09/2026, madrugada (JORNADA-REAL-01)
 
 No computador do titular, pela TELA, com a Mistral (chave): o contador de

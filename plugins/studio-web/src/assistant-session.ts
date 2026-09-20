@@ -9,7 +9,7 @@ import { KeyedMutex, type SessionRecord, type StudioIdentityService } from '@dz2
 import { roleAllows } from '@dz23-studio/policy'
 import type { StudioTenancyService } from '@dz23-studio/tenancy'
 import { createHash } from 'node:crypto'
-import { mkdir, realpath } from 'node:fs/promises'
+import { lstat, mkdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { t } from './i18n.js'
 
@@ -191,7 +191,13 @@ export class AssistantSessionLauncher {
     if (this.options.workspaceRoot === undefined) return undefined
     const pasta = pastaDoEspaco(this.options.workspaceRoot, identitySession.org_id, identitySession.tenant_id)
     await mkdir(pasta, { recursive: true, mode: 0o700 })
-    return realpath(pasta)
+    const entrada = await lstat(pasta)
+    const raizReal = await realpath(this.options.workspaceRoot)
+    const pastaReal = await realpath(pasta)
+    if (!entrada.isDirectory() || pastaReal !== pastaDoEspaco(raizReal, identitySession.org_id, identitySession.tenant_id)) {
+      throw new AssistantSessionLaunchError('FORBIDDEN', t('assistant.forbidden'))
+    }
+    return pastaReal
   }
 
   async #existingSession(

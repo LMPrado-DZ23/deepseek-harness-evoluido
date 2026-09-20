@@ -201,11 +201,12 @@ pulados.
 - Nenhum *deploy* de produção. O destino de publicação hoje é **local**.
 - A imagem OCI ainda não foi construída (falta rota de rede para registro de
   pacotes no ambiente de build).
-- **Nenhum aplicativo criado por modelo real chegou à prévia aberta ainda.**
-  O `qwen2.5-coder:7b`, no computador do titular, escreveu pelo próprio produto
-  um jogo da velha e um contador que passaram nas guardas; o contador compilou
-  e parou na checagem de tipos, e o conserto (o `title` do conteúdo) está no
-  código. Falta rodar até build, verificação e prévia (`EB-04`).
+- **Há uma jornada real registrada com Mistral em 20/09/2026:** o contador de
+  copos chegou a `VERIFIED_PROTOTYPE`, abriu na prévia e recebeu uma alteração
+  na mesma conversa. O reinício do processo também foi registrado. Isso não
+  prova reinício do computador, todos os modelos, todas as plataformas nem a
+  jornada geral completa. Consulte `JORNADA-REAL-01` no
+  livro mestre e o registro atual em `docs/status/PROJECT_STATUS.md`.
 - **A maioria dos requisitos está em `BETA`**: construídos e provados **neste
   ambiente**, não na vida real. A contagem atual está no fim do livro mestre, e
   só lá — escrita aqui ela envelhecia e passava a discordar.
@@ -213,6 +214,10 @@ pulados.
 A lista completa, com bloqueio e próximo passo de cada um, está no
 [livro-razão de requisitos](./docs/MASTER_REQUIREMENTS_LEDGER.md) e na
 [matriz de capacidades](./docs/CAPABILITY_MATRIX.md).
+
+A comparação com outros produtos segue o
+[protocolo de benchmarks por jornada](./docs/plans/FRIGG-JOURNEY-BENCHMARKS.md).
+Nenhuma superioridade sobre Manus ou outro produto foi demonstrada.
 
 ---
 

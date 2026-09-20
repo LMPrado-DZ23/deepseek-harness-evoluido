@@ -472,21 +472,28 @@ declarada.
 <!-- O livro mestre REGISTRA achados, e o achado da OS-39 e sobre numeros de ADR
      que nomeiam mais de uma decisao: citacao-ambigua-proposital -->
 
+| AUDIT-OCI-01 | O comando de baixar imagem confere cada blob antes de publica-lo e limpa transferencias interrompidas | Auditoria independente sobre HEAD 997fa20, 20/09/2026 | v1.0 | BETA | scripts/ponte/puxar-imagem.mjs, scripts/ponte/puxar-imagem.cli.test.mjs, .github/workflows/verify.yml | CLI em processo separado, transporte controlado; camada/configuracao/manifesto adulterados, interrupcao e concorrencia | execucao: antes o CLI anunciava imagem concluida com blobs adulterados; a correcao usa a mesma gravacao conferida e atomica em todos os caminhos | Nao prova download de registro externo, Docker nem a imagem final; resultados globais e limitacoes em audit/FRIGG-AUDIT-20260920.md | repetir a CI e a reconstrucao no computador do titular |
+| AUDIT-FILES-01 | Uploads concorrentes nao sobrescrevem arquivos; pastas e downloads resistem a troca por links | Auditoria independente sobre HEAD 997fa20, 20/09/2026 | v1.0 | BETA | plugins/studio-web/src/assistant-files.ts, plugins/studio-web/src/assistant-session.ts, plugins/studio-web/src/index.ts, plugins/studio-web/tests/assistant-files.spec.ts, plugins/studio-web/tests/assistant-session.spec.ts | Arquivos reais em temporario; concorrencia, link anterior, troca durante envio e troca antes da leitura | execucao: 20 uploads eram aceitos mas deixavam dois arquivos; a correcao reserva nome por link atomico e usa descritores de diretorio/arquivo; testes focados exercitam as recusas | Confinamento de caminhos concorrentes usa /proc no Linux/WSL; outras plataformas precisam de prova nativa. Nao equivale a auditoria completa de multitenancy | executar regressao completa e jornada real de arquivos |
+| BENCHMARK-JOURNEYS-01 | Comparar o FRIGG por jornada, custo, latencia, qualidade, seguranca, privacidade, acessibilidade, exportacao, recuperacao e transparencia | Pedido do titular nesta auditoria, 20/09/2026 | v1.x | NOT_EXECUTED | docs/plans/FRIGG-JOURNEY-BENCHMARKS.md | Protocolo de amostragem e criterios definidos; nenhuma comparacao externa executada | nenhuma | Acesso aos produtos comparados, modelos, hardware e usuarios reais | executar pilotos pareados sem afirmar superioridade |
+
+| AUDIT-LOADER-01 | Gates TypeScript e servidor E2E executam sem exigir o socket IPC privado do lancador tsx | Restricao reproduzida durante auditoria de 20/09/2026 | v1.0 | BETA | package.json, apps/studio-web/playwright.config.ts | Mesmos scripts e servidor executados pelo loader node --import tsx | execucao: servidor de E2E passou a iniciar no Chromium fixado; nenhum teste ou assercao removido | A troca do lancador nao elimina as restricoes a sockets Unix dos testes do produto; ver audit/FRIGG-AUDIT-20260920.md | repetir gates e CI na versao Node fixada |
+| AUDIT-MOBILE-01 | Campo de mensagem e botao de envio cabem em 320 e 390 px e permitem continuar a conversa | Auditoria visual de 20/09/2026 | v1.0 | BETA | apps/studio-web/src/tarefa/tarefa.css, apps/studio-web/tests/overflow.spec.ts | Chromium, medicao de limites dos controles e clique real nas duas larguras | execucao: o campo chegava a 465 px e era cortado; minmax(0, 1fr) impede expansao intrinseca da coluna; 8 testes de overflow aprovados | Servidor de teste; celular fisico e outros navegadores ainda nao medidos | repetir em dispositivos reais |
+
 ## Contagem por estado
 
 | estado | quantos |
 | --- | --- |
 | `STABLE` | 70 |
-| `BETA` | 245 |
+| `BETA` | 249 |
 | `NOT_PRESENT` | 33 |
 | `NOT_CONFIGURED` | 1 |
-| `NOT_EXECUTED` | 4 |
+| `NOT_EXECUTED` | 5 |
 | `FAILED` | 2 |
 
-**Total de requisitos rastreados: 355.**
+**Total de requisitos rastreados: 360.**
 
 | versao-alvo | quantos |
 | --- | --- |
-| v1.0 | 319 |
-| v1.x | 33 |
+| v1.0 | 323 |
+| v1.x | 34 |
 | v2 | 3 |
