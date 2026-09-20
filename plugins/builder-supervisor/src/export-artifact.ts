@@ -7,6 +7,9 @@ import type { ExportedArtifact } from './model.js'
 import { BuilderSupervisorError } from './model.js'
 
 const BLOCK = 512
+const PAX_MAX_BYTES = 64 * 1024
+/** Chaves PAX que só descrevem metadados que a extração ignora. */
+const PAX_CHAVES_INOFENSIVAS = new Set(['mtime', 'atime', 'ctime', 'uid', 'gid', 'uname', 'gname'])
 const MAX_FILES = 20_000
 const MAX_BYTES = 512 * 1024 * 1024
 
@@ -128,7 +131,7 @@ export async function enforceExportRetention(exportRoot: string, currentBuildRef
 
 async function extractTar(archivePath: string, stage: string, signal: AbortSignal, runtime: ExportRuntime, expected?: ExpectedArchive): Promise<{ readonly files: number; readonly bytes: number }> {
   const archive = await runtime.open(archivePath, constants.O_RDONLY | runtime.noFollowFlag)
-  const names = new Set<string>(); let offset = 0; let files = 0; let bytes = 0; let terminated = false
+  const names = new Set<string>(); let offset = 0; let files = 0; let bytes = 0; let terminated = false; let paxPath: string | undefined; let paxPendente = false
   try {
     const archiveBefore = await archive.stat(); if (!archiveBefore.isFile() || archiveBefore.nlink !== 1) invalid()
     if (expected !== undefined) {
@@ -138,6 +141,7 @@ async function extractTar(archivePath: string, stage: string, signal: AbortSigna
       signal.throwIfAborted()
       const header = Buffer.alloc(BLOCK); if ((await archive.read(header, 0, BLOCK, offset)).bytesRead !== BLOCK) invalid(); offset += BLOCK
       if (header.every(byte => byte === 0)) {
+        if (paxPendente) invalid()
         const second = Buffer.alloc(BLOCK); if ((await archive.read(second, 0, BLOCK, offset)).bytesRead !== BLOCK || !second.every(byte => byte === 0)) invalid(); offset += BLOCK
         while (offset < archiveBefore.size) {
           const trailing = Buffer.alloc(Math.min(64 * 1024, archiveBefore.size - offset))
@@ -149,8 +153,21 @@ async function extractTar(archivePath: string, stage: string, signal: AbortSigna
         terminated = true; break
       }
       verifyChecksum(header)
-      const rawName = `${cstring(header.subarray(345, 500))}${cstring(header.subarray(345, 500)) === '' ? '' : '/'}${cstring(header.subarray(0, 100))}`
-      const name = normalizeTarName(rawName); const size = parseOctal(header.subarray(124, 136)); const type = String.fromCharCode(header[156] || 48)
+      const size = parseOctal(header.subarray(124, 136)); const type = String.fromCharCode(header[156] || 48)
+      if (type === 'x') {
+        // Cabeçalho PAX: o Docker o escreve antes de todo nome que não cabe
+        // nos 255 bytes do ustar — e a saída `standalone` com pnpm tem vários
+        // (`node_modules/.pnpm/next@16…_react@19…/node_modules/next/dist/…`).
+        // Sem ler PAX, toda exportação real era `EXPORT_INVALID`.
+        if (paxPendente || size < 1 || size > PAX_MAX_BYTES) invalid()
+        const corpo = Buffer.alloc(size); if ((await archive.read(corpo, 0, size, offset)).bytesRead !== size) invalid()
+        offset += size + (BLOCK - size % BLOCK) % BLOCK
+        paxPath = paxPathOf(corpo); paxPendente = true
+        continue
+      }
+      const rawName = paxPath ?? `${cstring(header.subarray(345, 500))}${cstring(header.subarray(345, 500)) === '' ? '' : '/'}${cstring(header.subarray(0, 100))}`
+      paxPath = undefined; paxPendente = false
+      const name = normalizeTarName(rawName)
       if (name === undefined) { if (type !== '5' || size !== 0) invalid() }
       else if (type === '5') { if (size !== 0 || !allowedExportPath(name, true)) invalid(); await secureDirectory(stage, name, runtime) }
       else if (type === '0') {
@@ -287,6 +304,31 @@ async function assertRequiredExport(stage: string, runtime: ExportRuntime): Prom
     if (stat === undefined || stat.isSymbolicLink() || (kind === 'file' ? !stat.isFile() : !stat.isDirectory())) invalid()
   }
 }
+/**
+ * O NOME de um cabeçalho PAX, e só ele. Qualquer outra chave que mude o
+ * sentido da entrada seguinte (`size`, `linkpath`, esparsos do GNU…) é
+ * recusa: aceitá-la desalinharia a leitura ou traria um link por outra porta.
+ * @param corpo - os registros `<tamanho> <chave>=<valor>\n`.
+ * @returns o caminho, ou `undefined` quando o cabeçalho só traz metadados
+ *   (a data com fração de segundo, por exemplo) e o nome vem do ustar.
+ */
+export function paxPathOf(corpo: Buffer): string | undefined {
+  let posicao = 0; let caminho: string | undefined
+  while (posicao < corpo.length) {
+    const espaco = corpo.indexOf(0x20, posicao); if (espaco < 0) invalid()
+    const textoDoTamanho = corpo.subarray(posicao, espaco).toString('ascii'); if (!/^[1-9][0-9]{0,5}$/u.test(textoDoTamanho)) invalid()
+    const tamanho = Number(textoDoTamanho); const fim = posicao + tamanho
+    if (fim > corpo.length || corpo[fim - 1] !== 0x0a) invalid()
+    const registro = corpo.subarray(espaco + 1, fim - 1).toString('utf8'); const igual = registro.indexOf('=')
+    if (igual < 1) invalid()
+    const chave = registro.slice(0, igual); const valor = registro.slice(igual + 1)
+    if (chave === 'path') { if (caminho !== undefined || valor === '' || valor.includes('\0')) invalid(); caminho = valor }
+    else if (!PAX_CHAVES_INOFENSIVAS.has(chave)) invalid()
+    posicao = fim
+  }
+  return caminho
+}
+
 function verifyChecksum(header: Buffer): void {
   const expected = parseOctal(header.subarray(148, 156)); const copy = Buffer.from(header); copy.fill(0x20, 148, 156)
   if (copy.reduce((sum, byte) => sum + byte, 0) !== expected) invalid()

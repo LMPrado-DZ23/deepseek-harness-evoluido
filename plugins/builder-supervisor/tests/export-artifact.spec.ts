@@ -24,6 +24,41 @@ describe('validated Docker export publication', () => {
     const handle = await open(artifact.archivePath, 'r+'); await handle.write(Buffer.from('2'), 0, 1, 156); await handle.close()
     await expect(publishValidatedDockerArchive(exports, `build_${'b'.repeat(32)}`, artifact.archivePath, new AbortController().signal)).rejects.toThrow('EXPORT_INVALID'); await artifact.dispose()
   })
+  it('le o nome longo de um cabecalho PAX, como o Docker escreve para caminhos acima de 255 bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-export-pax-')); roots.push(root); const archive = join(root, 'pax.tar'); const exports = join(root, 'published')
+    const longo = `.next/standalone/node_modules/.pnpm/${'p'.repeat(200)}/node_modules/next/index.js`
+    await writeFile(archive, Buffer.concat([
+      paxEntry({ path: longo, mtime: '1789874055.5' }), tarEntry('ignorado-pelo-pax', 'next'),
+      tarEntry('.next/standalone/server.js', 'server'), tarEntry('.next/static/chunk.js', 'chunk'), tarEntry('evidence/appspec-report.json', '{}'), Buffer.alloc(1024),
+    ]))
+    const ref = `build_${'e'.repeat(32)}`
+    await expect(publishValidatedDockerArchive(exports, ref, archive, new AbortController().signal)).resolves.toMatchObject({ files: 4 })
+    expect(await readFile(join(exports, 'exports', ref, ...longo.split('/')), 'utf8')).toBe('next')
+  })
+  it('um PAX so com metadados deixa o nome do ustar valer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dz23-export-pax-m-')); roots.push(root); const archive = join(root, 'pax.tar'); const exports = join(root, 'published')
+    await writeFile(archive, Buffer.concat([
+      paxEntry({ mtime: '1789874055.5' }), tarEntry('.next/standalone/server.js', 'server'),
+      tarEntry('.next/static/chunk.js', 'chunk'), tarEntry('evidence/appspec-report.json', '{}'), Buffer.alloc(1024),
+    ]))
+    await expect(publishValidatedDockerArchive(exports, `build_${'f'.repeat(32)}`, archive, new AbortController().signal)).resolves.toMatchObject({ files: 3 })
+  })
+  it('recusa PAX que traz link, que muda o tamanho, que sobra no fim, que vem em dobro, ou que sai da pasta', async () => {
+    const base = [tarEntry('.next/static/chunk.js', 'chunk'), tarEntry('evidence/appspec-report.json', '{}')]
+    const casos: Array<[string, Buffer]> = [
+      ['linkpath', Buffer.concat([paxEntry({ path: '.next/standalone/server.js', linkpath: '/etc/passwd' }), tarEntry('x', 'server'), ...base, Buffer.alloc(1024)])],
+      ['size', Buffer.concat([paxEntry({ path: '.next/standalone/server.js', size: '1' }), tarEntry('x', 'server'), ...base, Buffer.alloc(1024)])],
+      ['sobra no fim', Buffer.concat([tarEntry('.next/standalone/server.js', 'server'), ...base, paxEntry({ path: '.next/static/a.js' }), Buffer.alloc(1024)])],
+      ['em dobro', Buffer.concat([paxEntry({ path: '.next/static/a.js' }), paxEntry({ path: '.next/static/b.js' }), tarEntry('x', 'a'), tarEntry('.next/standalone/server.js', 'server'), ...base, Buffer.alloc(1024)])],
+      ['fora da pasta', Buffer.concat([paxEntry({ path: '.next/standalone/../../fora.js' }), tarEntry('x', 'a'), tarEntry('.next/standalone/server.js', 'server'), ...base, Buffer.alloc(1024)])],
+      ['registro torto', Buffer.concat([tarEntry('PaxHeader', '30 path=.next/static/a.js\n', { type: 'x' }), tarEntry('x', 'a'), tarEntry('.next/standalone/server.js', 'server'), ...base, Buffer.alloc(1024)])],
+    ]
+    for (const [nome, bytes] of casos) {
+      const root = await mkdtemp(join(tmpdir(), 'dz23-export-pax-bad-')); roots.push(root); const archive = join(root, 'pax.tar')
+      await writeFile(archive, bytes)
+      await expect(publishValidatedDockerArchive(join(root, 'published'), `build_${'9'.repeat(32)}`, archive, new AbortController().signal), nome).rejects.toThrow('EXPORT_INVALID')
+    }
+  })
   it('uses a canonical tree hash independent of tar entry order', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dz23-export-order-')); roots.push(root); const archive = join(root, 'reverse.tar'); const exports = join(root, 'published')
     const rows: Array<[string, string]> = [['public/logo.svg', 'logo'], ['evidence/appspec-report.json', '{}'], ['.next/static/chunk.js', 'chunk'], ['.next/standalone/server.js', 'server']]
@@ -346,4 +381,12 @@ function interceptOpen(targetPath: string | undefined, overrides: { readonly rea
       const value = Reflect.get(target, property, target); return typeof value === 'function' ? value.bind(target) : value
     } })
   }) as typeof open
+}
+function paxEntry(campos: Record<string, string>): Buffer {
+  const registros = Object.entries(campos).map(([chave, valor]) => {
+    const corpo = ` ${chave}=${valor}\n`; let tamanho = Buffer.byteLength(corpo) + 1
+    while (String(tamanho).length + Buffer.byteLength(corpo) !== tamanho) tamanho = String(tamanho).length + Buffer.byteLength(corpo)
+    return `${tamanho}${corpo}`
+  }).join('')
+  return tarEntry('PaxHeader', registros, { type: 'x' })
 }

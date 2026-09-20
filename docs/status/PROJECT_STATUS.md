@@ -31,8 +31,16 @@ conexão `chave-mistral` ligada), conduzido PELA TELA:
 - com os consertos instalados: "Tentar de novo" → a Mistral montou a
   especificação → "Montar meu plano" → plano de 1 etapa, 5 conferências →
   aprovado → "Iniciar criação" disponível.
-- PAROU em: o construtor não respondia (`PROBE_FAILED`): o gerente tinha
-  caído. Reiniciado com `frigg-gerente-reiniciar.sh`.
+- o construtor não respondia: a limpeza automática do daemon compartilhado
+  apagou a imagem do construtor (IMAGEM-CONSTRUTOR-01). Refeita pela ponte,
+  instalada numa base NOVA (`~/.frigg-b`; a antiga ficou intacta; a base em
+  uso mora em `~/.frigg/base-do-construtor`), com um contêiner-âncora parado;
+- "Iniciar criação" → a Mistral escreveu o código → build, testes e e2e
+  PASSARAM no construtor isolado (`E2E_OK`) → parou na EXPORTAÇÃO
+  (`EXPORT_INVALID` → `FINISH_INCONCLUSIVE`). Causa: links simbólicos do
+  pnpm na saída standalone (EXPORT-STANDALONE-01), consertada e provada na
+  nuvem com o docker cp de verdade. PRÓXIMO: instalar, reiniciar o gerente,
+  "Tentar novamente".
 
 ## IA POR CHAVE NO COMPUTADOR DO TITULAR — 19/09/2026, 20h15 (LLM-CHAVE-01)
 

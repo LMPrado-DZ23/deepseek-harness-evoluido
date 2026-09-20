@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { EXPORT_SCRIPT } from './export-script.js'
 import { rm } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
@@ -409,4 +410,3 @@ function sanitized(value: Buffer, maximumBytes: number): string {
   return result
 }
 
-const EXPORT_SCRIPT = String.raw`const fs=require('node:fs'),p=require('node:path');const rows=[['.next/standalone',true,true],['.next/static',true,true],['public',true,false],['evidence/appspec-report.json',false,true]];for(const [name,dir,required]of rows){const from=p.join('/workspace',name),to=p.join('/export',name);if(!fs.existsSync(from)){if(required)throw new Error('EXPORT_SOURCE_MISSING');continue}const stat=fs.lstatSync(from);if(stat.isSymbolicLink()||(dir?!stat.isDirectory():!stat.isFile()))throw new Error('EXPORT_SOURCE_INVALID');fs.mkdirSync(p.dirname(to),{recursive:true});fs.cpSync(from,to,{recursive:dir,dereference:false,errorOnExist:true,force:false})}`
