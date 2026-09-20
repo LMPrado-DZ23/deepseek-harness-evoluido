@@ -37,7 +37,8 @@ READY do iframe (no Chrome funciona). **Retomada medida:** a atualização
 seguinte derrubou e subiu o estúdio; a tarefa voltou com a conversa inteira e
 a prévia abriu "Disponível". Foi o reinício do PROCESSO, não do computador.
 Consertados depois disso: seção vira título curto (SECOES-TITULO-01) e a
-oferta de instalar pode ser dispensada (INSTALAR-DISPENSAR-01).
+oferta de instalar pode ser dispensada (INSTALAR-DISPENSAR-01, medido no
+Chrome do titular).
 FALTA: reinício do computador inteiro; medir SECOES-TITULO-01 numa tarefa nova.
 
 ## A JORNADA PELA MISTRAL — 20/09/2026, madrugada
