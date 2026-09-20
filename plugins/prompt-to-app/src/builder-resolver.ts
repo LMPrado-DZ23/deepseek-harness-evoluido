@@ -95,6 +95,7 @@ export class ManagedBuilderLifecycleResolver implements BuilderLifecycleResolver
         scopeId: config.scopeId,
         imageDigest: config.imageDigest,
         policySha256: config.policySha256,
+        exportRoot: config.exportRoot,
       }
       return lifecycleSession(client, artifactClient, lifecycleScope, this.#dependencies.createArchive, this.#dependencies.openArchive)
     } catch (error) {
@@ -104,7 +105,7 @@ export class ManagedBuilderLifecycleResolver implements BuilderLifecycleResolver
   }
 }
 
-type BuilderLifecycleResolvedScope = Pick<BuilderSupervisorResolvedConfig, 'scopeId' | 'imageDigest' | 'policySha256'>
+type BuilderLifecycleResolvedScope = Pick<BuilderSupervisorResolvedConfig, 'scopeId' | 'imageDigest' | 'policySha256'> & { readonly exportRoot?: string }
 
 function lifecycleSession(client: BuilderUnixClient, artifactClient: ArtifactIngressUnixClient, config: BuilderLifecycleResolvedScope, createArchive: typeof createVerifiedBuildArchive, openArchive: typeof open): BuilderLifecycleSession {
   const invoke = async <T>(action: () => Promise<T>): Promise<T> => {
@@ -170,6 +171,7 @@ function lifecycleSession(client: BuilderUnixClient, artifactClient: ArtifactIng
     finish: (buildRef, signal) => invoke(async () => {
       const value = await client.finish({ request_id: requestId(), build_ref: buildRef }, { signal: callSignal(signal) })
       return {
+        ...caminhoDaExportacao(config.exportRoot, value.exported),
         finalState: value.final_state,
         exported: value.exported,
         cleanupPending: value.cleanup_pending,
@@ -286,3 +288,17 @@ function sameCredentialStat(left: Stats, right: Stats): boolean {
   return left.isFile() && right.isFile() && !left.isSymbolicLink() && !right.isSymbolicLink() && left.dev === right.dev && left.ino === right.ino && left.nlink === 1 && right.nlink === 1 && left.uid === right.uid && left.gid === right.gid && left.mode === right.mode && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
 }
 function unavailable(code: string): never { throw new BuilderLifecycleError('BLOCKED_EXTERNAL', code) }
+
+/**
+ * O caminho da exportação publicada, quando há uma e ela tem a forma que o
+ * construtor publica (`exports/build_<32 hex>`). Qualquer outra forma é
+ * ignorada — e a execução segue sem a importação, que a faz reprovar pela
+ * conferência, e não por um caminho inventado.
+ * @param raiz - a raiz de exportação do escopo.
+ * @param exportado - o que o construtor devolveu.
+ * @returns `{ exportedPath }`, ou nada.
+ */
+export function caminhoDaExportacao(raiz: string | undefined, exportado: { readonly relative_path: string } | null): { readonly exportedPath?: string } {
+  if (raiz === undefined || exportado === null || !/^exports\/build_[a-f0-9]{32}$/u.test(exportado.relative_path)) return {}
+  return { exportedPath: posix.join(raiz, exportado.relative_path) }
+}

@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto'
 import { deflateSync } from 'node:zlib'
 
-import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -13,6 +14,7 @@ import { BuilderLifecycleError, type BuildStep, type BuilderLifecycleFinished, t
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from '../src/service.js'
 import { latestGreenCheckpoint, runCheckpoints } from '../src/checkpoint.js'
 import { screenshotPath, VIEWPORTS } from '../src/visual-qa.js'
+import { hashTree } from '../src/runner.js'
 
 const actor: PromptToAppActor = { userId: 'owner', orgId: 'org-a', tenantId: 'tenant-a', role: 'owner' }
 const spec: AppSpecV1 = {
@@ -274,6 +276,75 @@ describe('Prompt-to-App pipeline', () => {
     exported: { relative_path: 'exports/build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sha256: 'a'.repeat(64), files: 1, bytes: 1 },
     cleanupPending: false, cleaned: true,
     attestation: { image_digest: `sha256:${'d'.repeat(64)}`, policy_sha256: 'f'.repeat(64), scope_id: 's_1' },
+  })
+
+  /** O hash como o CONSTRUTOR publica: nomes em ordem de código, `nome\0conteúdo\0`. */
+  async function hashDoConstrutor(raiz: string): Promise<string> {
+    const nomes: string[] = []
+    const andar = async (pasta: string, prefixo: string): Promise<void> => {
+      for (const entrada of await readdir(pasta, { withFileTypes: true })) {
+        if (prefixo === '' && entrada.name === '.dz23-artifact.json') continue
+        const nome = prefixo === '' ? entrada.name : `${prefixo}/${entrada.name}`
+        if (entrada.isDirectory()) await andar(resolve(pasta, entrada.name), nome); else nomes.push(nome)
+      }
+    }
+    await andar(raiz, '')
+    const hash = createHash('sha256')
+    for (const nome of nomes.sort()) hash.update(nome).update('\0').update(await readFile(resolve(raiz, nome))).update('\0')
+    return hash.digest('hex')
+  }
+
+  async function exportacaoDoConstrutor(pastaDaExecucao: string, destino: string, status: 'PASSED' | 'FAILED'): Promise<void> {
+    const report = JSON.parse(await readFile(resolve(pastaDaExecucao, 'evidence', 'appspec-report.json'), 'utf8')) as { checks: { status: string }[] }
+    for (const check of report.checks) if (check.status === 'PENDING') check.status = status
+    await mkdir(resolve(destino, 'evidence'), { recursive: true }); await writeFile(resolve(destino, 'evidence', 'appspec-report.json'), JSON.stringify(report))
+    await mkdir(resolve(destino, '.next', 'standalone'), { recursive: true }); await writeFile(resolve(destino, '.next', 'standalone', 'server.js'), 'server')
+    await mkdir(resolve(destino, '.next', 'static'), { recursive: true }); await writeFile(resolve(destino, '.next', 'static', 'a.js'), 'a')
+    // Nomes em que as DUAS ordens discordam ('B' antes de 'a' por código; 'a'
+    // antes de 'B' por idioma): é o que separa o hash do construtor do da prévia.
+    await mkdir(resolve(destino, 'public'), { recursive: true }); await writeFile(resolve(destino, 'public', 'B.svg'), 'b'); await writeFile(resolve(destino, 'public', 'a.svg'), 'a')
+    await writeFile(resolve(destino, '.dz23-artifact.json'), '{}')
+  }
+
+  it('as conferências e a prévia vêm da EXPORTAÇÃO do construtor, e não da pasta local', async () => {
+    // O construtor de verdade escreve o relatório DENTRO do contêiner: a pasta
+    // do Studio fica com a cópia de antes (PENDING). Os dublês antigos
+    // escreviam direto na pasta local, e por isso nenhum teste via que nada
+    // trazia o relatório de volta.
+    const exportacao = await mkdtemp(join(tmpdir(), 'dz23-exportacao-')); roots.push(exportacao)
+    let f!: Awaited<ReturnType<typeof fixture>>
+    const finish: BuilderLifecycleSession['finish'] = async () => {
+      await exportacaoDoConstrutor(vi.mocked(f.builder.prepare).mock.calls[0]![0], exportacao, 'PASSED')
+      const base = await attestingFinish('build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+      return { ...base, exported: { ...base.exported!, sha256: await hashDoConstrutor(exportacao) }, exportedPath: exportacao }
+    }
+    f = await fixture({ execute: reportingExecute('PENDING'), finish })
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(result.state).toBe('VERIFIED_PROTOTYPE')
+    const ultima = f.runs.at(-1)!
+    const previa = resolve(ultima.run_directory, '.dz23', 'preview-artifact-v1')
+    expect(ultima.artifact_sha256).toBe(await hashTree(previa))
+    expect(ultima.artifact_sha256).not.toBe(await hashDoConstrutor(exportacao))
+    // A atestação fala do MESMO artefato que a prévia vai abrir.
+    const proveniencia = JSON.parse(await readFile(resolve(ultima.run_directory, 'evidence', 'attestation-provenance.json'), 'utf8')) as { artifact_sha256: string }
+    expect(proveniencia.artifact_sha256).toBe(ultima.artifact_sha256)
+    expect(await readFile(resolve(previa, '.next', 'standalone', 'server.js'), 'utf8')).toBe('server')
+    await expect(readFile(resolve(previa, '.dz23-artifact.json'))).rejects.toThrow()
+    expect(ultima.acceptance_checks.some(check => check.status === 'PENDING')).toBe(false)
+  })
+
+  it('uma exportação que não bate com o hash do construtor bloqueia, e não aprova', async () => {
+    const exportacao = await mkdtemp(join(tmpdir(), 'dz23-exportacao-ruim-')); roots.push(exportacao)
+    let f!: Awaited<ReturnType<typeof fixture>>
+    const finish: BuilderLifecycleSession['finish'] = async () => {
+      await exportacaoDoConstrutor(vi.mocked(f.builder.prepare).mock.calls[0]![0], exportacao, 'PASSED')
+      const base = await attestingFinish('build_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+      return { ...base, exported: { ...base.exported!, sha256: 'b'.repeat(64) }, exportedPath: exportacao }
+    }
+    f = await fixture({ execute: reportingExecute('PENDING'), finish })
+    const result = await f.pipeline.run(actor, 'project', { generate: vi.fn(async () => cleanGeneration) })
+    expect(result.state).not.toBe('VERIFIED_PROTOTYPE')
+    expect(f.runs.at(-1)!.failure_code).toBe('EXPORT_IMPORT_FAILED')
   })
 
   it('o pipeline reprova quando o REGISTRO perde uma etapa que o construtor afirma ter rodado', async () => {

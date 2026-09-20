@@ -42,6 +42,7 @@ import { assertCategoryCanGenerate } from './planner.js'
 import type { PromptModelPort } from './ports.js'
 import { BUILD_STEPS, BuilderLifecycleError, type BuilderLifecycleResolverPort, type BuilderLifecycleSession } from './builder-lifecycle.js'
 import { listTreeFiles } from './runner.js'
+import { importarExportacao } from './importar-exportacao.js'
 import { scanGeneratedContent } from './security.js'
 import { PromptToAppError, type PromptToAppActor, type PromptToAppService } from './service.js'
 import type { EmergencyStopGuard } from './jobs.js'
@@ -601,6 +602,14 @@ export class PromptToAppPipeline {
       if (!finished.cleaned || finished.cleanupPending || (finished.finalState === 'E2E_OK') !== (finished.exported !== null)) {
         throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'FINISH_INCONCLUSIVE')
       }
+      // O aplicativo construído e o relatório das conferências vivem na
+      // exportação do CONSTRUTOR; sem trazê-los, toda conferência ficava
+      // PENDING e a prévia não tinha o que abrir (ver `importarExportacao`).
+      let artefatoDaPrevia: { readonly caminho: string; readonly sha256: string } | undefined
+      if (finished.finalState === 'E2E_OK' && finished.exported !== null && finished.exportedPath !== undefined) {
+        try { artefatoDaPrevia = await importarExportacao(finished.exportedPath, runDirectory, finished.exported.sha256) }
+        catch (importError) { throw new BuilderLifecycleError('BLOCKED_EXTERNAL', 'EXPORT_IMPORT_FAILED', { cause: importError }) }
+      }
       const verifiedAcceptanceChecks = await readAcceptanceChecks(runDirectory, expectedAcceptanceChecks)
       // O VISUAL QA (T-18). A suite gerada tirou uma foto da tela inicial dentro
       // do ambiente isolado; aqui alguem finalmente OLHA para ela.
@@ -662,7 +671,7 @@ export class PromptToAppPipeline {
         }
         const attested = await this.attest({
           runId, projectId, planId: plan.plan_id, directory: runDirectory, attempt,
-          artifactSha256: finished.exported!.sha256, templateIntegrity, builder: facts,
+          artifactSha256: artefatoDaPrevia?.sha256 ?? finished.exported!.sha256, templateIntegrity, builder: facts,
           checks: verifiedAcceptanceChecks, appSpecSha256: appSpecHash(spec),
           templateId: project.category, templateVersion: this.options.templateVersion ?? 'unversioned',
         })
@@ -687,7 +696,7 @@ export class PromptToAppPipeline {
       if (state !== 'PASSED') finalFailureState = failedStage === 'test' ? 'TESTS_FAILED' : 'BUILD_FAILED'
       await writeFile(resolve(runDirectory, 'pipeline.log'), log, 'utf8')
       activeStage = 'verify'
-      const artifactSha256 = state === 'PASSED' ? finished.exported!.sha256 : null
+      const artifactSha256 = state === 'PASSED' ? (artefatoDaPrevia?.sha256 ?? finished.exported!.sha256) : null
       await this.options.service.putRun(actor, this.runRecord(actor, projectId, plan.plan_id, state === 'PASSED' ? 'verify' : failedStage, attempt, state, 'full', runDirectory, generated, diagnostic ?? null, runId, operationId, ownerSessionId, verifiedAcceptanceChecks, artifactSha256, templateIntegrity, attestations, buildSteps, attempt === 1 ? resumedFromRunId : null))
       await this.recordEvidence(actor, projectId, runId, runDirectory, 'pipeline.log', 'build-log')
       await this.writeRunReport({ actor, projectId, runId, directory: runDirectory, stage: state === 'PASSED' ? 'verify' : failedStage, runState: state, attempt, files: attemptFiles, previousFiles: previousAttemptFiles, findings: attemptFindings, correction: previousDiagnosticForReport })

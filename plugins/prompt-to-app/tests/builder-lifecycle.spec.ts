@@ -19,6 +19,7 @@ import {
 import { BuilderLifecycleError, managedBuild } from '../src/builder-lifecycle.js'
 import {
   ManagedBuilderLifecycleResolver,
+  caminhoDaExportacao,
   opaqueTenantIdentity,
   PROMPT_APP_BUILDER_INSTANCE_ID,
   readSecureLifecycleCredential,
@@ -263,11 +264,22 @@ describe('builder lifecycle resolver', () => {
     await expect(session.finish(buildRef)).resolves.toEqual({
       finalState: 'E2E_OK',
       exported: { relative_path: `exports/${buildRef}`, sha256: 'a'.repeat(64), files: 2, bytes: 3 },
+      // ONDE está a exportação: a raiz resolvida do escopo + o caminho que o
+      // construtor publicou. Sem ele o Studio não traz nada de volta.
+      exportedPath: `/srv/dz23-studio/builder-exports/instances/${scopeId}/exports/${buildRef}`,
       cleanupPending: false, cleaned: true,
       attestation: { image_digest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u), policy_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u), scope_id: scopeId },
     })
     await expect(session.listManaged(new AbortController().signal)).resolves.toEqual([{ buildRef, buildId: 'logical-build', state: 'E2E_OK', exported: true, cleanupPending: false }])
     expect(managedBuild({ build_ref: buildRef, build_id: 'direct', state: 'FAILED', exported: false, cleanup_pending: true })).toEqual({ buildRef, buildId: 'direct', state: 'FAILED', exported: false, cleanupPending: true })
+  })
+
+  it('o caminho da exportação só existe com a forma que o construtor publica', () => {
+    expect(caminhoDaExportacao('/raiz', { relative_path: `exports/build_${'a'.repeat(32)}` })).toEqual({ exportedPath: `/raiz/exports/build_${'a'.repeat(32)}` })
+    expect(caminhoDaExportacao('/raiz', null)).toEqual({})
+    expect(caminhoDaExportacao(undefined, { relative_path: `exports/build_${'a'.repeat(32)}` })).toEqual({})
+    expect(caminhoDaExportacao('/raiz', { relative_path: '../../etc' })).toEqual({})
+    expect(caminhoDaExportacao('/raiz', { relative_path: `exports/build_${'a'.repeat(32)}/../..` })).toEqual({})
   })
 
   it('preserves lifecycle errors and classifies transport and unknown failures', async () => {

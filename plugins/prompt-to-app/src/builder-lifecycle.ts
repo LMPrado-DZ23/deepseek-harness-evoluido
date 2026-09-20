@@ -35,6 +35,13 @@ export interface BuilderLifecycleFinished {
    * que ninguém conferiu.
    */
   readonly attestation?: BuilderAttestationFacts
+  /**
+   * ONDE o construtor publicou a exportação, no disco desta máquina. Só a
+   * sessão sabe (ela resolveu a raiz de exportação do escopo); sem isso o
+   * Studio não tem como trazer o aplicativo e o relatório das conferências de
+   * volta (`importarExportacao`).
+   */
+  readonly exportedPath?: string
 }
 export interface BuilderLifecycleManaged {
   readonly buildRef: string
