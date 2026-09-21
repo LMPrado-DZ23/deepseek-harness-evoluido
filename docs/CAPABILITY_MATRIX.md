@@ -64,7 +64,13 @@ o código pode existir, mas ainda não foi validado com pessoas leigas.
 | Claude Code como subagente do Assistente | NOT_CONFIGURED | O provider global da fase 3 não foi removido, mas a ponte P36 recusa Claude Code no boot, no schema e em chamada direta; o E2E real está `NOT_EXECUTED` | provar em Windows e Linux que symlink/junction não alcança arquivo externo; só então habilitação administrativa explícita |
 | Hermes Agent | NOT_PRESENT | prova 7.6 somente leitura | adapter JSON-RPC v1.x e auditoria de segurança |
 
-## A jornada comparável ao Manus Desktop — estado em 19/09/2026
+## A jornada comparável ao Manus Desktop — reconciliação em 21/09/2026
+
+Base histórica de 19/09 preservada nas evidências das linhas. O passo 12 foi
+atualizado com `JORNADA-REAL-01` de 20/09. `BETA` permanece o estado da
+capacidade; `PROVEN_IN_EXTERNAL_RUNTIME` qualifica a procedência da prova,
+não cria um novo nível de prontidão. A jornada geral inteira e a comparação
+pareada com Manus não foram executadas nesta sessão.
 
 Direção do titular (19/09, noite): fechar esta jornada, no computador dele e com
 modelo real, antes de qualquer frente nova. Cada linha diz o que EXISTE e o que
@@ -84,6 +90,6 @@ foi MEDIDO; "existe no código" não é "funciona para a pessoa".
 | 9. Arquivo real para baixar | BETA | AGENTE-GERAL-03: download da pasta de trabalho como anexo | medido com modelo real produzindo o arquivo |
 | 10. Sobreviver a reinício | BETA | conversa e lembretes são registro do Harness; criação retoma (ABRIR-08) | medido na jornada inteira |
 | 11. Agendamento numa tela, cancelável | BETA (parcial) | AGENDADO-01: lembretes listados e cancelados pela conversa | PAUSAR não existe no Harness; tarefa que começa sozinha numa conversa NOVA não existe |
-| 12. Prompt-to-App até prévia aberta | NOT_EXECUTED | EB-04: com modelo real, o aplicativo gerado COMPILOU e passou nos testes de unidade no construtor isolado (19/09, tarde); reprovou em textos da tela; o conserto (ABRIR-08l) está no código | passar a verificação da tela e abrir a prévia |
+| 12. Prompt-to-App até prévia aberta | BETA | JORNADA-REAL-01, 20/09: contador com chave-mistral/codestral-latest; build, testes, E2E, axe, exportação/importação, atestação, prévia, revisão 2 (`37438b09`) e retomada após reinício do processo. PROVEN_IN_EXTERNAL_RUNTIME | NEEDS_REVALIDATION para SHA por execução, IDs completos, hashes/logs e nova execução; reinício do computador, outras jornadas/modelos/plataformas pendentes |
 | Conexões de IA (local, chave, linha de comando) | BETA | LLM-CLI-01 + UX-CONEXOES-01 | linha de comando no WSL2 do titular depende de rede |
 | MCP e conectores dentro da conversa | BETA | MCP-CONVERSA-01: listar/perguntar/chamar pelo Hub, contra servidor MCP real | ligar conector exige manifesto assinado (chave de publicador vazia por padrão) |

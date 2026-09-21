@@ -178,16 +178,19 @@ contagem: uma linha nova exige atualizar os totais no fim do arquivo.
 
 ## 4. O que este projeto ainda não é
 
-Duas coisas, e nenhuma delas é código:
+Além das falhas internas e funcionalidades pendentes registradas no DAG,
+faltam estas validações:
 
 - **Ninguém que não programa jamais usou o produto** (`EB-02`). Nenhum dos
   milhares de testes substitui isso.
-- **Nenhum modelo real jamais escreveu um aplicativo aqui** (`EB-04`). O
-  caminho inteiro é provado contra dobro. Uma medição com Ollama real está
-  registrada em `EB-04`: o código que um modelo pequeno devolveu **passa** nas
-  guardas, mas o prompt real não completa em tempo utilizável em CPU.
+- **Uma jornada real não certifica o produto inteiro.** `JORNADA-REAL-01`
+  registra em 20/09/2026 o contador criado com Mistral, a prévia, a alteração
+  na mesma conversa e o reinício do processo. Consultar `CURRENT VERIFIED
+  STATE` em `PROJECT_STATUS.md` para a distinção entre registro externo e
+  revalidação nesta sessão; reinício do computador e demais jornadas pendentes.
 
-Não chame o produto de pronto enquanto essas duas linhas estiverem aqui.
+Não chame o produto de pronto enquanto os critérios de aceite e as pendências
+canônicas não estiverem resolvidos.
 
 ---
 

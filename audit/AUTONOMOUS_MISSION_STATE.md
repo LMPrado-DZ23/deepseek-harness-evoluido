@@ -85,3 +85,40 @@ T-18 (QA visual) e T-28 (superfície da trilha).
 
 **Entrega:** o bundle vai para a pasta de downloads da máquina de quem opera e o Prado aplica com
 `git pull <bundle> integ`. Nunca há push daqui.
+
+
+## Retomada em 21/09/2026 — DOCUMENTATION_RECONCILED
+
+- Missão permanece EXECUTING; checkout recuperado. Próxima ação de engenharia:
+  resolver as falhas da validação e revalidar/corrigir AUDIT-SYNTHESIS-REPLAY-01
+  antes da integração.
+- Branch remota `integ`, base `997fa20d897a95061db6da17981c0713dce5f8a3`.
+  PR #1 em `2be67b5e36bf02652c31492a3e35edaf020f9e15`, aberto e em rascunho.
+- Arquivos: CLAUDE.md, README.md, PROJECT_STATUS, TASK_DAG, EXTERNAL_BLOCKERS,
+  INTERNAL_BLOCKERS, CAPABILITY_MATRIX, linha JORNADA-REAL-01 do ledger, este
+  checkpoint e evidência `audit/evidence/20260921/recovery-state.json`.
+- Mudança: alinhar a jornada documentada com Mistral e retirar a contagem fixa
+  de plugins; preservar a cronologia. Sem alteração de produção ou de estado
+  BETA. Ver CURRENT VERIFIED STATE para evidência, riscos e próxima ação.
+- Recuperação: objetos Git de árvore e 20 commits conferidos por SHA; todos
+  os 6.167 blobs canônicos recuperados. Submódulo materializado no pin, zero
+  diff e gate PASS; dependências instaladas. Nenhum ZIP usado.
+- Validação atual: builds upstream/produto/interface PASS, unidade da interface
+  1.075 PASS (88 arquivos), portão de segredos PASS e 10 autotestes do doctor
+  PASS; boot montado STUDIO_BOOT=PASS e 8 autotestes PASS. Suíte raiz com
+  maxWorkers=1: 4.431 PASS, 176 FAIL e 68 SKIP (43 suítes com falha).
+  Portões: 26/32 PASS; seis não iniciaram por listen EPERM no pipe Unix do
+  CLI do TSX. Constitution PASS com 44 veredictos, sem aprovação global.
+  Navegador NOT_EXECUTED: repetição também bloqueada na partida pelo CLI do
+  TSX. Instalação na máquina alvo NOT_EXECUTED. As 176 falhas não foram
+  individualmente diagnosticadas; detalhes em CURRENT VERIFIED STATE.
+- Falsificações novas: não se aplica a este diff documental, que não introduz
+  guardas. Provas antigas não são reapresentadas como execução atual.
+- Bloqueios externos: transporte Git no terminal, máquina alvo offline,
+  execução de CI sem diagnóstico; internas: síntese, reenvios remanescentes,
+  funcionalidades e instalação ainda sem aceite global.
+- Rollback: reverter exclusivamente o commit documental; nenhuma migração,
+  segredo, dado do usuário, configuração de infraestrutura ou upstream mudou.
+- Commit/push: consultar git log -1 e confirmar SHA remoto; não afirmar envio
+  sem confirmação. A frase antiga “Nunca há push daqui” é histórica: a
+  autorização vigente permite origin integ, sem force, release ou deploy.

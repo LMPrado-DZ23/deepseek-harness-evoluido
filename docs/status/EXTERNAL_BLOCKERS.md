@@ -4,6 +4,38 @@ Cada item aqui precisa provar que **o trabalho interno já foi até onde dava**.
 "OAuth bloqueado porque não tenho credencial" quando o callback nem existe não é
 blocker externo: é trabalho interno pendente com nome errado.
 
+## Estado atual de EB-04 e do ambiente — 21/09/2026
+
+A ausência de prévia descrita nas medições de 12–19/09 abaixo foi superada
+para o contador de copos: `JORNADA-REAL-01` registra modelo Mistral, construção,
+prévia, alteração e retomada do processo em 20/09. Procedência:
+**PROVEN_IN_EXTERNAL_RUNTIME**. Não fecha reinício do computador nem a jornada
+geral completa; detalhes e lacunas em `PROJECT_STATUS.md`, CURRENT VERIFIED STATE.
+
+`DESKTOP-PRADO`: offline ao reconsultar; última atividade 19/09 18:16:40 UTC.
+Checkout canônico recuperado integralmente: 6.167 blobs, dependências
+instaladas e submódulo materializado no pin, zero diff e `gate:upstream-pin`
+**PASS**. Builds upstream/produto/interface e unidade da interface passaram;
+boot montado STUDIO_BOOT=PASS. Seis portões e o servidor do navegador não
+iniciaram pelo CLI do TSX (`listen EPERM` no pipe Unix); correção de partida
+ainda no PR. Placar final: 26/32 portões PASS; suíte raiz com 4.431 PASS,
+176 FAIL e 68 SKIP. Não há diagnóstico individual completo das 176 falhas.
+Detalhes e limites estão em CURRENT VERIFIED STATE.
+Docker e rota LLM ausentes; filesystem overlay recusado pelo doctor:
+**BLOCKED_ENVIRONMENT** para a jornada real que exige esses recursos.
+Trabalho interno continua pendente.
+
+Acesso de leitura ao repositório pelo conector: disponível. Transporte Git:
+SSH sem resolução de github.com; HTTPS sem credencial no terminal.
+Isso não equivale a `BLOCKED_EXTERNAL_REPOSITORY_ACCESS`.
+CI do PR #1, run `35528801256`: ambos os jobs falharam; etapas e logs não
+retornados pelo conector, causa desconhecida. Responsável pela infraestrutura:
+titular/administrador do ambiente; próximas ações externas são diagnosticar
+a CI e restabelecer acesso à máquina alvo. A recuperação do checkout e das
+dependências foi concluída nesta sessão. Nenhuma alteração de rede ou guarda.
+
+## Medições históricas — não usar como estado atual da jornada
+
 | ID | o que está bloqueado | evidência do bloqueio | trabalho interno já feito | ação humana mínima |
 | --- | --- | --- | --- | --- |
 | ~~EB-01~~ | ~~Push, PR e leitura da API do GitHub~~ | **RESOLVIDO em 12/09/2026.** A API do GitHub continua 403 para esta sessão (`add_repo` não existe aqui), mas o `desktop-commander` instalado na máquina do Prado EXECUTA comandos nela, e o `gh`/`git` de lá têm escrita (`"push": true`). Push provado: `4968cca..c7c6952 integ -> integ`, com `rev-parse` local conferido contra `ls-remote` | O bloqueio era meu, não do repositório: eu havia testado três caminhos (API, credential helper, shell da ponte — este último quebrado pela atualização do Windows de 08/09) e parado antes de procurar o quarto | Nenhuma. O envio passou a ser feito pela sessão, e o bundle vira redundância e não via única |

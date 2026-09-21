@@ -7,7 +7,17 @@ trabalhar nele é a forma mais comum de esconder trabalho.
 
 Meta: `CRITICAL = 0` e `HIGH = 0`.
 
-Estado em 17/09/2026: **CRITICAL = 0, HIGH = 0.**
+Estado histórico em 17/09/2026: **CRITICAL = 0, HIGH = 0.**
+
+## Retomada em 21/09/2026
+
+**Há pelo menos um HIGH aberto; o placar histórico acima não descreve o estado
+atual.** `AUDIT-SYNTHESIS-REPLAY-01`: a inspeção da fonte da `integ` confirma
+que a síntese permanece fora do recibo durável do turno. O PR #1 registra
+quatro regressões vermelhas de reenvio; a correção de produção está em
+andamento numa cópia candidata isolada, ainda não integrada. Próximo passo:
+provar a correção e as falhas negativas antes de integrar. Este aviso não
+acrescenta requisito nem altera a contagem do livro mestre.
 
 ## Abertos
 

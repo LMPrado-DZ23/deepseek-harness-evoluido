@@ -10,6 +10,22 @@ Prioridades conforme §215 da missão: **P0** segurança/corrupção/build ·
 **P1** core runtime · **P2** spec/skills/memória/revisão · **P3** browser/UX/
 avaliação/observabilidade · **P4** polimento.
 
+## Retomada verificada — 21/09/2026
+
+Reconciliação de `JORNADA-REAL-01`: **DOCUMENTATION_RECONCILED**; veja CURRENT
+VERIFIED STATE em `PROJECT_STATUS.md`. `REV-CAN-JORNADA` continua em andamento:
+prévia/alteração/reinício do processo registrados externamente, reinício do
+computador pendente. `ABRIR-05` abaixo descreve o bloqueio histórico de 19/09,
+que já não representa o contador aprovado em 20/09.
+
+Antes da integração: revalidar `AUDIT-SYNTHESIS-REPLAY-01` (HIGH, registrado no
+PR #1 `2be67b5`) e corrigir síntese incerta; checkout e dependências já
+recuperados, executar as regressões e resolver as falhas da validação local
+(4.431 PASS, 176 FAIL, 68 SKIP; 26/32 portões PASS). PR aberto
+não é entrega integrada. Depois da jornada
+classificada, manter as prioridades READY existentes; não abrir outro
+orquestrador nem declarar os clientes nativos implementados.
+
 ## Ordem escolhida, e por quê
 
 A missão pede catorze motores. Construí-los na ordem em que aparecem no texto

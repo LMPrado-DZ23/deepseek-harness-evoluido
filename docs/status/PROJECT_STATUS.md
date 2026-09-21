@@ -14,9 +14,84 @@
 - `mission_intent`: evoluir o repositório para um Engineering OS sobre o DeepSeek Harness, preservando o motor e a compatibilidade com o upstream
 - `state`: `EXECUTING`
 - `branch`: `integ` (**não é `main`** — confirmar com `git branch --show-current`)
-- `head`: ver `git log --oneline -1`; o último estado registrado aqui é `91c6aa0` + o trabalho desta iteração (T-27: revisão adversarial do portão de prévia)
+- `head`: base revalidada `997fa20d897a95061db6da17981c0713dce5f8a3`; consultar `git log -1` para o commit desta reconciliação. PR #1 em `2be67b5e36bf02652c31492a3e35edaf020f9e15`, ainda não integrado.
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
-- `atualizado_em`: 2026-09-20
+- `atualizado_em`: 2026-09-21
+
+## CURRENT VERIFIED STATE — 21/09/2026
+
+**Missão EXECUTING. Reconciliação documental, não produto concluído.**
+A API autenticada confirmou a branch `integ`, o HEAD acima e o PR #1 aberto,
+em rascunho e não integrado. Seus testes e correções não certificam a `integ`.
+
+`JORNADA-REAL-01`: **PROVEN_IN_EXTERNAL_RUNTIME**, conforme registro de
+20/09 abaixo e no livro mestre. Contador de copos, projeto `9c4bfbe9…`,
+WSL2 do titular, Chrome no Windows, perfil Melhor qualidade,
+rota `chave-mistral`, modelo `codestral-latest`. Execução inicial `faf9d4bf`:
+build, testes, E2E, axe, exportação, importação e atestação registrados.
+Alteração na mesma conversa: execução `37438b09`, revisão 2, meta de 10;
+três cliques resultaram em 3 e faltavam 7; zerar retornou a 0.
+Reinício do processo registrado após `188e6cb`; reinício do computador não provado.
+
+**NEEDS_REVALIDATION nesta sessão:** modelo efetivamente resolvido pelo alias,
+SHA exato de código de cada execução, IDs completos, hashes dos artefatos e
+logs redigidos de build/E2E/axe/atestação. Esses identificadores completos não
+estão nesta evidência documental; não foram inferidos a partir do HEAD atual.
+`DESKTOP-PRADO` foi reconsultado e está offline (última atividade informada:
+19/09/2026 18:16:40 UTC). Nenhum comando foi enviado ao computador.
+
+A cópia local anterior perdeu metadados Git, dependências e 5.543 dos 6.199
+blobs do PR. A recuperação separada da `integ` foi concluída: **6.167 blobs**,
+sem faltantes, objetos de árvore e 20 commits conferidos por SHA. O submódulo
+foi materializado por Git no pin `6c705be1ce6774a000d061da41d1823b03a3d42c`,
+com zero diff e `gate:upstream-pin` **PASS**. Nenhum ZIP substituiu o repositório.
+
+Validação local desta retomada, sobre a base canônica e este diff documental:
+
+- Dependências instaladas com Node 22 e pnpm 11.19; etapas posteriores usam
+  explicitamente pnpm 11.7. O primeiro build upstream via pnpm tentou uma
+  instalação automática e falhou no hook lefthook do submódulo; não alterou
+  arquivos rastreados. `npm run build:lib` com Node 22 depois passou.
+- Build recursivo do produto com pnpm 11.7: **PASS**. Unidade da interface:
+  **1.075 PASS**, 88 arquivos; build da interface: **PASS**.
+- `pnpm test --maxWorkers=1`: **FAIL**, 4.431 PASS, 176 FAIL e 68 SKIP
+  (4.675 testes; 43 suítes com falha). Duas falhas de restore-core envolvem
+  backup esperado com falha e ancestral inseguro do workspace; as correções
+  já existem no PR, não nesta base. As 176 falhas não foram individualmente
+  diagnosticadas; não são atribuídas em bloco ao ambiente.
+- Portões: **26/32 PASS**. A primeira tentativa precedeu o build do produto
+  e encontrou bibliotecas ainda ausentes. Na repetição, seis portões
+  (`domain-scopes`, `domain-routes`, `assistant-tools`, `team-role-tools`,
+  `rls-coverage`, `comprehension`) não iniciaram seus testes: o CLI do TSX
+  falhou com `listen EPERM` no pipe Unix. `constitution`: **PASS**,
+  44 veredictos; isso não equivale a aprovação global.
+- Navegador: **NOT_EXECUTED**. A primeira tentativa falhou na partida por
+  biblioteca compilada ausente; a repetição falhou na partida pelo CLI do TSX.
+  A correção de partida com `node --import tsx` existe no PR, ainda não nesta
+  base; resultados de navegador do PR não certificam a `integ`.
+- Boot montado (`prove-studio-boot.mjs`): **8 autotestes PASS** e
+  **STUDIO_BOOT=PASS** — árvore de plugins, partida e processo vivo, bilhete
+  shell 303, Studio 200 sem sessão, identidade pessoal 200 e rotas de detalhe
+  200. Isso prova a partida local, não a geração com modelo real.
+- Portão de segredos: **PASS**, 6.120 arquivos, 32 isenções, zero achados.
+  Doctor: **10 autotestes PASS**; Docker e rota LLM ausentes, filesystem
+  overlay recusado pelo diagnóstico. Não provam execução real do construtor.
+
+Uma cópia isolada em `2be67b5` foi preparada para corrigir a síntese antes da
+integração; seus resultados não são resultados desta base canônica.
+
+CI do PR, execução `35528801256`: Linux e Windows falharam; o conector não
+retornou etapas nem URL de logs. Causa específica não confirmada.
+
+Evidência consolidada: `audit/evidence/20260921/recovery-state.json`.
+
+Prioridades: resolver as falhas locais e reexecutar as regressões de
+`AUDIT-SYNTHESIS-REPLAY-01` antes de integrar o PR; validar instalação e retomada
+na máquina alvo. Agendamento durável, clientes nativos e demais itens do DAG
+continuam abertos. Comparação pareada com Manus: **NOT_EXECUTED**.
+
+Os blocos datados abaixo preservam a história. Expressões como “próximo” e
+“falta” dentro deles descrevem aquela data; este bloco governa a retomada.
 
 ## PRIMEIRO APLICATIVO DE MODELO REAL APROVADO — 20/09/2026, madrugada (JORNADA-REAL-01)
 

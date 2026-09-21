@@ -189,8 +189,10 @@ está, tem o motivo escrito.
 | portões estáticos | **30/30** |
 | diff no Harness | **zero** |
 
-Os números acima são de uma execução completa das quatro suítes, e não de uma
-estimativa. `docs/OPERACAO.md` tem o comando de cada uma; `gate:typecheck` e
+Os números acima são uma **medição histórica**, não reexecutada integralmente
+nesta sessão. Consulte o [estado verificado atual](./docs/status/PROJECT_STATUS.md#current-verified-state--21092026)
+para os resultados atuais e suas limitações. O registro histórico descreve uma
+execução completa das quatro suítes, não uma estimativa. `docs/OPERACAO.md` tem o comando de cada uma; `gate:typecheck` e
 `gate:lib-freshness` existem porque os dois passos que dava para pular foram
 pulados.
 
@@ -201,11 +203,12 @@ pulados.
 - Nenhum *deploy* de produção. O destino de publicação hoje é **local**.
 - A imagem OCI ainda não foi construída (falta rota de rede para registro de
   pacotes no ambiente de build).
-- **Nenhum aplicativo criado por modelo real chegou à prévia aberta ainda.**
-  O `qwen2.5-coder:7b`, no computador do titular, escreveu pelo próprio produto
-  um jogo da velha e um contador que passaram nas guardas; o contador compilou
-  e parou na checagem de tipos, e o conserto (o `title` do conteúdo) está no
-  código. Falta rodar até build, verificação e prévia (`EB-04`).
+- **Uma jornada com modelo real chegou à prévia e à alteração na mesma
+  conversa**, registrada em 20/09/2026: contador de copos com Mistral no
+  computador do titular (`JORNADA-REAL-01`). A classificação é
+  `PROVEN_IN_EXTERNAL_RUNTIME`; esta sessão não repetiu a execução.
+  Reinício do computador, outras jornadas e plataformas continuam pendentes.
+  Consulte o [estado verificado atual](./docs/status/PROJECT_STATUS.md#current-verified-state--21092026).
 - **A maioria dos requisitos está em `BETA`**: construídos e provados **neste
   ambiente**, não na vida real. A contagem atual está no fim do livro mestre, e
   só lá — escrita aqui ela envelhecia e passava a discordar.
@@ -308,7 +311,7 @@ agora usa o caminho de desenvolvimento acima.
 └───────────────────────────┬──────────────────────────────────┘
                             │  composição, sem patch
 ┌───────────────────────────▼──────────────────────────────────┐
-│  22 plugins do FRIGG                                        │
+│  Plugins do FRIGG                                           │
 │                                                              │
 │  confiança   identity · tenancy · policy · action-approval   │
 │  criação     prompt-to-app · builder-supervisor · staging    │
