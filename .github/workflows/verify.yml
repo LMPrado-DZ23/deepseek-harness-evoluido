@@ -263,12 +263,14 @@ jobs:
           path: sbom.cdx.json
           if-no-files-found: error
 
-      - name: Web interface suite (part 1)
+      - name: Web interface suite
+        # Each shard gets a fresh Node process so memory from collected test
+        # modules is reclaimed between batches on the memory-limited runner.
         working-directory: apps/studio-web
-        run: NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run --shard=1/2
-      - name: Web interface suite (part 2)
-        working-directory: apps/studio-web
-        run: NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run --shard=2/2
+        run: |
+          for shard in 1 2 3 4 5 6 7 8; do
+            NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run --shard="${shard}/8" || exit $?
+          done
 
       - name: Browser suite
         # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
