@@ -265,10 +265,10 @@ jobs:
 
       - name: Web interface suite (part 1)
         working-directory: apps/studio-web
-        run: pnpm exec vitest run --shard=1/2
+        run: NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run --shard=1/2
       - name: Web interface suite (part 2)
         working-directory: apps/studio-web
-        run: pnpm exec vitest run --shard=2/2
+        run: NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run --shard=2/2
 
       - name: Browser suite
         # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
