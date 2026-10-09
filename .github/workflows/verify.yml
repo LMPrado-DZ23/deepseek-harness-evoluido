@@ -264,10 +264,16 @@ jobs:
           if-no-files-found: error
 
       - name: Web interface suite
-        # Vitest retains the worker when singleFork is enabled. Recycle it once
-        # it reaches 512 MiB so long suites stay below the runner's heap limit.
+        # Execute tests in sequential shards of 10 to ensure fresh processes
+        # are spawned, preventing OOM in the runner's heap.
         working-directory: apps/studio-web
-        run: pnpm exec vitest run --pool=forks --maxWorkers=1 --minWorkers=1 --poolOptions.forks.memoryLimit=512
+        run: |
+          all_specs=(src/**/*.spec.ts src/**/*.spec.tsx)
+          chunk_size=10
+          for ((i=0; i<${#all_specs[@]}; i+=chunk_size)); do
+            chunk=("${all_specs[@]:i:chunk_size}")
+            pnpm exec vitest run --pool=forks --maxWorkers=1 "${chunk[@]}" || exit $?
+          done
 
       - name: Browser suite
         # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
