@@ -9,9 +9,10 @@ export default defineConfig({
   test: {
     include: ['src/**/*.spec.ts', 'src/**/*.spec.tsx'],
     environment: 'node',
+    pool: 'forks',
     poolOptions: {
-      threads: {
-        singleThread: true
+      forks: {
+        singleFork: true
       }
     }
   },
