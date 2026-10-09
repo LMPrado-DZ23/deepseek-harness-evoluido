@@ -1,6 +1,0 @@
-.git
-**/.git
-**/node_modules
-**/node_modules/**
-third_party/deepseek-harness/**/lib
-third_party/deepseek-harness/**/lib/**
