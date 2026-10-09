@@ -264,12 +264,13 @@ jobs:
           if-no-files-found: error
 
       - name: Web interface suite
-        # Each shard gets a fresh Node process so memory from collected test
-        # modules is reclaimed between batches on the memory-limited runner.
+        # Run each spec in its own Node process to keep peak memory bounded on
+        # the Linux runner; Vitest retains transformed modules across a shard.
         working-directory: apps/studio-web
         run: |
-          for shard in 1 2 3 4 5 6 7 8; do
-            NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run --shard="${shard}/8" || exit $?
+          mapfile -t specs < <(find src -type f \( -name '*.spec.ts' -o -name '*.spec.tsx' \) | sort)
+          for spec in "${specs[@]}"; do
+            NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run "$spec" --maxWorkers=1 || exit $?
           done
 
       - name: Browser suite
