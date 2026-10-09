@@ -268,7 +268,7 @@ jobs:
         # próprio: o da raiz não alcança `apps/`, e sem esta etapa a peça
         # central do portão humano ficava sem cobertura na CI.
         working-directory: apps/studio-web
-        run: pnpm exec vitest run
+        run: pnpm exec vitest run --maxWorkers=1
 
       - name: Browser suite
         # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
