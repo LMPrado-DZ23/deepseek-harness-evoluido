@@ -264,14 +264,10 @@ jobs:
           if-no-files-found: error
 
       - name: Web interface suite
-        # Run each spec in its own Node process to keep peak memory bounded on
-        # the Linux runner; Vitest retains transformed modules across a shard.
+        # Use the threads pool: the forked runner grows to the V8 heap ceiling
+        # on Linux even when each spec gets its own process.
         working-directory: apps/studio-web
-        run: |
-          mapfile -t specs < <(find src -type f \( -name '*.spec.ts' -o -name '*.spec.tsx' \) | sort)
-          for spec in "${specs[@]}"; do
-            NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run "$spec" --maxWorkers=1 || exit $?
-          done
+        run: pnpm exec vitest run --pool=threads --maxWorkers=1 --no-file-parallelism
 
       - name: Browser suite
         # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
