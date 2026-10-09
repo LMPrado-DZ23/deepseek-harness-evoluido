@@ -1,6 +1,6 @@
 import { ArrowUp, CircleCheck, CircleSlash, FileText, FolderOpen, Loader, TriangleAlert, X } from 'lucide-react'
 import { BuildSteps } from '../BuildSteps'
-import { hasBuildSteps } from '../buildSteps'
+import { hasBuildSteps } from '../BuildSteps'
 import { attemptSentence, stageSentence } from '../creationProgress'
 import { useEffect, useRef, useState } from 'react'
 import tarefa from '../i18n/tarefa.pt-BR.json'

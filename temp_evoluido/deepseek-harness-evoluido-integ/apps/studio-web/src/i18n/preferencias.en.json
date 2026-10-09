@@ -1,0 +1,99 @@
+{
+  "titulo": "Preferences",
+  "abrir": "Preferences",
+  "fechar": "Close preferences",
+  "navegacao": "Preference sections",
+  "grupos": {
+    "configuracoes": "Settings",
+    "capacidades": "Capabilities",
+    "dados": "Data and integrations"
+  },
+  "secoes": {
+    "conta": "Account",
+    "notificacoes": "Notifications",
+    "tema": "Theme",
+    "idioma": "Language",
+    "atalhos": "Keyboard shortcuts",
+    "uso": "Usage and costs",
+    "conexoes": "AI connections",
+    "habilidades": "Skills",
+    "plugins": "Plugins",
+    "computador": "My computer",
+    "biblioteca": "Library",
+    "privacidade": "Data controls",
+    "implantacoes": "Deployments"
+  },
+  "pendencias": {
+    "semSessao": "Sign in to your account to see this data.",
+    "semNotificacao": "This browser does not offer notifications. On one that does, the notice shows up here.",
+    "temaUnico": "Only the dark theme exists. The old stylesheet still paints hundreds of colours by hand, outside the tokens, and a light theme that paints half the screen would be worse than none. The migration is planned as V7-K.",
+    "semComputador": "Connecting FRIGG to a folder on your computer does not exist yet. It is planned as V7-F.",
+    "semImplantacao": "Publishing the app you created does not exist in this product yet."
+  },
+  "verDestino": "Open",
+  "contaNome": "Name",
+  "contaSemNome": "Your session has no name on record.",
+  "pendenciaRotulo": "Not available yet",
+  "avatarSemNome": "—",
+  "usoLendo": "Reading this workspace's usage…",
+  "usoErro": "Could not read the usage right now.",
+  "usoSemMedicao": "This FRIGG is set up without the service that measures route, usage and cost. There is no number to show, and inventing one would be worse.",
+  "usoRota": "Route",
+  "usoChamadas": "Calls",
+  "usoTokens": "Tokens",
+  "usoCusto": "Estimated cost",
+  "usoCustoDesconhecido": "not measured",
+  "usoSemPreco": "{n} unpriced",
+  "usoTotal": "Measured total: {custo} across {chamadas} call(s).",
+  "usoNaoPrecificadas": "{n} call(s) with no price configured — their cost is NOT in this total.",
+  "usoVeredito": {
+    "semConsumo": "No calls recorded in this workspace yet.",
+    "dentro": "Within the configured ceiling.",
+    "custoExcedido": "The cost ceiling was reached. External routes stay blocked until the ceiling is revised.",
+    "semPrecoExcedido": "There were too many calls with no price configured. Set the route prices so the ceiling can measure again.",
+    "naoSei": "There is no measurement available to say whether this workspace is within any ceiling."
+  },
+  "usoLimitacao": "Subscription quota and provider-reported cost do not exist in this product. What is here is the usage FRIGG measured.",
+  "atalhosEscopo": {
+    "global": "on any screen",
+    "compositor": "while writing in the composer"
+  },
+  "atalhosNomes": {
+    "enviar": "Send what you wrote",
+    "quebrarLinha": "Break the line without sending",
+    "fechar": "Close whatever is open — menu, modal or panel"
+  },
+  "atalhosTecla": "Key",
+  "atalhosAcao": "What it does",
+  "atalhosOnde": "Where it works",
+  "atalhosLimitacao": "These are all the shortcuts that exist today. There is no way to change the keys, and a shortcut listed here is always a shortcut that works.",
+  "dadosBaixar": "Download everything that is mine",
+  "dadosExplicacao": "A JSON file with your tasks, their conversations, the descriptions, the plans, the attempts and the evidence — everything in this workspace's scope, and nothing outside it.",
+  "dadosLimitacao": "The code your tasks generated is NOT in this file: it lives in the Library, with a cryptographic digest and its own download. Deleting data from here does not exist — deleting is a destructive action and depends on a decision by the product's owner.",
+  "dadosSemSegredo": "No password, key or secret goes into the file. FRIGG does not keep any of them in this place.",
+  "idiomaTitulo": "Interface language",
+  "idiomaAjuda": "Changing the language only changes what is written on the screen. It does not change currency, price, permissions, tasks, history or the time of your scheduled runs.",
+  "idiomaAtual": "Language in use",
+  "idiomaCobertura": "For now, the navigation and this Preferences screen are in all three languages. The other screens are still in Brazilian Portuguese and are being translated screen by screen — claiming everything is translated before that would be false.",
+  "idiomaNaoGuardado": "Your choice could not be saved in this browser, so it only lasts until you close the page.",
+  "conexoes": {
+    "explicacao": "Creations use the first connection in this list that is on and ready. To use another one, turn off the ones above it.",
+    "lendo": "Reading the connections…",
+    "erro": "Could not read the connections right now.",
+    "erroMudar": "Could not change this connection right now.",
+    "tipos": {
+      "local": "Local AI, on your computer",
+      "linha": "Through the command line, with your account",
+      "chave": "Through an API key"
+    },
+    "estados": {
+      "pronta": "ready",
+      "naoConfigurada": "not configured",
+      "comFalha": "recently failing"
+    },
+    "emUso": "used now for creations",
+    "ligar": "Use {nome}",
+    "linhaComoInstalar": "To show up here, install the tool (Claude Code, Gemini CLI, Qwen Code or Codex CLI), sign in with your account in the terminal and restart FRIGG. FRIGG does not keep your password or key: the tool talks to the provider.",
+    "limitacao": "Through the command line the agent chats but does not use tools (search, write files, schedule). A project with the private profile only uses the local AI."
+  }
+}

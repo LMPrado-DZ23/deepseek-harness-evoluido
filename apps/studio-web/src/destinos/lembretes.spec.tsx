@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { intervaloEmTexto, lerLembretes, pedidoDeCancelamento } from './lembretes'
-import { LembretesDaConversa, ListaDeLembretes } from './Destinos'
+import { LembretesDaConversa, ListaDeLembretes } from './destinos'
 import copy from '../i18n/destinos.pt-BR.json'
 
 const INTERVALOS = { minutos: copy.lembretesMinutos, horas: copy.lembretesHoras, dias: copy.lembretesDias }

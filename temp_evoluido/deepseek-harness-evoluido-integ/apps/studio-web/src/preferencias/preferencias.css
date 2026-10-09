@@ -1,0 +1,194 @@
+/*
+  As Preferências em modal, como F04/F05: navegação à esquerda, seção à
+  direita, e o fundo escurecido que devolve o foco à janela.
+*/
+.dz-preferencias-fundo {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--dz-4);
+  background: rgb(0 0 0 / 60%);
+}
+
+.dz-preferencias {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  width: min(980px, 100%);
+  height: min(640px, 90vh);
+  overflow: hidden;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+}
+
+.dz-preferencias-lista {
+  overflow-y: auto;
+  padding: var(--dz-4) var(--dz-3);
+  border-right: 1px solid var(--dz-border);
+  background: var(--dz-sidebar);
+}
+
+.dz-preferencias-grupo + .dz-preferencias-grupo { margin-top: var(--dz-4); }
+
+.dz-preferencias-grupo-titulo {
+  margin: 0 0 var(--dz-2);
+  padding: 0 var(--dz-2);
+  font-size: 0.75rem;
+  color: var(--dz-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dz-preferencias-lista ul { margin: 0; padding: 0; list-style: none; }
+
+.dz-preferencias-item {
+  display: block;
+  width: 100%;
+  padding: 0.4rem var(--dz-2);
+  border: 0;
+  border-radius: var(--dz-radius);
+  background: none;
+  color: var(--dz-text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dz-preferencias-item-aberto { background: var(--dz-surface-active); color: var(--dz-text); }
+
+.dz-preferencias-corpo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-3);
+  overflow-y: auto;
+  padding: var(--dz-4);
+}
+
+.dz-preferencias-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  padding-bottom: var(--dz-3);
+  border-bottom: 1px solid var(--dz-border);
+}
+
+.dz-preferencias-topo h2 { margin: 0; font-size: 1.25rem; }
+
+.dz-preferencias-fechar {
+  display: inline-flex;
+  padding: var(--dz-1);
+  border: 0;
+  border-radius: var(--dz-radius);
+  background: none;
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+}
+
+.dz-preferencias-fechar svg { width: 1.125rem; height: 1.125rem; }
+
+/* A pendência é TEXTO, e nunca um controle apagado. */
+.dz-preferencias-pendencia {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-1);
+  max-width: 60ch;
+  margin: 0;
+  color: var(--dz-text-secondary);
+}
+
+.dz-preferencias-pendencia strong { color: var(--dz-text); font-size: 0.875rem; }
+
+.dz-preferencias-conta { margin: 0; }
+.dz-preferencias-conta dt { color: var(--dz-text-secondary); font-size: 0.875rem; }
+.dz-preferencias-conta dd { margin: var(--dz-1) 0 0; }
+
+.dz-preferencias-destino {
+  display: inline-flex;
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--dz-border);
+  border-radius: 999px;
+  color: var(--dz-text);
+  text-decoration: none;
+}
+
+@media (max-width: 860px) {
+  .dz-preferencias { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: 90vh; }
+  .dz-preferencias-lista { border-right: 0; border-bottom: 1px solid var(--dz-border); max-height: 34vh; }
+}
+
+.dz-preferencias-conta-topo {
+  display: flex;
+  align-items: center;
+  gap: var(--dz-2);
+  margin: 0 0 var(--dz-4);
+  padding: 0 var(--dz-2);
+  color: var(--dz-text);
+  font-weight: 600;
+}
+
+.dz-preferencias-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--dz-border);
+  border-radius: 999px;
+  background: var(--dz-surface-active);
+  color: var(--dz-accent);
+  font-size: 0.8125rem;
+}
+
+/* O consumo do espaço de trabalho, nas Preferências. */
+.dz-preferencias-uso { display: grid; gap: var(--dz-3); }
+.dz-preferencias-uso-veredito { margin: 0; }
+
+.dz-preferencias-uso-tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.dz-preferencias-uso-tabela th,
+.dz-preferencias-uso-tabela td {
+  padding: var(--dz-2) var(--dz-3);
+  text-align: left;
+  border-bottom: 1px solid var(--dz-border);
+}
+
+.dz-preferencias-uso-tabela thead th { color: var(--dz-text-secondary); font-weight: 500; }
+.dz-preferencias-uso-tabela tbody th { font-weight: 500; }
+.dz-preferencias-uso-total { margin: 0; }
+.dz-preferencias-uso-aviso { margin: 0; color: var(--dz-warning); font-size: 0.8125rem; }
+.dz-preferencias-uso-limite { margin: 0; color: var(--dz-text-secondary); font-size: 0.8125rem; }
+
+/*
+  O SELETOR DE IDIOMA.
+
+  Rádio, e não `select`: com três opções, a lista fechada esconde duas delas
+  atrás de um clique, e quem procura o próprio idioma numa interface que não lê
+  precisa VER os nomes. A partir de umas seis opções a conta se inverte, e aí a
+  decisão muda junto.
+*/
+.dz-preferencias-idioma fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: var(--dz-2); }
+.dz-preferencias-idioma legend { padding: 0; font-weight: 600; margin-bottom: var(--dz-2); }
+.dz-preferencias-idioma label { display: flex; align-items: center; gap: var(--dz-2); min-height: 40px; }
+
+/*
+  As DUAS frases de ajuda do idioma precisam de ar entre elas.
+
+  A conferência da captura mostrou as duas coladas, lidas como um parágrafo só —
+  e a primeira delas é a que importa: "trocar o idioma não muda moeda, preço,
+  permissões, tarefas, histórico nem horário". Enterrada no meio de um bloco de
+  texto pequeno, ela não é lida por ninguém.
+*/
+.dz-preferencias-idioma .dz-preferencias-uso-limite { margin: var(--dz-3) 0 0; }
+
+.dz-preferencias-conexoes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.dz-preferencias-conexoes label { display: flex; gap: 0.75rem; align-items: flex-start; cursor: pointer; }
+.dz-preferencias-conexoes label > span { display: grid; gap: 0.125rem; }
+.dz-preferencias-conexao-em-uso { font-size: 0.8125rem; font-weight: 600; color: var(--dz-success); }

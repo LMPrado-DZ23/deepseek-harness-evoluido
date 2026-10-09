@@ -1,0 +1,99 @@
+{
+  "titulo": "Preferencias",
+  "abrir": "Preferencias",
+  "fechar": "Cerrar las preferencias",
+  "navegacao": "Secciones de las preferencias",
+  "grupos": {
+    "configuracoes": "Ajustes",
+    "capacidades": "Capacidades",
+    "dados": "Datos e integraciones"
+  },
+  "secoes": {
+    "conta": "Cuenta",
+    "notificacoes": "Notificaciones",
+    "tema": "Tema",
+    "idioma": "Idioma",
+    "atalhos": "Atajos de teclado",
+    "uso": "Uso y costes",
+    "conexoes": "Conexiones de IA",
+    "habilidades": "Habilidades",
+    "plugins": "Plugins",
+    "computador": "Mi ordenador",
+    "biblioteca": "Biblioteca",
+    "privacidade": "Controles de datos",
+    "implantacoes": "Despliegues"
+  },
+  "pendencias": {
+    "semSessao": "Inicia sesión en tu cuenta para ver estos datos.",
+    "semNotificacao": "Este navegador no ofrece notificaciones. En uno que las ofrezca, el aviso aparece aquí.",
+    "temaUnico": "Solo existe el tema oscuro. La hoja antigua todavía pinta cientos de colores a mano, fuera de los tokens, y un tema claro que pinte media pantalla sería peor que ninguno. La migración está planificada como V7-K.",
+    "semComputador": "Conectar FRIGG a una carpeta de tu ordenador todavía no existe. Está planificado como V7-F.",
+    "semImplantacao": "Publicar la aplicación creada todavía no existe en este producto."
+  },
+  "verDestino": "Abrir",
+  "contaNome": "Nombre",
+  "contaSemNome": "Tu sesión no tiene un nombre registrado.",
+  "pendenciaRotulo": "Todavía no disponible",
+  "avatarSemNome": "—",
+  "usoLendo": "Leyendo el consumo de este espacio de trabajo…",
+  "usoErro": "No se pudo leer el consumo ahora mismo.",
+  "usoSemMedicao": "Este FRIGG está montado sin el servicio que mide ruta, uso y coste. No hay número que mostrar, e inventar uno sería peor.",
+  "usoRota": "Ruta",
+  "usoChamadas": "Llamadas",
+  "usoTokens": "Tokens",
+  "usoCusto": "Coste estimado",
+  "usoCustoDesconhecido": "no medido",
+  "usoSemPreco": "{n} sin precio",
+  "usoTotal": "Total medido: {custo} en {chamadas} llamada(s).",
+  "usoNaoPrecificadas": "{n} llamada(s) sin precio configurado — su coste NO está en este total.",
+  "usoVeredito": {
+    "semConsumo": "Todavía no hay ninguna llamada registrada en este espacio de trabajo.",
+    "dentro": "Dentro del techo configurado.",
+    "custoExcedido": "Se alcanzó el techo de coste. Las rutas externas quedan bloqueadas hasta que se revise el techo.",
+    "semPrecoExcedido": "Hubo demasiadas llamadas sin precio configurado. Configura el precio de las rutas para que el techo vuelva a medir.",
+    "naoSei": "No hay medición disponible para decir si este espacio está dentro de algún techo."
+  },
+  "usoLimitacao": "La cuota de suscripción y el coste informado por el proveedor no existen en este producto. Lo que hay aquí es el consumo que FRIGG midió.",
+  "atalhosEscopo": {
+    "global": "en cualquier pantalla",
+    "compositor": "mientras escribes en el compositor"
+  },
+  "atalhosNomes": {
+    "enviar": "Enviar lo que escribiste",
+    "quebrarLinha": "Saltar de línea sin enviar",
+    "fechar": "Cerrar lo que esté abierto — menú, modal o panel"
+  },
+  "atalhosTecla": "Tecla",
+  "atalhosAcao": "Qué hace",
+  "atalhosOnde": "Dónde vale",
+  "atalhosLimitacao": "Estos son todos los atajos que existen hoy. No se pueden cambiar las teclas, y un atajo listado aquí es siempre un atajo que funciona.",
+  "dadosBaixar": "Descargar todo lo que es mío",
+  "dadosExplicacao": "Un archivo JSON con tus tareas, sus conversaciones, las descripciones, los planes, los intentos y las pruebas — todo lo del ámbito de este espacio de trabajo, y nada de fuera.",
+  "dadosLimitacao": "El código que generaron las tareas NO va en este archivo: vive en la Biblioteca, con resumen criptográfico y descarga propia. Borrar datos desde aquí no existe — borrar es una acción destructiva y depende de una decisión del dueño del producto.",
+  "dadosSemSegredo": "Ninguna contraseña, clave o secreto entra en el archivo. FRIGG no guarda ninguno de ellos en este lugar.",
+  "idiomaTitulo": "Idioma de la interfaz",
+  "idiomaAjuda": "Cambiar el idioma solo cambia lo que está escrito en la pantalla. No cambia moneda, precio, permisos, tareas, historial ni la hora de las ejecuciones programadas.",
+  "idiomaAtual": "Idioma en uso",
+  "idiomaCobertura": "Por ahora, la navegación y esta pantalla de Preferencias están en los tres idiomas. Las demás pantallas siguen en portugués de Brasil y se van traduciendo pantalla a pantalla — decir que todo está traducido antes de eso sería falso.",
+  "idiomaNaoGuardado": "No se pudo guardar tu elección en este navegador, así que solo vale hasta que cierres la página.",
+  "conexoes": {
+    "explicacao": "Las creaciones usan la primera conexión de esta lista que esté activada y lista. Para usar otra, desactiva las que están antes.",
+    "lendo": "Leyendo las conexiones…",
+    "erro": "No se pudieron leer las conexiones ahora.",
+    "erroMudar": "No se pudo cambiar esta conexión ahora.",
+    "tipos": {
+      "local": "IA local, en tu computadora",
+      "linha": "Por la línea de comandos, con tu cuenta",
+      "chave": "Por clave de API"
+    },
+    "estados": {
+      "pronta": "lista",
+      "naoConfigurada": "no configurada",
+      "comFalha": "con fallos recientes"
+    },
+    "emUso": "usada ahora en las creaciones",
+    "ligar": "Usar {nome}",
+    "linhaComoInstalar": "Para aparecer aquí, instala la herramienta (Claude Code, Gemini CLI, Qwen Code o Codex CLI), inicia sesión con tu cuenta en la terminal y reinicia FRIGG. FRIGG no guarda tu contraseña ni tu clave: la herramienta habla con el proveedor.",
+    "limitacao": "Por la línea de comandos el agente conversa, pero no usa herramientas (buscar, escribir archivos, programar). Un proyecto con el perfil privado solo usa la IA local."
+  }
+}

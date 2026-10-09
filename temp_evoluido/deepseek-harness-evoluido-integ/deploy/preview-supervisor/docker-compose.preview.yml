@@ -1,0 +1,60 @@
+services:
+  harness:
+    environment:
+      DZ23_RUNS_ROOT: /var/lib/dz23-studio/generated-runs
+      DZ23_PREVIEW_SUPERVISOR_ENABLED: "1"
+      DZ23_PREVIEW_SUPERVISOR_SOCKET: /run/dz23-preview/supervisor.sock
+      DZ23_PREVIEW_SUPERVISOR_TOKEN_FILE: /run/secrets/dz23_preview_supervisor_token
+      DZ23_PREVIEW_PROXY_SOCKET_ROOT: /run/dz23-preview-proxies
+    volumes:
+      - preview-supervisor-socket:/run/dz23-preview:ro
+      - preview-proxy-sockets:/run/dz23-preview-proxies:ro
+      - ${DZ23_PREVIEW_SUPERVISOR_TOKEN_FILE:?Defina o arquivo do token do supervisor}:/run/secrets/dz23_preview_supervisor_token:ro
+    depends_on:
+      preview-supervisor:
+        condition: service_healthy
+
+  preview-supervisor:
+    image: ${DZ23_PREVIEW_SUPERVISOR_IMAGE:?Defina o ID sha256 auditado da imagem do supervisor}
+    environment:
+      DZ23_DOCKER_SOCKET: /var/run/docker.sock
+      DZ23_SUPERVISOR_SOCKET: /run/dz23-preview/supervisor.sock
+      DZ23_SUPERVISOR_TOKEN_FILE: /run/secrets/dz23-preview-supervisor-token
+      DZ23_ARTIFACT_ROOT: /var/lib/dz23-studio/generated-runs
+      DZ23_PROXY_SOCKET_ROOT: /run/dz23-preview-proxies
+      DZ23_PROXY_SOCKET_VOLUME: ${DZ23_PREVIEW_PROXY_SOCKET_VOLUME:-dz23-preview-proxy-sockets}
+      DZ23_RUNTIME_IMAGE_DIGEST: ${DZ23_RUNTIME_IMAGE_DIGEST:?Defina o ID sha256 auditado da imagem do runtime}
+      DZ23_PROXY_IMAGE_DIGEST: ${DZ23_PREVIEW_SUPERVISOR_IMAGE:?Defina o ID sha256 auditado da imagem do supervisor}
+      DZ23_INSTANCE_ID: ${DZ23_INSTANCE_ID:?Defina o identificador desta instalacao}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - studio-data:/var/lib/dz23-studio:ro
+      - preview-supervisor-socket:/run/dz23-preview
+      - preview-proxy-sockets:/run/dz23-preview-proxies
+      - ${DZ23_PREVIEW_SUPERVISOR_TOKEN_FILE:?Defina o arquivo do token do supervisor}:/run/secrets/dz23-preview-supervisor-token:ro
+    network_mode: none
+    user: "10001:10001"
+    group_add:
+      - ${DZ23_DOCKER_GID:?Defina o GID do socket Docker}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:fs').lstatSync('/run/dz23-preview/supervisor.sock').isSocket()||process.exit(1)"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
+    stop_grace_period: 75s
+    restart: unless-stopped
+
+volumes:
+  preview-supervisor-socket:
+    name: ${DZ23_PREVIEW_SUPERVISOR_SOCKET_VOLUME:-dz23-preview-supervisor-socket}
+  preview-proxy-sockets:
+    name: ${DZ23_PREVIEW_PROXY_SOCKET_VOLUME:-dz23-preview-proxy-sockets}

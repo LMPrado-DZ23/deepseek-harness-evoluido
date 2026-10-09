@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.package-build.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "noEmit": false,
+    "outDir": "lib",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"]
+}

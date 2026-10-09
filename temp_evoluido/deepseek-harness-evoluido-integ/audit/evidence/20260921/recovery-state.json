@@ -1,0 +1,832 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-21T00:37:20.812912+00:00",
+  "state": "DOCUMENTATION_RECONCILED",
+  "product_complete": false,
+  "repository": "LMPrado-DZ23/deepseek-harness-evoluido",
+  "branch": "integ",
+  "base_commit": "997fa20d897a95061db6da17981c0713dce5f8a3",
+  "unmerged_pr": {
+    "number": 1,
+    "sha": "2be67b5e36bf02652c31492a3e35edaf020f9e15",
+    "draft": true
+  },
+  "recovery": {
+    "tracked_blobs": 6167,
+    "missing_blobs": 0,
+    "verified_history_commits": 20,
+    "upstream_commit": "6c705be1ce6774a000d061da41d1823b03a3d42c",
+    "upstream_tree": "a712eec535b48badc4fefb4df5176a7002e4280b",
+    "upstream_diff": "zero",
+    "zip_used": false
+  },
+  "environment": {
+    "node": "22.23.1",
+    "dependency_install_pnpm": "11.19.0",
+    "subsequent_pnpm": "11.7.0",
+    "docker": "not_available",
+    "filesystem": "overlay",
+    "unix_socket": "EPERM",
+    "target_device": "offline"
+  },
+  "tests": {
+    "root": {
+      "command": "pnpm test --maxWorkers=1 --reporter=json",
+      "state": "FAIL",
+      "passed": 4431,
+      "failed": 176,
+      "skipped": 68,
+      "all_failures_individually_diagnosed": false
+    },
+    "gates": {
+      "state": "FAIL",
+      "passed": 26,
+      "failed": 6,
+      "failed_before_test": [
+        "domain-scopes",
+        "domain-routes",
+        "assistant-tools",
+        "team-role-tools",
+        "rls-coverage",
+        "comprehension"
+      ],
+      "reason": "tsx CLI listen EPERM on Unix IPC pipe",
+      "constitution": "PASS"
+    },
+    "web_unit": {
+      "state": "PASS",
+      "tests": 1075,
+      "files": 88
+    },
+    "web_build": "PASS",
+    "product_build": "PASS",
+    "upstream_build": "PASS",
+    "boot": {
+      "state": "PASS",
+      "self_tests": 8,
+      "runtime": "STUDIO_BOOT=PASS"
+    },
+    "secrets": {
+      "state": "PASS",
+      "files": 6120,
+      "allowlist": 32,
+      "findings": 0
+    },
+    "builder_doctor": {
+      "self_tests": "PASS",
+      "cases": 10,
+      "runtime": "BLOCKED_ENVIRONMENT"
+    },
+    "browser": {
+      "state": "NOT_EXECUTED",
+      "reason": "webServer failed before tests; TSX CLI Unix IPC EPERM after dependencies compiled"
+    },
+    "postgres": {
+      "state": "NOT_EXECUTED",
+      "command": "node scripts/test-postgres.mjs",
+      "reason": "POSTGRES_GATE=NOT_EXECUTED reason=no-server; Docker ENOENT; no isolated DSN configured"
+    },
+    "physical_install": "NEEDS_REVALIDATION",
+    "model_generation": "NEEDS_REVALIDATION"
+  },
+  "journey": {
+    "id": "JORNADA-REAL-01",
+    "classification": "PROVEN_IN_EXTERNAL_RUNTIME",
+    "historical_date": "2026-09-20",
+    "project_prefix": "9c4bfbe9",
+    "initial_run_prefix": "faf9d4bf",
+    "revision_run_prefix": "37438b09",
+    "revision": 2,
+    "route": "chave-mistral",
+    "model_alias": "codestral-latest",
+    "evidence_source": "docs/MASTER_REQUIREMENTS_LEDGER.md",
+    "current_session_rerun": false,
+    "missing_evidence": [
+      "full run IDs",
+      "code SHA per run",
+      "artifact hashes",
+      "provider-resolved model identity",
+      "redacted build/E2E/axe/attestation logs",
+      "computer restart"
+    ]
+  },
+  "new_guards": 0,
+  "new_mutations": "NOT_APPLICABLE_DOCUMENTATION_ONLY",
+  "raw_log_sha256": {
+    "recovery-root.json": "19dea7e9f90a907ffbeb16e7b1bd7086723ff8e9cf53be88962ccca764e9398c",
+    "recovery-full-gates-retry.log": "53843a5d5c74ea64c897bab38231ebb4de8756073cb0436781a82072f139b60a",
+    "recovery-web-unit.log": "8ee88a0e83aa3097bd4d0716a8a1f7b1b3e64e4686a73a4a11bf042fa890f7be",
+    "recovery-web-build.log": "48327a084996431e6fe84626e4cb2b6547d9fc7ad68f377c35b795b8e02e845b",
+    "recovery-boot.log": "be04e15a19a092ef28eb1f706eefcfadd7ee25c2cf88844592f1ba5320169e72",
+    "recovery-product-build.log": "0445d3e53874905c9fe01f5b753b1522b5986c5916f367418403d1caa85674e6",
+    "recovery-upstream-build-direct.log": "0b8cc4203325491ee2ea2b785dc60e8ea4310dc1f8a20163c3f89373de908cfb",
+    "recovery-doctor.log": "83c3ee269fb844de3c934ce53991ab8dd34ff096ad2eef0b65d80511fd6733d7",
+    "recovery-postgres.log": "8199930b4597e7c601261f3124759a7d65d7a8839b07855fea550228611ed568"
+  },
+  "root_failures": [
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport uses the real Unix HTTP transport, fixed paths and JSON bodies"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport remover um contêiner com AutoRemove já em remoção (409) espera o Docker terminar, e não é falha"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport a espera do 409 mantém o processo vivo quando ela é a ÚNICA coisa pendente"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport streams archive to a caller-owned descriptor and hashes it under cap/deadline"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport enforces the combined output budget while the Docker log stream is still live"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport sem acompanhar, pede follow=0; por padrao, follow=1"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport decodes Docker frames split across transport chunks"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport lets caller deadlines govern long wait, log and archive streams instead of the short control timeout"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport covers every bounded Docker operation and rejects malformed daemon responses"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport fails closed for invalid limits, files, statuses, JSON and daemon DTOs"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport validates every archive source invariant and Docker upload response"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport rejects malformed live frames, incomplete streams and oversized control responses"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport fails closed on zero-byte archive writes to the caller-owned descriptor"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/docker-engine.spec.ts",
+      "test": "Docker Engine Unix transport rejects truncated and aborted live Docker responses"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/export-script.spec.ts",
+      "test": "a exportação do aplicativo construído segue o link do pnpm DENTRO do standalone e copia o conteúdo: a exportação não leva link nenhum"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/installer.spec.ts",
+      "test": "o instalador do construtor liga as quatro pecas: manifesto, provisionamento, ativacao e gerente"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/installer.spec.ts",
+      "test": "o instalador do construtor a politica gravada e a MESMA que o adaptador vai atestar"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/installer.spec.ts",
+      "test": "o instalador do construtor a SEGUNDA execucao nao duplica nada: mesmo escopo, mesmo gerente, mesmo manifesto"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/installer.spec.ts",
+      "test": "o instalador do construtor o gerente que nao sobe vira GERENTE_NAO_SUBIU, e o socket que nao aparece tem teto"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/installer.spec.ts",
+      "test": "o instalador do construtor substituir uma instalacao existente por OUTRA imagem e recusado com o codigo do provisionamento"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-main.spec.ts",
+      "test": "slot starter lifecycle opens a real Unix listener after exactly one authoritative initialization"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer activates once, keeps schema v1 physical-only, and is idempotent"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer serializes concurrent activation without lost updates and generates monotonic generations server-side"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer fails closed on mutated config hash/reference, divergent installation and registry corruption"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer recovers before-rename and after-rename failures without generation gaps"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer rejects changed scope authority, full registries, and damaged permanent guards"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer rejects divergent installation, duplicated slots, and unsafe authority files without changing the registry"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer rejects every malformed authority encoding before trusting its embedded registry"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer rejects orphan registries and every divergent pending/committed authority relation"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer rejects changed active slots, exhausted generations, and failed post-publication verification"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-registry-writer.spec.ts",
+      "test": "durable runtime registry writer cleans valid crash temporaries and rejects malformed or unsafe temporary authority"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux holds one real manager per installation across processes and SIGKILL releases it"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux bootstraps one guard under a synchronized multiprocess storm without false invalid-state failures"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux serializes a same-process bootstrap race and maps flock process failures closed"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux creates a permanent private guard and rejects a hardlink added while held"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux retains authority when guard close is inconclusive and permits a controlled close retry"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux persists an exact checkpoint with fsync-safe replacement and reloads it"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux fails closed for corrupt JSON, invalid UTF-8, symlink, hardlink, mode and owner"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux rejects malformed checkpoint values before publishing any bytes"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux never reads or publishes a checkpoint outside its matching held lease"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux maps unexpected checkpoint-open failures and rejects a non-array checkpoint slot list"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux handles guard creation races and refuses unprovable guard cleanup"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux retains local authority when cleanup of a failed flock acquisition cannot be proven"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/manager-state.spec.ts",
+      "test": "manager authority on Linux rejects strict checkpoint schema mutations, embedded NUL, and unsafe replacement on save"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/runtime-activation.spec.ts",
+      "test": "provision and activate transaction boundary resumes a crash between config and registry without rotating token, scope or config digest"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning pins, copies, seals and publishes the store before server-side authority and config"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning fails closed when the permanent guard mode, inode type or link count diverges"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning releases every guard descriptor and keeps the event loop responsive"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning reprovisions idempotently and never overwrites an existing authority set"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning persists one canonical manifest independent of source JSON formatting and entry order"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning validates existing authority before materializing a newly requested store version"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning rejects a missing published store parent without recreating or changing any durable path"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning rejects a missing version inside an existing store parent without changing durable state"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning fails closed on malformed existing config and canonical-manifest hash authority"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning rejects a mutated published store instead of overwriting or repairing it"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning rejects content drift in a sealed store even when permissions are restored"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning derives a different opaque scope for every logical or installation identity and rejects config identity or layout mutation"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning serializes concurrent provisioners with a live process-identity lock"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning preserves a live L1 substituted between stale L0 proof and reclaim"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning arbitrates a takeover immediately before unlink and never touches L1 installed afterward"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning treats a vanished stale lock and claim as lost arbitration, then retries without deleting another owner"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning cleans its takeover link and preserves the proven stale lock when the pre-unlink hook fails"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning refuses a fourth hard-link competitor and removes only its own takeover link"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning fails closed without unlinking a foreign inode substituted at its takeover path"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning preserves stale-lock evidence whose mode diverges after proof"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning recognizes a lock from another boot as stale without probing its pid"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning does not mistake a retired witness from another boot for a live local pid"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning cleans a graceful partial-store failure and retries without stale-owner authority"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning recovers automatically after a real SIGKILL with the takeover linked but L0 still present"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning recovers a partial target after a real SIGKILL between L0 unlink and witness cleanup"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning recovers automatically after a real SIGKILL during long template-store I/O"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning elects exactly one of two simultaneous restart processes after a pre-unlink crash"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning holds the same kernel guard against fifty simultaneous provision processes"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning bootstraps one permanent guard after fifty processes observe the same empty root"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning serializes release against a competing reclaim process under the same crash-releasing mutex"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning preserves divergent lock and claim inodes substituted after stale-owner proof"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning recovers a vanished claim after lock unlink and cleans the singleton takeover after success"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning detects a foreign takeover after lock unlink and removes only the still-proven claim link"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning never replaces a version directory created by a competing same-uid process"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning rejects an oversized sparse published entry before attempting to hash its contents"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning recovers stale locks, sealed staging and partial authority from an interrupted provision"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning durably completes a valid envelope left after marker sync when its owner is proven stale"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning preserves a corrupt completion marker even after proving the previous lock owner stale"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/store-provision.spec.ts",
+      "test": "immutable builder template-store provisioning rejects missing entries and file/directory type substitution in a published envelope"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/supervisor-main.spec.ts",
+      "test": "builder supervisor real Unix process boundary preserves an alien replacement socket and reports failed authority cleanup"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract executes every typed lifecycle method and listManaged over the closed protocol"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract rejects hostile finish result: 'failed build carrying an export'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract rejects hostile finish result: 'cancelled build carrying an export'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract rejects hostile finish result: 'successful build without an export'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract rejects hostile finish result: 'successful build carrying another bui…'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract preserves caller request IDs and bytes across explicit retries and never retries itself"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract handles fragmented request writes and fragmented response reads"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract fails closed on 'invalid JSON'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract fails closed on 'wrong media type'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract fails closed on 'success flag is not true'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract fails closed on 'extra success authority'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract fails closed on 'invalid success result'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract fails closed on 'unknown remote error'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract fails closed on 'status and code mismatch'"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract rejects declared and streamed oversized responses before parsing"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract distinguishes deadline, caller abort and socket availability without leaking transport details"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract maps only authenticated server error allowlists with status preserved"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-client.spec.ts",
+      "test": "builder Unix client wire contract does not retry a socket failure"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket streams an authenticated TAR through the production socket without a shared source path"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket creates mode 0660, rejects unauthenticated input and removes the socket"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket fails closed when an artifact request has no HTTP method"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket carries the public test step and bounded termination fields over the real Unix wire"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket replays the exact persisted response after a server restart without redispatch"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket never replays one physical scope request inside another scope"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket does not strand the exclusive lease when initialization fails"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket never publishes a socket when startup is cancelled before or during listener binding"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket uses an authenticated probe and exclusive lease to reject split-brain"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket creates and validates missing nested socket directories"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket bounds request bodies and aborts a cooperative slow RPC at the operation deadline"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket detects lock ownership replacement during close"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket routes unexpected handler failures through the bounded 500 response"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket recovers a dead lease only when its socket identity matches and probe transport throws"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket uses bounded close to destroy a held connection"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket closes and unlinks a bound server when post-listen socket attestation fails"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket surfaces cleanup failures without leaving a live server after setup rejection"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket applies shutdown signals and treats a missing lock during close as already released"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket distinguishes missing and unexpected process-probe failures for a stale lease"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket recovers only a dead owned lease and refuses a live owner"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket preserves an alien socket when stale metadata or close-time inode does not match"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket fails closed when the synchronous and asynchronous bound socket identities disagree"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket aborts a live RPC when its client disconnects"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket accepts a conflict response as proof of a live authenticated supervisor"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket revalidates every socket identity component before unlink and tolerates an absent owned socket"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket closes a live listener whose accepting path disappeared and releases its lease"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket preserves a foreign socket before close and one installed during close"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket handles an owner that stops concurrently with shutdown identity validation"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "authenticated Unix builder socket handles an already-stopped server and fail-closes unusual HTTP message shapes"
+    },
+    {
+      "file": "plugins/builder-supervisor/tests/unix-server.spec.ts",
+      "test": "T-23: (dev, ino) nao e identidade — o inode e reciclado um socket com o MESMO inode e nascimento diferente NAO e o nosso"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract exchanges a valid closed envelope over the authenticated Unix control socket"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract rejects the Unix control response non-200 status"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract rejects the Unix control response malformed JSON"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract rejects the Unix control response array envelope"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract rejects the Unix control response false envelope"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract rejects the Unix control response missing result"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract rejects the Unix control response extra field"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract bounds a Unix control response without leaving an unhandled stream error"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract exchanges and bounds raw data-plane responses over a per-runtime Unix socket"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract rejects a non-200 response from the Unix data plane"
+    },
+    {
+      "file": "plugins/preview/tests/supervisor-runtime.contract.spec.ts",
+      "test": "Unix-socket preview supervisor client contract bounds a Unix data-plane response without leaving an unhandled stream error"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/artifact-stage.spec.ts",
+      "test": "verified preview runtime archive rejects sockets and other special filesystem entries"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-engine.spec.ts",
+      "test": "DockerEngine over a fake Unix-socket daemon covers every public method with encoded paths, typed payloads and accepted idempotent statuses"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-engine.spec.ts",
+      "test": "DockerEngine over a fake Unix-socket daemon rejects an unexpected Docker status without exposing its response body"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-engine.spec.ts",
+      "test": "DockerEngine over a fake Unix-socket daemon rejects malformed JSON and invalid daemon identifiers fail-closed"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-engine.spec.ts",
+      "test": "DockerEngine over a fake Unix-socket daemon rejects a response larger than 8 MiB without returning partial bytes"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-engine.spec.ts",
+      "test": "DockerEngine over a fake Unix-socket daemon does not contact the daemon when already aborted"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-engine.spec.ts",
+      "test": "DockerEngine over a fake Unix-socket daemon aborts an in-flight daemon request through the caller AbortSignal"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-manager-coverage.spec.ts",
+      "test": "DockerPreviewSupervisor complete lifecycle serializes duplicate start, serves health/messages/forward/list/logs and removes the runtime completely"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-manager-coverage.spec.ts",
+      "test": "DockerPreviewSupervisor complete lifecycle records DOWN for an unhealthy, malformed or non-200 proxy response without exposing the failure"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-manager-coverage.spec.ts",
+      "test": "DockerPreviewSupervisor complete lifecycle returns no verification messages when the isolated proxy sends a non-array payload"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/docker-manager-coverage.spec.ts",
+      "test": "DockerPreviewSupervisor complete lifecycle reports both container states after readiness expires and tolerates an unavailable inspection"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/proxy-server.spec.ts",
+      "test": "preview proxy Unix-socket boundary forwards to the configured runtime host and rewrites/removes authority and internal headers"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/proxy-server.spec.ts",
+      "test": "preview proxy Unix-socket boundary returns only allowlisted runtime response headers and never exposes hop-by-hop or internal metadata"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/proxy-server.spec.ts",
+      "test": "preview proxy Unix-socket boundary rejects a mismatched runtime reference without contacting the configured runtime"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/proxy-server.spec.ts",
+      "test": "preview proxy Unix-socket boundary bounds the RPC body, forwarded body and runtime response without returning partial content"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/proxy-server.spec.ts",
+      "test": "preview proxy Unix-socket boundary aborts the outbound runtime request when the Unix-socket caller disconnects"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/proxy-server.spec.ts",
+      "test": "preview proxy Unix-socket boundary fails within the configured outbound timeout when the runtime never responds"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/proxy-server.spec.ts",
+      "test": "preview proxy Unix-socket boundary creates a real socket and removes it on close"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/proxy-server.spec.ts",
+      "test": "preview proxy Unix-socket boundary reads only bounded regular capture files and filters every malformed message field"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/proxy-server.spec.ts",
+      "test": "preview proxy Unix-socket boundary ACHADO G: endereco de email vindo do app gerado nao carrega metacaractere de HTML nem tamanho ilimitado"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/unix-server-fallback.spec.ts",
+      "test": "preview supervisor Unix transport fallback returns only a closed generic error when the RPC boundary rejects unexpectedly"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/unix-server.spec.ts",
+      "test": "preview supervisor Unix control socket creates a 0660 socket, authenticates before dispatch and removes it on close"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/unix-server.spec.ts",
+      "test": "preview supervisor Unix control socket rejects wrong paths, methods, malformed JSON and oversized bodies without dispatch"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/unix-server.spec.ts",
+      "test": "preview supervisor Unix control socket sanitizes manager failures and never returns the internal error"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/unix-server.spec.ts",
+      "test": "preview supervisor Unix control socket replaces a stale Unix socket and forwards every closed RPC operation"
+    },
+    {
+      "file": "plugins/preview-supervisor/tests/unix-server.spec.ts",
+      "test": "preview supervisor Unix control socket propagates supervisor shutdown to an in-flight Docker operation"
+    },
+    {
+      "file": "plugins/runtime-governor/tests/retention.spec.ts",
+      "test": "ArtifactRetentionGarbageCollector fail-closed v1 blocks an active inode alias through a bind mount"
+    },
+    {
+      "file": "plugins/runtime-governor/tests/retention.spec.ts",
+      "test": "ArtifactRetentionGarbageCollector fail-closed v1 fails closed for a nested bind mount"
+    },
+    {
+      "file": "plugins/storage-postgres/tests/backup-child.spec.ts",
+      "test": "childProcessBackupRunner: what the Studio is told when the backup process dies names the time limit when the killed child left nothing behind at all"
+    },
+    {
+      "file": "plugins/storage-postgres/tests/backup-child.spec.ts",
+      "test": "childProcessBackupRunner: what the Studio is told when the backup process dies never exposes execFile argv when a child exits silently"
+    },
+    {
+      "file": "plugins/storage-postgres/tests/restore-core.spec.ts",
+      "test": "restore core without Docker holds the exclusive lock and completes the safety backup before creating staging"
+    },
+    {
+      "file": "plugins/storage-postgres/tests/restore-core.spec.ts",
+      "test": "restore core without Docker records and returns one successful safety backup for an existing target"
+    }
+  ]
+}

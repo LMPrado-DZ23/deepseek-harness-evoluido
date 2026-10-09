@@ -1,0 +1,324 @@
+name: Verify FRIGG
+
+on:
+  pull_request:
+  push:
+    # `integ` e a linha principal deste repositorio e o ramo padrao no GitHub.
+    # Enquanto aqui dizia `main, master`, NENHUM push disparava a verificacao:
+    # a CI so rodava em pull request, e um push direto entrava sem prova.
+    branches: [integ, main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-contracts:
+    name: Windows release contracts
+    runs-on: windows-2025
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout without starting services
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.23.1
+
+      - name: Run hermetic Windows contracts
+        shell: pwsh
+        run: |
+          node scripts/run-windows-contracts.mjs --profile hosted
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hermeticTests = @(
+            'tests/m6/studio-image-build.test.mjs'
+            'tests/m6/studio-runtime-proof.test.mjs'
+            'tests/portability/bootstrap-upstream.test.mjs'
+            'tests/portability/clean-clone-readme.test.mjs'
+            'tests/portability/image-lock.test.mjs'
+            'tests/portability/windows-contract-coverage.test.mjs'
+          )
+          node --test @hermeticTests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  linux-and-postgres:
+    name: Linux clean clone and PostgreSQL 16
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_DB: dz23_test
+          POSTGRES_USER: dz23_test
+          POSTGRES_PASSWORD: dz23_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dz23_test -d dz23_test"
+          --health-interval 1s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - name: Checkout with pinned Harness
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+
+      - name: Verify pinned upstream content
+        run: |
+          node scripts/check-upstream-content.mjs --materialize-symlinks
+          node scripts/check-upstream-pin.mjs --self-test
+
+      - name: Build pinned Harness
+        run: |
+          pnpm --dir third_party/deepseek-harness install --frozen-lockfile
+          pnpm --dir third_party/deepseek-harness build:official
+
+      - name: Install and build the web interface
+        run: |
+          pnpm install --frozen-lockfile --filter '@dz23-studio/*...'
+          pnpm build
+
+      - name: Static and policy gates
+        run: |
+          # `gate:typecheck` cobre a raiz E `apps/studio-web`, que sao dois
+          # projetos de verdade: `pnpm typecheck` sozinho deixava a tela e os
+          # dubles de e2e sem tipo conferido.
+          pnpm gate:typecheck
+          # O `lib/` versionado tem de ser o que `pnpm build` produz do `src/`
+          # de hoje. `gate:tracked-lib` confere se ele esta COMPLETO; este
+          # confere se ele esta EM DIA, que e outra pergunta — e a que deixou
+          # `tenancy/lib/` vinte e tantos commits atras com uma correcao de
+          # autorizacao parada dentro.
+          pnpm gate:lib-freshness
+          # Todo plugin declarado como dependencia do perfil esta MONTADO em
+          # algum perfil? A parada de emergencia passou a existencia inteira
+          # deste repositorio sem ser montada: codigo completo, tela na
+          # interface, rotas que nunca subiram. Nada acusava, porque nenhum
+          # portao olhava a montagem.
+          pnpm gate:profile-mounts
+          pnpm gate:i18n
+          # TRES idiomas de verdade: chave faltando ou a mais, traducao que e
+          # copia do portugues, interpolacao perdida e catalogo orfao. Nenhuma
+          # delas e pega por `gate:i18n`, que confere outra coisa.
+          pnpm gate:idiomas
+          # UMA marca, e ela nao arrasta a identidade de instalacao junto. O
+          # nome do produto estava escrito a mao em onze arquivos que nenhum
+          # teste comparava entre si; e `id`/`scope`/`start_url` do manifesto
+          # mudando por branding fariam o navegador tratar a PWA ja instalada
+          # como outro aplicativo.
+          pnpm gate:marca
+          # O CODIGO DE DOACAO. Um BR Code errado nao falha barulhento: falha na
+          # mao de quem quis doar, no aplicativo do banco. O portao confere o
+          # CRC-16 e que o README cite a fonte byte a byte.
+          pnpm gate:pix
+          # Obrigacao canonica NAO fecha por coincidencia de numero. Tres
+          # fatias sairam rotuladas BUS-01..03 e duas dessas obrigacoes
+          # significam outra coisa na matriz; quem lesse os dois lados
+          # concluiria que fecharam, e elas nao tem uma linha de codigo.
+          pnpm gate:bus-matriz
+          pnpm gate:portability
+          pnpm gate:domain-scopes
+          pnpm gate:domain-routes
+          # Todo pacote de workspace IMPORTADO esta DECLARADO por quem importa?
+          # A arvore de links do pnpm deixa um pacote nao declarado alcancavel
+          # na maquina de quem desenvolve; o clone limpo daqui nao instala. Foi
+          # assim que `action-approval` importou `dsh-user-approval` sem
+          # declara-lo e a CI reprovou por CINCO entregas seguidas enquanto o
+          # typecheck local passava.
+          pnpm gate:declared-imports
+          pnpm gate:assistant-tools
+          # Estes dois existiam e a CI não os executava. O de papéis é o que
+          # apanha uma permissão que nomeia ferramenta fora do perfil — e o
+          # Harness LANÇA nesse caso, ou seja, toda delegação quebraria. O de
+          # RLS é o que impede um domínio novo entrar sem classificação de
+          # isolamento, que é como um vazamento entre organizações começa.
+          pnpm gate:team-role-tools
+          pnpm gate:rls-coverage
+          # Um portão que ninguém executa não impede a regressão que ele foi
+          # escrito para impedir: o `lib/` versionado importava um arquivo que
+          # o repositório não tinha, e um clone limpo quebrava.
+          pnpm gate:tracked-lib
+          # O lock de release ficava defasado em silêncio: o portão só conferia
+          # topologia, e quatro plugins simplesmente não entravam na imagem.
+          pnpm gate:image-lock
+          # `ref={a ?? b}` desliga o ref de dentro sempre que o de fora chega,
+          # e o produto montado sempre passa o de fora. O defeito veio de
+          # revisão externa, foi reproduzido em navegador e era invisível: o
+          # quadro desenhava e duas coisas paravam caladas.
+          pnpm gate:refs
+          # O ledger e a fonte unica de "o que falta". Sem este portao, um
+          # requisito aceito pode sumir ou virar STABLE sem prova.
+          pnpm gate:requirements-ledger
+          # Varredura de segredo: a CI não tinha nenhuma, e um segredo colado
+          # por engano entrava no histórico sem um único sinal.
+          pnpm gate:secrets
+          # C-16 e verdade por AUSÊNCIA: nenhuma compressão Caveman/RTK existe,
+          # então nada transforma código, log ou erro sem opt-in. Ausência não
+          # se defende sozinha - basta uma dependência nova para a saída passar
+          # a mentir -, e este portão a versiona.
+          pnpm gate:no-caveman
+          # P37 de referência externa. Sem este portão, um inventário pode
+          # perder o campo que decidiria a cópia - licença, marca, segredo -
+          # e o travessão passa por resposta.
+          pnpm gate:p37
+          # As cópias em vendor/ afirmam três coisas que sem verificação são só
+          # prosa: que carregam a licença do titular, que dizem de qual commit
+          # vieram, e que NADA ali é dependência do produto. A quarta é o
+          # motivo real deste portão existir: `vendor/ecc/assets` ficou de fora
+          # porque guarda marca de terceiro que o MIT do ECC não licencia, e
+          # uma recópia distraída a traria de volta para um repositório
+          # público.
+          pnpm gate:vendored-references
+          # P37 de licença. Recusa a família fonte-disponível (BSL, SSPL,
+          # AGPL, Elastic, Commons Clause) e exige revisão humana registrada
+          # para qualquer licença que não esteja nas duas listas.
+          pnpm gate:licenses
+          # Os cinco que faltavam. Sem eles a CI executava dezessete dos vinte
+          # e quatro portoes enquanto o README dizia 24/24 — e um numero que a
+          # CI nao sustenta e segunda verdade na primeira coisa que um visitante
+          # le. `constitution` confere os vereditos que os outros gravaram;
+          # `candidates` recusa promover um candidato externo sem licenca,
+          # telemetria e plano de saida resolvidos; `memory-map` e `vocabulary`
+          # guardam o vocabulario fechado que impede um estado inventado.
+          pnpm gate:candidates
+          pnpm gate:memory-map
+          pnpm gate:vocabulary
+          pnpm gate:decision-record
+          pnpm gate:upstream-pin
+          # A constituicao vem POR ULTIMO e le os vereditos que os outros
+          # gravaram. Rodando antes deles, ela conferiria um arquivo vazio e
+          # passaria — que e o modo de falhar que ela existe para impedir.
+          pnpm gate:constitution
+          # P-07: o conjunto de briefs leigos, medido no ponto que dá para medir
+          # sem LLM e sem construtor — o FRIGG entendeu o que a pessoa
+          # escreveu? Dois conjuntos: um onde o vocabulário foi ajustado, e um
+          # CEGO, escrito depois e nunca usado para ajustar. O portão reprova
+          # por ERRO COM CONFIANÇA no cego, e não por acerto: exigir acerto às
+          # cegas só faria alguém ampliar o vocabulário até o número subir.
+          pnpm gate:comprehension
+          # Inventário CycloneDX, direto do lockfile pelo próprio pnpm - não
+          # se reimplementa o que a ferramenta já faz certo. Sem ele não há
+          # como responder "esta CVE me atinge?" senão relendo o repositório no
+          # pior momento possível.
+          pnpm sbom:cyclonedx
+          pnpm test:postgres-discovery
+          node scripts/test-postgres.mjs --list
+
+      - name: Release license blockers (C-05)
+        # `gate:licenses` roda em modo REPOSITÓRIO e só AVISA sobre os pacotes
+        # não redistribuíveis; o modo release é o que reprova. Ele mede o
+        # `pnpm-lock.release.yaml` - o que vira o artefato -, e não
+        # `node_modules`, que é o que a máquina de desenvolvimento tem.
+        #
+        # Este passo era `continue-on-error` enquanto a decisão do C-05 estava
+        # aberta: avisar sem reprovar era honesto quando ninguém tinha decidido.
+        # A ADR-042 decidiu, o bloqueio caiu para zero, e um passo que avisa e
+        # segue verde vira um passo que se aprende a ignorar. Agora reprova: se
+        # `@anthropic-ai/claude-agent-sdk` - ou qualquer outro pacote não
+        # redistribuível - voltar ao lockfile de release, a imagem deixa de
+        # poder ser publicada e a CI diz isso antes do merge, não depois da
+        # publicação.
+        run: pnpm gate:licenses:release
+
+      - name: Dependency advisories
+        # Precisa de rede, então NÃO roda fora da CI e nenhuma prova local a
+        # cobre. `continue-on-error` é deliberado: um aviso novo publicado hoje
+        # não pode reprovar um commit que não mudou dependência nenhuma - o
+        # sinal aparece no log e vira tarefa, em vez de virar ruído que se
+        # aprende a ignorar.
+        continue-on-error: true
+        run: pnpm audit --audit-level high
+
+      - name: Publish the SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: error
+
+      - name: Web interface suite
+        # A tela por onde a pessoa autoriza uma ação sensível tem vitest
+        # próprio: o da raiz não alcança `apps/`, e sem esta etapa a peça
+        # central do portão humano ficava sem cobertura na CI.
+        working-directory: apps/studio-web
+        run: pnpm exec vitest run
+
+      - name: Browser suite
+        # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
+        # ficaram vermelhas em silêncio: a jornada principal desde 575ccc0 e a
+        # rotação de cookie da prévia. Um teste de navegador que ninguém executa
+        # não é prova de nada.
+        working-directory: apps/studio-web
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm exec playwright test
+
+      - name: FRIGG boot proof
+        # Os TRÊS defeitos que impediam o produto de abrir — o `dsh` sem
+        # `--profile`, o serviço inexistente pedido pelo `business` e a
+        # interface exigindo cookie em instalação pessoal — moravam na
+        # MONTAGEM, e nenhum teste unitário podia pegá-los. Esta prova sobe o
+        # produto pelo caminho real e PERGUNTA a ele. Não precisa de Docker nem
+        # de modelo: subir não é construir, e subir não é gerar.
+        run: pnpm prove:frigg-boot
+
+      - name: Container hardening proof
+        # Nenhuma prova `prove:*` rodava na CI. Esta é a que responde por um
+        # fato que nenhum teste unitário alcança: o contêiner do construtor não
+        # escreve na raiz, não alcança a rede e não tem capacidade nenhuma. Ela
+        # roda o Docker do runner, executa contêineres deliberadamente
+        # enfraquecidos no `--self-test` e reprova se algum deles passar.
+        run: pnpm prove:container-hardening
+
+      - name: Unit and contract suite
+        # One worker is intentional: this suite exercises subprocesses, PTYs,
+        # large archive ceilings and filesystem races in the same job.
+        run: pnpm exec vitest run --maxWorkers=1
+
+      - name: Install PostgreSQL 16 client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-client-16
+
+      - name: PostgreSQL integration suite
+        env:
+          DZ23_POSTGRES_TEST_DSN: postgresql://dz23_test:dz23_ci_only@127.0.0.1:5432/dz23_test
+        run: pnpm test:postgres
+
+      - name: Refuse unexpected build mutations
+        # O `lib/` versionado DEIXOU de ser exceção aqui. Ele é o que o pacote
+        # publica e executa (`exports.default → ./lib/index.js`), nenhum teste o
+        # importa, e nada o conferia contra o `src/`: uma auditoria sabotou
+        # `identity/lib/service.js` removendo a validação de CSRF e TODOS os
+        # portões passaram. Com o `lib/` dentro do diff, o artefato versionado
+        # tem de ser exatamente o que `pnpm build` produz a partir do fonte
+        # revisado — e um `lib/` adulterado reprova aqui.
+        run: git diff --exit-code
+

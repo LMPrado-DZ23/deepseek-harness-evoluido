@@ -1,0 +1,381 @@
+{
+  "note": "Literais em português que já existiam quando o gate de i18n passou a varrer cada raiz. Gerado por `pnpm i18n:baseline`; o gate usa este arquivo quando não há histórico Git (artefato de release) e, quando há, recusa qualquer entrada que o Git não confirme.",
+  "legacyRevision": "ab0fe506928dacd736262a024d202f3e96e2689d",
+  "pluginBaselines": [
+    "c0aeb53"
+  ],
+  "files": {
+    "plugins/agents/src/git.ts": {
+      "legacy": [
+        "'A proposta mudou depois da revisão e foi bloqueada.'",
+        "'Destino de worktree fora da área controlada pelo Studio.'",
+        "'Git não confirmou o novo worktree.'",
+        "'O assistente tentou escrever fora da cópia isolada.'",
+        "'O caminho informado precisa ser a raiz exata do repositório Git.'",
+        "'O projeto mudou nesses arquivos desde que o assistente começou.'",
+        "'O projeto mudou nos mesmos arquivos desde a criação da proposta.'",
+        "`git terminou com código ${String(code)}`"
+      ],
+      "plugins": [
+        "'A proposta mudou depois da revisão e foi bloqueada.'",
+        "'Destino de worktree fora da área controlada pelo Studio.'",
+        "'Git não confirmou o novo worktree.'",
+        "'O assistente tentou escrever fora da cópia isolada.'",
+        "'O caminho informado precisa ser a raiz exata do repositório Git.'",
+        "'O projeto mudou nesses arquivos desde que o assistente começou.'",
+        "'O projeto mudou nos mesmos arquivos desde a criação da proposta.'",
+        "`git terminou com código ${String(code)}`"
+      ]
+    },
+    "plugins/agents/src/index.ts": {
+      "legacy": [
+        "'A sessão coordenadora não pode ser a sessão da pessoa.'",
+        "'Ação incluída na delegação isolada já confirmada pela pessoa.'",
+        "'O Harness não preservou o cwd isolado da sessão coordenadora.'"
+      ],
+      "plugins": [
+        "'A sessão coordenadora não pode ser a sessão da pessoa.'",
+        "'Ação incluída na delegação isolada já confirmada pela pessoa.'",
+        "'O Harness não preservou o cwd isolado da sessão coordenadora.'"
+      ]
+    },
+    "plugins/agents/src/service.ts": {
+      "legacy": [
+        "'Confirme antes de aplicar a proposta ao seu projeto.'",
+        "'Confirme antes de o assistente trabalhar numa cópia do projeto.'",
+        "'Confirme com sua passkey antes de iniciar esta tarefa sensível.'",
+        "'Esta proposta não está disponível para aplicação.'",
+        "'Esta tarefa sensível precisa de confirmação reforçada antes de começar.'",
+        "'Outra proposta está sendo aplicada neste espaço de trabalho.'",
+        "'Outro assistente já está trabalhando nos mesmos arquivos.'",
+        "'Seu projeto mudou enquanto o assistente trabalhava; confira antes de aplicar.'",
+        "'arquivo fora dos caminhos aprovados'",
+        "`Caminho de delegação inválido: ${value}`"
+      ],
+      "plugins": [
+        "'Confirme antes de aplicar a proposta ao seu projeto.'",
+        "'Confirme antes de o assistente trabalhar numa cópia do projeto.'",
+        "'Confirme com sua passkey antes de iniciar esta tarefa sensível.'",
+        "'Esta proposta não está disponível para aplicação.'",
+        "'Esta tarefa sensível precisa de confirmação reforçada antes de começar.'",
+        "'Outra proposta está sendo aplicada neste espaço de trabalho.'",
+        "'Outro assistente já está trabalhando nos mesmos arquivos.'",
+        "'Seu projeto mudou enquanto o assistente trabalhava; confira antes de aplicar.'",
+        "'arquivo fora dos caminhos aprovados'",
+        "`Caminho de delegação inválido: ${value}`"
+      ]
+    },
+    "plugins/identity/src/email.ts": {
+      "legacy": [
+        "'A configuração segura de e-mail é inválida.'",
+        "'O envio de e-mail ainda não foi configurado.'",
+        "'Seu código de acesso ao DZ23 STUDIO'",
+        "`Use o código ${message.code}. Ele expira em ${message.expiresInMinutes} minutos.`",
+        "`Você recebeu um convite como ${message.role}. Use o código seguro ${message.token}. Ele expira em ${message.expiresInHours} horas.`"
+      ],
+      "plugins": [
+        "'A configuração segura de e-mail é inválida.'",
+        "'O envio de e-mail ainda não foi configurado.'",
+        "'Seu código de acesso ao DZ23 STUDIO'",
+        "`Use o código ${message.code}. Ele expira em ${message.expiresInMinutes} minutos.`",
+        "`Você recebeu um convite como ${message.role}. Use o código seguro ${message.token}. Ele expira em ${message.expiresInHours} horas.`"
+      ]
+    },
+    "plugins/identity/src/http.ts": {
+      "legacy": [
+        "'A interface do Harness ainda não está disponível.'",
+        "'Ação sensível confirmada.'",
+        "'Borda de acesso não autorizada.'",
+        "'Chave de acesso criada com segurança.'",
+        "'Host não autorizado.'",
+        "'JSON inválido.'",
+        "'Origem não autorizada.'",
+        "'Rota não encontrada.'",
+        "'Se o e-mail puder receber acesso, enviaremos um código temporário.'",
+        "'Sessão de trabalho protegida.'",
+        "'Solicitação grande demais.'",
+        "'Solicitação inválida.'"
+      ],
+      "plugins": [
+        "'A interface do Harness ainda não está disponível.'",
+        "'Ação sensível confirmada.'",
+        "'Borda de acesso não autorizada.'",
+        "'Chave de acesso criada com segurança.'",
+        "'Host não autorizado.'",
+        "'JSON inválido.'",
+        "'Origem não autorizada.'",
+        "'Rota não encontrada.'",
+        "'Se o e-mail puder receber acesso, enviaremos um código temporário.'",
+        "'Sessão de trabalho protegida.'",
+        "'Solicitação grande demais.'",
+        "'Solicitação inválida.'"
+      ]
+    },
+    "plugins/identity/src/index.ts": {
+      "legacy": [
+        "'A borda autenticada proíbe enrollment aberto; configure bootstrap-email ou closed.'",
+        "'O modo servidor exige um provedor SMTP configurado por referência de segredo.'",
+        "'O modo servidor não permite desativar edge.required.'",
+        "'rpId deve ser localhost ou um nome de domínio, nunca um endereço IP, porta ou URL.'"
+      ],
+      "plugins": [
+        "'A borda autenticada proíbe enrollment aberto; configure bootstrap-email ou closed.'",
+        "'O modo servidor exige um provedor SMTP configurado por referência de segredo.'",
+        "'O modo servidor não permite desativar edge.required.'",
+        "'rpId deve ser localhost ou um nome de domínio, nunca um endereço IP, porta ou URL.'"
+      ]
+    },
+    "plugins/identity/src/passkey.ts": {
+      "legacy": [
+        "'Não foi possível confirmar esta chave de acesso.'"
+      ],
+      "plugins": [
+        "'Não foi possível confirmar esta chave de acesso.'"
+      ]
+    },
+    "plugins/identity/src/service.ts": {
+      "legacy": [
+        "'A biometria ou o PIN do dispositivo não foi confirmado.'",
+        "'A confirmação desta solicitação é inválida.'",
+        "'Cadastre uma chave de acesso antes de confirmar esta ação.'",
+        "'Cadastro inicial encerrado após criar a pessoa proprietária.'",
+        "'Cadastro inicial já encerrado.'",
+        "'Chave de acesso não encontrada.'",
+        "'Confirmação não encontrada.'",
+        "'Código inválido ou expirado.'",
+        "'Código temporário ausente.'",
+        "'Código temporário expirado.'",
+        "'Código temporário incorreto.'",
+        "'Código temporário solicitado.'",
+        "'Digite um e-mail válido.'",
+        "'Dispositivo não encontrado.'",
+        "'Entrada por código temporário.'",
+        "'Esta chave de acesso já está cadastrada.'",
+        "'Esta confirmação expirou.'",
+        "'Esta confirmação já foi usada.'",
+        "'Esta sessão expirou por inatividade.'",
+        "'Esta sessão expirou.'",
+        "'Esta sessão foi encerrada.'",
+        "'Muitas tentativas. Solicite um novo código.'",
+        "'O gerador de código retornou um valor inválido.'",
+        "'Pessoa usuária não encontrada.'",
+        "'Revogada pela pessoa usuária.'",
+        "'Saída de todos os dispositivos.'",
+        "'Sessão do agente inválida.'",
+        "'Sessão do agente vinculada.'",
+        "'Sessão inválida.'",
+        "'Solicitação genérica recusada: não existe convite nem cadastro inicial aberto.'",
+        "'Todas as sessões foram revogadas.'"
+      ],
+      "plugins": [
+        "'A biometria ou o PIN do dispositivo não foi confirmado.'",
+        "'A confirmação desta solicitação é inválida.'",
+        "'Cadastre uma chave de acesso antes de confirmar esta ação.'",
+        "'Cadastro inicial encerrado após criar a pessoa proprietária.'",
+        "'Cadastro inicial já encerrado.'",
+        "'Chave de acesso não encontrada.'",
+        "'Confirmação não encontrada.'",
+        "'Código inválido ou expirado.'",
+        "'Código temporário ausente.'",
+        "'Código temporário expirado.'",
+        "'Código temporário incorreto.'",
+        "'Código temporário solicitado.'",
+        "'Digite um e-mail válido.'",
+        "'Dispositivo não encontrado.'",
+        "'Entrada por código temporário.'",
+        "'Esta chave de acesso já está cadastrada.'",
+        "'Esta confirmação expirou.'",
+        "'Esta confirmação já foi usada.'",
+        "'Esta sessão expirou por inatividade.'",
+        "'Esta sessão expirou.'",
+        "'Esta sessão foi encerrada.'",
+        "'Muitas tentativas. Solicite um novo código.'",
+        "'O gerador de código retornou um valor inválido.'",
+        "'Pessoa usuária não encontrada.'",
+        "'Revogada pela pessoa usuária.'",
+        "'Saída de todos os dispositivos.'",
+        "'Sessão do agente inválida.'",
+        "'Sessão do agente vinculada.'",
+        "'Sessão inválida.'",
+        "'Solicitação genérica recusada: não existe convite nem cadastro inicial aberto.'",
+        "'Todas as sessões foram revogadas.'"
+      ]
+    },
+    "plugins/policy/src/index.ts": {
+      "legacy": [
+        "'A ação tentou acessar outra organização ou espaço de trabalho.'",
+        "'Alteração reversível autorizada e registrada.'",
+        "'Ação bloqueada pela política do DZ23 STUDIO.'",
+        "'Ação sensível bloqueada até uma confirmação forte de identidade estar ativa.'",
+        "'Confirmação da pessoa necessária antes de continuar.'",
+        "'Confirmação reforçada necessária antes da ação sensível.'",
+        "'Execução sem sessão auditável foi bloqueada.'",
+        "'Ferramenta ainda não classificada: confirmação obrigatória.'",
+        "'Ferramenta sem declaração de permissão foi bloqueada.'",
+        "'Ferramenta sem identificação foi bloqueada por segurança.'",
+        "'Ferramenta sem permissão declarada foi bloqueada.'",
+        "'Nenhum vínculo ativo autoriza esta ação.'",
+        "'Não foi possível registrar a auditoria; a ação foi bloqueada.'",
+        "'Plugin não assinado é bloqueado no canal estável.'",
+        "'Regra de segurança inválida: execução bloqueada.'",
+        "'Sessão de identidade ausente, expirada ou revogada.'",
+        "'Seu papel neste espaço não permite esta ação.'"
+      ],
+      "plugins": [
+        "'A ação tentou acessar outra organização ou espaço de trabalho.'",
+        "'Alteração reversível autorizada e registrada.'",
+        "'Ação bloqueada pela política do DZ23 STUDIO.'",
+        "'Ação sensível bloqueada até uma confirmação forte de identidade estar ativa.'",
+        "'Confirmação da pessoa necessária antes de continuar.'",
+        "'Confirmação reforçada necessária antes da ação sensível.'",
+        "'Execução sem sessão auditável foi bloqueada.'",
+        "'Ferramenta ainda não classificada: confirmação obrigatória.'",
+        "'Ferramenta sem declaração de permissão foi bloqueada.'",
+        "'Ferramenta sem identificação foi bloqueada por segurança.'",
+        "'Ferramenta sem permissão declarada foi bloqueada.'",
+        "'Nenhum vínculo ativo autoriza esta ação.'",
+        "'Não foi possível registrar a auditoria; a ação foi bloqueada.'",
+        "'Plugin não assinado é bloqueado no canal estável.'",
+        "'Regra de segurança inválida: execução bloqueada.'",
+        "'Sessão de identidade ausente, expirada ou revogada.'",
+        "'Seu papel neste espaço não permite esta ação.'"
+      ]
+    },
+    "plugins/policy/src/rbac.ts": {
+      "legacy": [
+        "'Rota autorizada exige permissão.'",
+        "'Rota pública/autenticada não pode declarar permissão RBAC.'"
+      ],
+      "plugins": [
+        "'Rota autorizada exige permissão.'",
+        "'Rota pública/autenticada não pode declarar permissão RBAC.'"
+      ]
+    },
+    "plugins/prompt-to-app/src/acceptance.ts": {
+      "plugins": [
+        "'acesso:sem-sessão-401-e-login-por-código'",
+        "`const authStatePath=resolve(process.cwd(),'data/studio-auth-state.json')\nasync function captured(){try{return JSON.parse(await readFile(resolve(process.cwd(),'data/studio-capture.json'),'utf8')) as Array<{kind:string;email:string;code?:string}>}catch{return []}}\nasync function loginAsOwner(page:import('@playwright/test').Page){const email='owner@example.test';try{const state=JSON.parse(await readFile(authStatePath,'utf8')) as {cookies:Parameters<ReturnType<typeof page.context>['addCookies']>[0]};await page.context().addCookies(state.cookies);await page.goto('/');if(await page.getByTestId('signed-in-user').count()>0)return}catch{}await page.goto('/');const before=await captured();await page.getByTestId('request-code-form').locator('[name=\"email\"]').fill(email);await page.getByTestId('request-code-form').getByRole('button',{name:'Enviar código'}).click();await expect.poll(async()=>{const items=await captured();return items.length>before.length?[...items].reverse().find(item=>item.kind==='code'&&item.email===email)?.code:undefined}).toMatch(/^\\\\d{6}$/u);const captures=await captured();const code=[...captures].reverse().find(item=>item.kind==='code'&&item.email===email)?.code;await page.getByTestId('verify-code-form').locator('[name=\"email\"]').fill(email);await page.getByTestId('verify-code-form').locator('[name=\"code\"]').fill(code!);await page.getByTestId('verify-code-form').getByRole('button',{name:'Entrar'}).click();await expect(page.getByTestId('signed-in-user')).toContainText(email);await writeFile(authStatePath,JSON.stringify({cookies:await page.context().cookies()}),{encoding:'utf8',mode:0o600})}`",
+        "`test(${JSON.stringify(check.label)},async({page})=>checked(${JSON.stringify(check.id)},async()=>{await loginAsOwner(page);const form=page.getByTestId(${JSON.stringify(flow.form_test_id)});${fieldEntries(flow,marker).join(';')};await form.getByRole('button',{name:'Adicionar'}).click();let row=page.getByTestId(${JSON.stringify(flow.list_test_id)}).getByRole('listitem').filter({hasText:${JSON.stringify(marker)}});await expect(row).toBeVisible();const edit=row.locator('form').filter({hasText:'Salvar alterações'});await edit.locator(${JSON.stringify(`[name=\"${flow.marker_field}\"]`)}).fill(${JSON.stringify(edited)});await edit.getByRole('button',{name:'Salvar alterações'}).click();row=page.getByTestId(${JSON.stringify(flow.list_test_id)}).getByRole('listitem').filter({hasText:${JSON.stringify(edited)}});await expect(row).toBeVisible();page.once('dialog',dialog=>dialog.accept());await row.getByRole('button',{name:'Excluir'}).click();await expect(page.getByText(${JSON.stringify(edited)},{exact:false})).toHaveCount(0)}))`"
+      ]
+    },
+    "plugins/prompt-to-app/src/auth-generator.ts": {
+      "plugins": [
+        "`// @vitest-environment node\nimport { mkdtempSync, rmSync } from 'node:fs'\nimport { tmpdir } from 'node:os'\nimport { join } from 'node:path'\nimport { describe, expect, it } from 'vitest'\nimport { openDatabase } from '../src/db/client'\nimport { createEmailSender } from '../src/auth/email'\nimport { AppAuthError, GeneratedAuthService } from '../src/auth/service'\n\nfunction fixture() { const directory=mkdtempSync(join(tmpdir(),'dz23-auth-')); const database=openDatabase(directory); let now=new Date('2026-09-03T12:00:00.000Z'); let secret=0; const sent:string[]=[]; const service=new GeneratedAuthService({ database,ownerEmail:'owner@example.test',sender:{sendCode:async m=>{sent.push(m.code)},sendInvitation:async()=>{}},now:()=>now,createId:()=>\\`id-\\${++secret}\\`,createSecret:()=>\\`secret-\\${++secret}\\`,createCode:()=> '123456' }); return {directory,database,service,sent,advance:(ms:number)=>{now=new Date(now.getTime()+ms)},close:()=>{database.close();rmSync(directory,{recursive:true,force:true})}} }\ndescribe('acesso real gerado pelo Studio',()=>{\n  it('versiona auth sem avançar as migrações de dados',()=>{const f=fixture();try{expect(f.database.prepare('PRAGMA user_version').get()).toMatchObject({user_version:1});expect(f.database.prepare('SELECT max(version) AS version FROM auth_schema_migrations').get()).toMatchObject({version:1})}finally{f.close()}})\n  it('cria o primeiro owner e valida sessão e CSRF',async()=>{const f=fixture();try{const request=await f.service.requestCode('owner@example.test');expect(request.status).toBe('sent');const issued=f.service.verifyCode('owner@example.test',request.requestId,f.sent[0]!);expect(f.service.authenticate(issued.token)).toMatchObject({email:'owner@example.test',role:'owner'});expect(()=>f.service.validateCsrf(issued.session,issued.csrf,undefined)).toThrow(AppAuthError);expect(()=>f.service.validateCsrf(issued.session,issued.csrf,issued.csrf)).not.toThrow();f.service.revoke(issued.token);expect(()=>f.service.authenticate(issued.token)).toThrow('Sessão encerrada')}finally{f.close()}})\n  it('isola tentativas por navegador e expira a sessão',async()=>{const f=fixture();try{const first=await f.service.requestCode('owner@example.test');f.advance(61_000);const second=await f.service.requestCode('owner@example.test');for(let attempt=1;attempt<=5;attempt++)expect(()=>f.service.verifyCode('owner@example.test',first.requestId,'000000')).toThrow(attempt===5?'Código bloqueado':'Código inválido');const issued=f.service.verifyCode('owner@example.test',second.requestId,'123456');f.advance(15*24*60*60*1000);expect(()=>f.service.authenticate(issued.token)).toThrow('Sessão expirada')}finally{f.close()}})\n  it('permite que o owner convide um member sem elevar o papel',async()=>{const f=fixture();try{const ownerRequest=await f.service.requestCode('owner@example.test');const owner=f.service.verifyCode('owner@example.test',ownerRequest.requestId,'123456');await f.service.invite(owner.token,owner.csrf,owner.csrf,'member@example.test');const memberRequest=await f.service.requestCode('member@example.test');expect(memberRequest.status).toBe('sent');const member=f.service.verifyCode('member@example.test',memberRequest.requestId,'123456');expect(f.service.authenticate(member.token)).toMatchObject({email:'member@example.test',role:'member'});await expect(f.service.invite(member.token,member.csrf,member.csrf,'other@example.test')).rejects.toThrow('Somente o proprietário')}finally{f.close()}})\n  it('limita emissão e só permite captura no verificador do Studio',async()=>{const f=fixture();try{expect((await f.service.requestCode('other@example.test')).status).toBe('suppressed');expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('sent');f.advance(61_000);expect((await f.service.requestCode('owner@example.test')).status).toBe('suppressed');expect(()=>createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(()=>createEmailSender({NODE_ENV:'development',APP_EMAIL_MODE:'studio-capture'})).toThrow('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION');expect(createEmailSender({NODE_ENV:'production',APP_EMAIL_MODE:'studio-capture',DZ23_STUDIO_VERIFICATION:'1'})).toBeInstanceOf(Object);expect(()=>createEmailSender({APP_EMAIL_MODE:'invalid'})).toThrow('APP_EMAIL_MODE_INVALID');expect(()=>createEmailSender({APP_EMAIL_MODE:'smtp',APP_SMTP_URL:'http://example.test',APP_EMAIL_FROM:'owner@example.test'})).toThrow('APP_SMTP_URL_INVALID')}finally{f.close()}})\n})\n`",
+        "`import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'\nimport { dirname, resolve } from 'node:path'\nimport nodemailer from 'nodemailer'\n\nexport interface EmailSender {\n  sendCode(message: { email: string; code: string; expiresAt: string }): Promise<void>\n  sendInvitation(message: { email: string; expiresAt: string }): Promise<void>\n}\n\nexport function createEmailSender(env: Readonly<Record<string, string | undefined>> = process.env): EmailSender {\n  const mode = env.APP_EMAIL_MODE ?? 'studio-capture'\n  if (mode === 'studio-capture' && env.DZ23_STUDIO_VERIFICATION !== '1') throw new Error('STUDIO_CAPTURE_FORBIDDEN_OUTSIDE_VERIFICATION')\n  if (mode === 'studio-capture') return new StudioCaptureEmailSender(env.DATA_DIR ?? './data')\n  if (mode !== 'smtp') throw new Error('APP_EMAIL_MODE_INVALID')\n  const url = required(env.APP_SMTP_URL, 'APP_SMTP_URL')\n  const from = required(env.APP_EMAIL_FROM, 'APP_EMAIL_FROM')\n  const protocol = new URL(url).protocol\n  if (protocol !== 'smtp:' && protocol !== 'smtps:') throw new Error('APP_SMTP_URL_INVALID')\n  const transport = nodemailer.createTransport(url, { requireTLS: protocol === 'smtp:' })\n  return {\n    async sendCode(message) { await transport.sendMail({ from, to: message.email, subject: 'Seu código de acesso', text: \\`Use o código \\${message.code}. Ele expira em 10 minutos.\\` }) },\n    async sendInvitation(message) { await transport.sendMail({ from, to: message.email, subject: 'Você recebeu um convite', text: \\`Abra o aplicativo e peça seu código até \\${message.expiresAt}.\\` }) },\n  }\n}\n\nexport class StudioCaptureEmailSender implements EmailSender {\n  readonly path: string\n  constructor(dataDirectory: string) { this.path = resolve(dataDirectory, 'studio-capture.json') }\n  async sendCode(message: { email: string; code: string; expiresAt: string }): Promise<void> { await this.append({ kind: 'code', ...message }) }\n  async sendInvitation(message: { email: string; expiresAt: string }): Promise<void> { await this.append({ kind: 'invitation', ...message }) }\n  private async append(message: object): Promise<void> {\n    await mkdir(dirname(this.path), { recursive: true })\n    let current: unknown[] = []\n    try { current = JSON.parse(await readFile(this.path, 'utf8')) as unknown[] } catch {}\n    await writeFile(this.path, JSON.stringify([...current.slice(-19), message], null, 2) + '\\\\n', { encoding: 'utf8', mode: 0o600 })\n    await chmod(this.path, 0o600)\n  }\n}\n\nfunction required(value: string | undefined, name: string): string { if (value === undefined || value === '') throw new Error(\\`\\${name}_REQUIRED\\`); return value }\n`",
+        "`import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'\nimport type { DatabaseSync } from 'node:sqlite'\nimport type { EmailSender } from './email'\nimport { migrateAuth } from './migrations'\n\nconst TEN_MINUTES = 10 * 60 * 1000\nconst FIFTEEN_MINUTES = 15 * 60 * 1000\nconst MINIMUM_ISSUE_INTERVAL = 60 * 1000\nconst DAY = 24 * 60 * 60 * 1000\nconst SESSION_TTL = 14 * DAY\n\nexport type AppRole = 'owner' | 'member'\nexport interface AuthSession { id: string; userId: string; email: string; role: AppRole; csrfHash: string; expiresAt: string; revokedAt: string | null }\nexport class AppAuthError extends Error { constructor(readonly code: 'INVALID' | 'EXPIRED' | 'REVOKED' | 'LOCKED' | 'CSRF' | 'FORBIDDEN', message: string) { super(message) } }\nexport interface AuthServiceOptions { database: DatabaseSync; sender: EmailSender; ownerEmail: string; now?: () => Date; createId?: () => string; createSecret?: () => string; createCode?: () => string }\n\nexport class GeneratedAuthService {\n  private readonly database: DatabaseSync\n  private readonly sender: EmailSender\n  private readonly ownerEmail: string\n  private readonly now: () => Date\n  private readonly createId: () => string\n  private readonly createSecret: () => string\n  private readonly createCode: () => string\n  constructor(options: AuthServiceOptions) {\n    this.database = options.database; this.sender = options.sender; this.ownerEmail = normalizeEmail(options.ownerEmail)\n    this.now = options.now ?? (() => new Date()); this.createId = options.createId ?? randomUUID\n    this.createSecret = options.createSecret ?? (() => randomBytes(32).toString('base64url'))\n    this.createCode = options.createCode ?? (() => String(randomInt(0, 1_000_000)).padStart(6, '0'))\n    migrateAuth(this.database)\n  }\n  async requestCode(rawEmail: string): Promise<{ status: 'sent' | 'suppressed'; requestId: string }> {\n    const email = normalizeEmail(rawEmail); const now = this.now(); const requestId = this.createSecret(); const nowIso = now.toISOString()\n    this.database.prepare('DELETE FROM auth_codes WHERE expires_at <= ?').run(nowIso)\n    const users = Number(this.database.prepare('SELECT count(*) AS total FROM auth_users').get()?.total ?? 0)\n    const user = this.database.prepare('SELECT id FROM auth_users WHERE email = ?').get(email)\n    const invite = this.database.prepare('SELECT id FROM auth_invites WHERE email = ? AND used_at IS NULL AND expires_at > ?').get(email, nowIso)\n    if (user === undefined && invite === undefined && !(users === 0 && email === this.ownerEmail)) return { status: 'suppressed', requestId }\n    const windowStart = new Date(now.getTime() - FIFTEEN_MINUTES).toISOString(); const intervalStart = new Date(now.getTime() - MINIMUM_ISSUE_INTERVAL).toISOString()\n    const recent = Number(this.database.prepare('SELECT count(*) AS total FROM auth_codes WHERE email = ? AND issued_at > ?').get(email, windowStart)?.total ?? 0)\n    const tooSoon = this.database.prepare('SELECT 1 FROM auth_codes WHERE email = ? AND issued_at > ? LIMIT 1').get(email, intervalStart) !== undefined\n    if (recent >= 3 || tooSoon) return { status: 'suppressed', requestId }\n    const code = this.createCode(); if (!/^\\\\d{6}$/u.test(code)) throw new AppAuthError('INVALID', 'Código inválido.')\n    const expiresAt = new Date(now.getTime() + TEN_MINUTES).toISOString()\n    this.database.prepare('INSERT INTO auth_codes (id,request_id,email,code_hash,attempts,issued_at,expires_at,consumed_at) VALUES (?,?,?,?,?,?,?,NULL)').run(this.createId(), requestId, email, hashCode(code), 0, nowIso, expiresAt)\n    await this.sender.sendCode({ email, code, expiresAt }); return { status: 'sent', requestId }\n  }\n  verifyCode(rawEmail: string, requestId: string, code: string): { token: string; csrf: string; session: AuthSession } {\n    const email = normalizeEmail(rawEmail); const now = this.now()\n    const row = this.database.prepare('SELECT * FROM auth_codes WHERE request_id = ? AND email = ? AND consumed_at IS NULL LIMIT 1').get(requestId, email) as Record<string, unknown> | undefined\n    if (row === undefined) throw new AppAuthError('INVALID', 'Código inválido.')\n    if (Number(row.attempts) >= 5) throw new AppAuthError('LOCKED', 'Código bloqueado.')\n    if (Date.parse(String(row.expires_at)) <= now.getTime()) throw new AppAuthError('EXPIRED', 'Código expirado.')\n    if (!matchesCode(code, String(row.code_hash))) {\n      const attempts = Number(row.attempts) + 1\n      this.database.prepare('UPDATE auth_codes SET attempts = ?, consumed_at = ? WHERE id = ?').run(attempts, attempts >= 5 ? now.toISOString() : null, String(row.id))\n      throw new AppAuthError(attempts >= 5 ? 'LOCKED' : 'INVALID', attempts >= 5 ? 'Código bloqueado.' : 'Código inválido.')\n    }\n    this.database.prepare('UPDATE auth_codes SET consumed_at = ? WHERE id = ?').run(now.toISOString(), String(row.id))\n    const user = this.ensureUser(email, now)\n    const token = this.createSecret(); const csrf = this.createSecret(); const expiresAt = new Date(now.getTime() + SESSION_TTL).toISOString(); const id = this.createId()\n    this.database.prepare('INSERT INTO auth_sessions (id,user_id,token_hash,csrf_hash,expires_at,revoked_at) VALUES (?,?,?,?,?,NULL)').run(id, user.id, hash(token), hash(csrf), expiresAt)\n    return { token, csrf, session: { id, userId: user.id, email, role: user.role, csrfHash: hash(csrf), expiresAt, revokedAt: null } }\n  }\n  authenticate(token: string): AuthSession {\n    const row = this.database.prepare('SELECT s.*,u.email,u.role FROM auth_sessions s JOIN auth_users u ON u.id=s.user_id WHERE s.token_hash=?').get(hash(token)) as Record<string, unknown> | undefined\n    if (row === undefined) throw new AppAuthError('INVALID', 'Sessão inválida.')\n    if (row.revoked_at !== null) throw new AppAuthError('REVOKED', 'Sessão encerrada.')\n    if (Date.parse(String(row.expires_at)) <= this.now().getTime()) throw new AppAuthError('EXPIRED', 'Sessão expirada.')\n    return { id: String(row.id), userId: String(row.user_id), email: String(row.email), role: String(row.role) as AppRole, csrfHash: String(row.csrf_hash), expiresAt: String(row.expires_at), revokedAt: null }\n  }\n  validateCsrf(session: AuthSession, cookie: string | undefined, submitted: string | undefined): void {\n    if (cookie === undefined || submitted === undefined || cookie !== submitted || !matches(cookie, session.csrfHash)) throw new AppAuthError('CSRF', 'Confirmação de segurança ausente.')\n  }\n  revoke(token: string): void { this.database.prepare('UPDATE auth_sessions SET revoked_at = ? WHERE token_hash = ?').run(this.now().toISOString(), hash(token)) }\n  async invite(token: string, csrfCookie: string | undefined, csrfSubmitted: string | undefined, rawEmail: string): Promise<void> {\n    const session = this.authenticate(token); this.validateCsrf(session, csrfCookie, csrfSubmitted)\n    if (session.role !== 'owner') throw new AppAuthError('FORBIDDEN', 'Somente o proprietário pode convidar pessoas.')\n    const email = normalizeEmail(rawEmail); const expiresAt = new Date(this.now().getTime() + DAY).toISOString()\n    this.database.prepare('INSERT INTO auth_invites (id,email,invited_by,expires_at,used_at) VALUES (?,?,?,?,NULL) ON CONFLICT(email) DO UPDATE SET invited_by=excluded.invited_by,expires_at=excluded.expires_at,used_at=NULL').run(this.createId(), email, session.userId, expiresAt)\n    await this.sender.sendInvitation({ email, expiresAt })\n  }\n  private ensureUser(email: string, now: Date): { id: string; role: AppRole } {\n    const existing = this.database.prepare('SELECT id,role FROM auth_users WHERE email=?').get(email) as { id: string; role: AppRole } | undefined\n    if (existing !== undefined) return existing\n    const total = Number(this.database.prepare('SELECT count(*) AS total FROM auth_users').get()?.total ?? 0)\n    const invited = this.database.prepare('SELECT id FROM auth_invites WHERE email=? AND used_at IS NULL AND expires_at>?').get(email, now.toISOString()) as { id: string } | undefined\n    if (!(total === 0 && email === this.ownerEmail) && invited === undefined) throw new AppAuthError('FORBIDDEN', 'Convite necessário.')\n    const id = this.createId(); const role: AppRole = total === 0 ? 'owner' : 'member'\n    this.database.prepare('INSERT INTO auth_users (id,email,role,created_at) VALUES (?,?,?,?)').run(id, email, role, now.toISOString())\n    if (invited !== undefined) this.database.prepare('UPDATE auth_invites SET used_at=? WHERE id=?').run(now.toISOString(), invited.id)\n    return { id, role }\n  }\n}\nfunction normalizeEmail(value: string): string { const email=value.trim().toLowerCase(); if (!/^[^\\\\s@]+@[^\\\\s@]+\\\\.[^\\\\s@]+$/u.test(email)) throw new AppAuthError('INVALID','E-mail inválido.'); return email }\nfunction hash(value: string): string { return createHash('sha256').update(value).digest('hex') }\nfunction matches(value: string, expected: string): boolean { const actual=Buffer.from(hash(value)); const wanted=Buffer.from(expected); return actual.length===wanted.length && timingSafeEqual(actual,wanted) }\nfunction hashCode(value: string): string { const salt=randomBytes(16); return \\`\\${salt.toString('hex')}:\\${scryptSync(value,salt,32).toString('hex')}\\` }\nfunction matchesCode(value: string, encoded: string): boolean { const [saltHex,digestHex]=encoded.split(':'); if(saltHex===undefined||digestHex===undefined)return false;const salt=Buffer.from(saltHex,'hex');const actual=scryptSync(value,salt,32);const wanted=Buffer.from(digestHex,'hex');return actual.length===wanted.length&&timingSafeEqual(actual,wanted) }\n`",
+        "`import { inviteAction, logoutAction, requestCodeAction, verifyCodeAction } from '../../auth/actions'\nimport { csrfForCurrentSession, currentSession } from '../../auth/runtime'\nexport async function AccessPanel() { return <section aria-labelledby=\"access-title\"><h2 id=\"access-title\">Acessar o aplicativo</h2><form action={requestCodeAction} data-testid=\"request-code-form\"><label htmlFor=\"access-email\">E-mail</label><input id=\"access-email\" name=\"email\" type=\"email\" required/><button type=\"submit\">Enviar código</button></form><form action={verifyCodeAction} data-testid=\"verify-code-form\"><label htmlFor=\"verify-email\">E-mail</label><input id=\"verify-email\" name=\"email\" type=\"email\" required/><label htmlFor=\"access-code\">Código de 6 dígitos</label><input id=\"access-code\" name=\"code\" inputMode=\"numeric\" pattern=\"[0-9]{6}\" required/><button type=\"submit\">Entrar</button></form></section> }\nexport async function AccountPanel() { const session=await currentSession(); if(session===null) return null; const csrf=await csrfForCurrentSession(); return <aside><p data-testid=\"signed-in-user\">Acesso: {session.email} ({session.role==='owner'?'proprietário':'membro'})</p>{session.role==='owner'?<form action={inviteAction}><input type=\"hidden\" name=\"_csrf\" value={csrf}/><label htmlFor=\"invite-email\">Convidar por e-mail</label><input id=\"invite-email\" name=\"email\" type=\"email\" required/><button type=\"submit\">Enviar convite</button></form>:null}<form action={logoutAction}><input type=\"hidden\" name=\"_csrf\" value={csrf}/><button type=\"submit\">Sair</button></form></aside> }\n`"
+      ]
+    },
+    "plugins/prompt-to-app/src/crud-generator.ts": {
+      "plugins": [
+        "'O painel com ligações entre cadastros exige um seletor seguro que ainda não está disponível.'",
+        "`import { csrfForCurrentSession, currentSession } from '../../auth/runtime'\\nimport { openDatabase } from '../../db/client'\\nimport { create${symbol},delete${symbol},update${symbol} } from '../../server/actions/${slug}'\\nimport { ${symbol}Repository } from '../../server/repositories/${slug}'\\nimport { AccessPanel,AccountPanel } from './access-panel'\\nimport { ConfirmDeleteButton } from './confirm-delete-button'\\nexport default async function ${symbol}Panel(){const session=await currentSession();if(session===null)return <AccessPanel/>;const csrf=await csrfForCurrentSession();const db=openDatabase();let rows:ReturnType<${symbol}Repository['list']>;try{rows=new ${symbol}Repository(db).list()}finally{db.close()}return <main><AccountPanel/><h1>${jsx(`Gerenciar ${entity.name}`)}</h1><section><h2>Novo cadastro</h2><form action={create${symbol}} data-testid=${JSON.stringify(`${slug}-create-form`)}><input type=\"hidden\" name=\"_csrf\" value={csrf}/>\\n${createInputs}\\n<button type=\"submit\">Adicionar</button></form></section><section><h2>Cadastros</h2>{rows.length===0?<p>Nenhum cadastro ainda.</p>:<ul data-testid=${JSON.stringify(`${slug}-list`)}>{rows.map(row=><li key={row.id} data-testid={\\`${slug}-row-\\${row.id}\\`}><p>{[${visible}].filter(value=>value!==null&&value!==undefined&&value!=='').map(value=>typeof value==='boolean'?(value?'Sim':'Não'):String(value)).join(' · ')}</p><form action={update${symbol}} data-testid={\\`${slug}-edit-\\${row.id}\\`}><input type=\"hidden\" name=\"_csrf\" value={csrf}/><input type=\"hidden\" name=\"id\" value={row.id}/>\\n${editInputs}\\n<button type=\"submit\">Salvar alterações</button></form><form action={delete${symbol}}><input type=\"hidden\" name=\"_csrf\" value={csrf}/><input type=\"hidden\" name=\"id\" value={row.id}/><ConfirmDeleteButton/></form></li>)}</ul>}</section></main>}\\n`"
+      ]
+    },
+    "plugins/prompt-to-app/src/design.ts": {
+      "plugins": [
+        "`/* DZ23 DesignSpec v1 ${designSpecHash(value)} — arquivo protegido */\n:root {\n  --background: ${token('neutral', 'value')};\n  --foreground: ${token('neutral', 'foreground')};\n  --card: 0 0% 100%;\n  --card-foreground: ${token('neutral', 'foreground')};\n  --primary: ${token('primary', 'value')};\n  --primary-foreground: ${token('primary', 'foreground')};\n  --secondary: ${token('secondary', 'value')};\n  --secondary-foreground: ${token('secondary', 'foreground')};\n  --muted: ${token('neutral', 'value')};\n  --muted-foreground: ${token('neutral', 'foreground')};\n  --accent: ${token('secondary', 'value')};\n  --accent-foreground: ${token('secondary', 'foreground')};\n  --success: ${token('success', 'value')};\n  --success-foreground: ${token('success', 'foreground')};\n  --warning: ${token('warning', 'value')};\n  --warning-foreground: ${token('warning', 'foreground')};\n  --danger: ${token('danger', 'value')};\n  --danger-foreground: ${token('danger', 'foreground')};\n  --destructive: ${token('danger', 'value')};\n  --border: 214 24% 82%;\n  --input: 214 24% 82%;\n  --ring: ${token('primary', 'value')};\n  --radius: ${radius};\n  --content-spacing: ${spacing};\n  --font-body: ${font};\n}\n`"
+      ]
+    },
+    "plugins/prompt-to-app/src/form-generator.ts": {
+      "plugins": [
+        "`import { csrfForCurrentSession, currentSession } from '../../auth/runtime'\\nimport { AccessPanel, AccountPanel } from './access-panel'\\nimport { openDatabase } from '../../db/client'\\nimport { create${symbol} } from '../../server/actions/${slug}'\\nimport { ${symbol}Repository } from '../../server/repositories/${slug}'\\n\\nexport default async function ${symbol}Manager() {\\n  const session = await currentSession()\\n${sessionGate}  const csrf = session === null ? '' : await csrfForCurrentSession()\\n  let rows: ReturnType<${symbol}Repository['list']> = []\\n  if (session !== null) {\\n    const database = openDatabase()\\n    try { rows = new ${symbol}Repository(database).list() } finally { database.close() }\\n  }\\n  return <section aria-labelledby=${JSON.stringify(`${slug}-title`)}>\\n    {session === null ? null : <AccountPanel />}\\n    <h2 id=${JSON.stringify(`${slug}-title`)}>${jsx(entity.name)}</h2>\\n    <form action={create${symbol}} data-testid=${JSON.stringify(`${slug}-form`)}>\\n${csrfInput}${inputs}\\n      <button type=\"submit\">Salvar</button>\\n    </form>\\n    {session === null ? <section aria-label=\"Área de gestão\"><p>Entre para consultar os cadastros enviados.</p><AccessPanel /></section> : <>\\n      <h3>Cadastros salvos</h3>\\n      {rows.length === 0 ? <p>Nenhum cadastro ainda.</p> : <ul data-testid=${JSON.stringify(`${slug}-list`)}>\\n        {rows.map(row => <li key={row.id}>{[${visible}].filter(value => value !== null && value !== undefined && value !== '').map(value => typeof value === 'boolean' ? (value ? 'Sim' : 'Não') : String(value)).join(' · ')}</li>)}\\n      </ul>}\\n    </>}\\n  </section>\\n}\\n`"
+      ]
+    },
+    "plugins/prompt-to-app/src/import-policy.ts": {
+      "plugins": [
+        "'<dinâmico>'"
+      ]
+    },
+    "plugins/route-health/src/index.ts": {
+      "legacy": [
+        "'Método não permitido.'",
+        "'Sessão inválida.'"
+      ],
+      "plugins": [
+        "'Método não permitido.'",
+        "'Sessão inválida.'"
+      ]
+    },
+    "plugins/route-health/src/service.ts": {
+      "legacy": [
+        "'A conexão com a inteligência artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota.'",
+        "'IA local indisponível; nenhuma informação foi enviada para uma rota externa.'",
+        "'Modelo local saudável preferido para leitura segura.'",
+        "'OmniRoute falhou antes de produzir conteúdo; usando a rota DeepSeek direta.'",
+        "'Perfil privado restrito à IA local.'",
+        "'Primeira rota saudável do perfil.'",
+        "'Rota direta usada porque nenhuma rota monitorada está saudável.'"
+      ],
+      "plugins": [
+        "'A conexão com a inteligência artificial falhou. Nada foi aplicado; tente novamente ou escolha outra rota.'",
+        "'IA local indisponível; nenhuma informação foi enviada para uma rota externa.'",
+        "'Modelo local saudável preferido para leitura segura.'",
+        "'OmniRoute falhou antes de produzir conteúdo; usando a rota DeepSeek direta.'",
+        "'Perfil privado restrito à IA local.'",
+        "'Primeira rota saudável do perfil.'",
+        "'Rota direta usada porque nenhuma rota monitorada está saudável.'"
+      ]
+    },
+    "plugins/studio-web/src/index.ts": {
+      "plugins": [
+        "'Arquivo não encontrado.'",
+        "'Caminho inválido.'",
+        "'Interface ainda não foi compilada.'",
+        "'Links simbólicos não são servidos.'",
+        "'Método não permitido.'",
+        "'Não foi possível abrir a interface.'"
+      ]
+    },
+    "plugins/tenancy/src/http.ts": {
+      "legacy": [
+        "'Rota não encontrada.'",
+        "'Seu papel não permite esta ação.'",
+        "'Solicitação grande demais.'",
+        "'Solicitação inválida.'"
+      ],
+      "plugins": [
+        "'Rota não encontrada.'",
+        "'Seu papel não permite esta ação.'",
+        "'Solicitação grande demais.'",
+        "'Solicitação inválida.'"
+      ]
+    },
+    "plugins/tenancy/src/service.ts": {
+      "legacy": [
+        "'Convite inválido ou não encontrado.'",
+        "'Digite um e-mail válido.'",
+        "'Digite um nome para o espaço de trabalho.'",
+        "'Espaço de trabalho criado.'",
+        "'Espaço de trabalho não encontrado.'",
+        "'Esta pessoa já participa do espaço de trabalho.'",
+        "'Este convite não está mais disponível.'",
+        "'Este convite pertence a outra organização.'",
+        "'Este e-mail já pertence a outra organização.'",
+        "'Membro não encontrado.'",
+        "'Meu espaço de trabalho'",
+        "'O espaço precisa manter ao menos uma pessoa proprietária.'",
+        "'Seu papel não permite esta ação.'",
+        "'Seu papel não pode atribuir esse nível de acesso.'",
+        "'Somente uma pessoa proprietária pode alterar outra proprietária.'"
+      ],
+      "plugins": [
+        "'Convite inválido ou não encontrado.'",
+        "'Digite um e-mail válido.'",
+        "'Digite um nome para o espaço de trabalho.'",
+        "'Espaço de trabalho criado.'",
+        "'Espaço de trabalho não encontrado.'",
+        "'Esta pessoa já participa do espaço de trabalho.'",
+        "'Este convite não está mais disponível.'",
+        "'Este convite pertence a outra organização.'",
+        "'Este e-mail já pertence a outra organização.'",
+        "'Membro não encontrado.'",
+        "'Meu espaço de trabalho'",
+        "'O espaço precisa manter ao menos uma pessoa proprietária.'",
+        "'Seu papel não permite esta ação.'",
+        "'Seu papel não pode atribuir esse nível de acesso.'",
+        "'Somente uma pessoa proprietária pode alterar outra proprietária.'"
+      ]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+repository=https://github.com/deepseek-ai/deepseek-harness.git
+path=third_party/deepseek-harness
+commit=6c705be1ce6774a000d061da41d1823b03a3d42c
+tree=a712eec535b48badc4fefb4df5176a7002e4280b
+manifest_sha256=862b92782c2f5cd67f81debd1116b16150dfafd84fb4ce2602a729f9cf3d26dc

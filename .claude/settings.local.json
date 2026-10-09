@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__obsidian-memoria__list_directory",
+      "mcp__obsidian-memoria__create_directory",
+      "mcp__obsidian-memoria__read_file",
+      "mcp__obsidian-memoria__read_text_file",
+      "mcp__dz23-subagents__mission_start",
+      "mcp__dz23-subagents__mission_resume",
+      "Bash(git clone *)",
+      "Bash(pnpm gates *)",
+      "Bash(npm -v)"
+    ]
+  }
+}

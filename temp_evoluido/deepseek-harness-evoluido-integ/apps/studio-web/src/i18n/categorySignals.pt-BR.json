@@ -1,0 +1,1024 @@
+{
+  "scheduling": [
+    [
+      "agenda",
+      4
+    ],
+    [
+      "agendar",
+      4
+    ],
+    [
+      "agendamento",
+      4
+    ],
+    [
+      "agendamentos",
+      4
+    ],
+    [
+      "marcar consulta",
+      5
+    ],
+    [
+      "marcar consultas",
+      5
+    ],
+    [
+      "consulta",
+      2
+    ],
+    [
+      "consultas",
+      2
+    ],
+    [
+      "reserva",
+      3
+    ],
+    [
+      "reservas",
+      3
+    ],
+    [
+      "horario",
+      2
+    ],
+    [
+      "horarios",
+      2
+    ],
+    [
+      "compromisso",
+      3
+    ],
+    [
+      "compromissos",
+      3
+    ],
+    [
+      "confirmar e cancelar",
+      4
+    ],
+    [
+      "remarcar",
+      3
+    ],
+    [
+      " marcar hora",
+      5
+    ],
+    [
+      " marque hora",
+      5
+    ],
+    [
+      " marcar horario",
+      5
+    ],
+    [
+      " marca hora",
+      5
+    ],
+    [
+      " dia e hora",
+      5
+    ],
+    [
+      " hora com a",
+      4
+    ],
+    [
+      " ajenda",
+      4
+    ],
+    [
+      " ajendar",
+      4
+    ],
+    [
+      " agenda ",
+      4
+    ],
+    [
+      " escolhe dia",
+      4
+    ],
+    [
+      " escolher dia",
+      4
+    ],
+    [
+      " horario com",
+      4
+    ],
+    [
+      " atendimento ",
+      2
+    ],
+    [
+      " marcar ",
+      2
+    ],
+    [
+      " marcar batizado",
+      4
+    ],
+    [
+      " organizar os pacientes",
+      4
+    ]
+  ],
+  "saas-authenticated": [
+    [
+      "cada cliente",
+      5
+    ],
+    [
+      "area do cliente",
+      5
+    ],
+    [
+      "area dos clientes",
+      5
+    ],
+    [
+      "acesso separado",
+      5
+    ],
+    [
+      "conta para cada",
+      4
+    ],
+    [
+      "assinatura",
+      3
+    ],
+    [
+      "assinantes",
+      3
+    ],
+    [
+      "cada empresa",
+      4
+    ],
+    [
+      "varias empresas",
+      4
+    ],
+    [
+      "login para cada",
+      4
+    ],
+    [
+      "area restrita",
+      3
+    ],
+    [
+      " clientes entrarem",
+      5
+    ],
+    [
+      " entrarem e ",
+      3
+    ],
+    [
+      " portal para",
+      4
+    ],
+    [
+      " area para clientes",
+      5
+    ],
+    [
+      " area para os clientes",
+      5
+    ],
+    [
+      " cada pessoa vendo",
+      5
+    ],
+    [
+      " vendo somente o que",
+      5
+    ],
+    [
+      " somente o que pertence",
+      5
+    ],
+    [
+      " so o que e dela",
+      5
+    ],
+    [
+      " so o que e dele",
+      5
+    ],
+    [
+      " cada um ve",
+      5
+    ],
+    [
+      " cada um so ve",
+      5
+    ],
+    [
+      " sem uma familia",
+      4
+    ],
+    [
+      " sem um ver o outro",
+      5
+    ],
+    [
+      " uma nao ver a outra",
+      5
+    ],
+    [
+      " area da escola",
+      4
+    ],
+    [
+      " responsaveis verem",
+      4
+    ],
+    [
+      " fornecedores mandarem",
+      4
+    ],
+    [
+      " cada fornecedor",
+      4
+    ],
+    [
+      " cada aluno",
+      4
+    ],
+    [
+      " cada paciente ve",
+      4
+    ],
+    [
+      " login e permissoes",
+      4
+    ],
+    [
+      " permissoes e seguranca",
+      4
+    ]
+  ],
+  "dashboard": [
+    [
+      "acompanhar numeros",
+      5
+    ],
+    [
+      "acompanhar os numeros",
+      5
+    ],
+    [
+      "indicadores",
+      4
+    ],
+    [
+      "grafico",
+      3
+    ],
+    [
+      "graficos",
+      3
+    ],
+    [
+      "relatorio",
+      3
+    ],
+    [
+      "relatorios",
+      3
+    ],
+    [
+      "metricas",
+      4
+    ],
+    [
+      "sem alterar",
+      4
+    ],
+    [
+      "agrupamento",
+      3
+    ],
+    [
+      "agrupamentos",
+      3
+    ],
+    [
+      "visao geral",
+      3
+    ],
+    [
+      "total por",
+      3
+    ],
+    [
+      " quanto entrou",
+      5
+    ],
+    [
+      " quanto saiu",
+      5
+    ],
+    [
+      " quanto vendi",
+      5
+    ],
+    [
+      " controle financeiro",
+      5
+    ],
+    [
+      " saber quanto",
+      4
+    ],
+    [
+      " resumo do mes",
+      4
+    ],
+    [
+      " total do mes",
+      4
+    ],
+    [
+      " acompanhar quanto",
+      4
+    ],
+    [
+      " acompanhar os numero",
+      4
+    ],
+    [
+      " acompanhar o numero",
+      4
+    ],
+    [
+      " painel para acompanhar",
+      5
+    ],
+    [
+      " painel de acompanhamento",
+      5
+    ],
+    [
+      " acompanhar entregas",
+      4
+    ],
+    [
+      " acompanhar as entregas",
+      4
+    ],
+    [
+      " telao",
+      5
+    ],
+    [
+      " mostrar despesas",
+      4
+    ],
+    [
+      " mostrar as despesas",
+      4
+    ],
+    [
+      " por regiao",
+      3
+    ],
+    [
+      " so mostrar",
+      4
+    ],
+    [
+      " apenas mostrar",
+      4
+    ],
+    [
+      " somente mostrar",
+      4
+    ],
+    [
+      " saber quem esta cuidando",
+      3
+    ],
+    [
+      " atrasadas",
+      3
+    ],
+    [
+      " painel do escritorio",
+      4
+    ]
+  ],
+  "crud-panel": [
+    [
+      "criar editar e excluir",
+      6
+    ],
+    [
+      "editar e excluir",
+      5
+    ],
+    [
+      "excluir",
+      3
+    ],
+    [
+      "gerenciar",
+      3
+    ],
+    [
+      "administrar",
+      3
+    ],
+    [
+      "painel para minha equipe",
+      5
+    ],
+    [
+      "painel para a equipe",
+      5
+    ],
+    [
+      "equipe",
+      1
+    ],
+    [
+      " ordens de servico",
+      5
+    ],
+    [
+      " ordem de servico",
+      5
+    ],
+    [
+      " mexer nos dados",
+      5
+    ],
+    [
+      " editar os dados",
+      5
+    ],
+    [
+      " corrigir os dados",
+      4
+    ],
+    [
+      " apagar um cadastro",
+      4
+    ],
+    [
+      " organizar meus clientes",
+      5
+    ],
+    [
+      " organizar os clientes",
+      5
+    ],
+    [
+      " lembrar quem",
+      4
+    ],
+    [
+      " quem respondeu",
+      4
+    ],
+    [
+      " quem pediu orcamento",
+      4
+    ],
+    [
+      " preciso ligar",
+      3
+    ],
+    [
+      " cadastrar clientes com",
+      4
+    ],
+    [
+      " controlar meus clientes",
+      4
+    ],
+    [
+      " acompanhar quem pediu",
+      4
+    ],
+    [
+      " e uma nota dizendo",
+      3
+    ]
+  ],
+  "form-database": [
+    [
+      "cadastrar",
+      4
+    ],
+    [
+      "cadastro",
+      3
+    ],
+    [
+      "cadastros",
+      3
+    ],
+    [
+      "formulario",
+      4
+    ],
+    [
+      "formularios",
+      4
+    ],
+    [
+      "ve las em uma lista",
+      5
+    ],
+    [
+      "em uma lista",
+      3
+    ],
+    [
+      "inscricao",
+      4
+    ],
+    [
+      "inscricoes",
+      4
+    ],
+    [
+      "coletar",
+      3
+    ],
+    [
+      "anotar",
+      2
+    ],
+    [
+      "registrar informacoes",
+      4
+    ],
+    [
+      " guardar os nomes",
+      5
+    ],
+    [
+      " guarda os nome",
+      5
+    ],
+    [
+      " guardar nomes",
+      4
+    ],
+    [
+      " registrar as horas",
+      5
+    ],
+    [
+      " registrar ",
+      3
+    ],
+    [
+      " anotar as",
+      3
+    ],
+    [
+      " controlar quem",
+      4
+    ],
+    [
+      " controle de quem",
+      4
+    ],
+    [
+      " ponto dos funcionarios",
+      5
+    ],
+    [
+      " lista de clientes",
+      4
+    ],
+    [
+      " cadastro de clientes",
+      5
+    ],
+    [
+      " nomes dos meus clientes",
+      5
+    ],
+    [
+      " quem me deve",
+      5
+    ],
+    [
+      " guardar as informacoes",
+      4
+    ],
+    [
+      " guardar os nome",
+      5
+    ],
+    [
+      " se inscrever",
+      4
+    ],
+    [
+      " inscrever no curso",
+      5
+    ]
+  ],
+  "catalog": [
+    [
+      "catalogo",
+      5
+    ],
+    [
+      "vitrine",
+      4
+    ],
+    [
+      "cardapio",
+      5
+    ],
+    [
+      "produtos",
+      3
+    ],
+    [
+      "meus produtos",
+      4
+    ],
+    [
+      "portfolio",
+      3
+    ],
+    [
+      "mostrar meus",
+      2
+    ],
+    [
+      "servicos",
+      1
+    ],
+    [
+      " vender bolo",
+      3
+    ],
+    [
+      " meus bolos",
+      3
+    ],
+    [
+      " minha loja",
+      2
+    ],
+    [
+      " imoveis",
+      3
+    ],
+    [
+      " cardapio digital",
+      5
+    ]
+  ],
+  "landing-page": [
+    [
+      "pagina",
+      3
+    ],
+    [
+      "apresentar",
+      3
+    ],
+    [
+      "divulgar",
+      3
+    ],
+    [
+      "institucional",
+      4
+    ],
+    [
+      "receber contatos",
+      4
+    ],
+    [
+      "fale conosco",
+      4
+    ],
+    [
+      "meu trabalho",
+      3
+    ],
+    [
+      "site",
+      2
+    ],
+    [
+      " na internet",
+      3
+    ],
+    [
+      " aparecer no google",
+      4
+    ],
+    [
+      " cartao de visita",
+      4
+    ],
+    [
+      " contar a historia",
+      4
+    ],
+    [
+      " mostrar minha",
+      3
+    ],
+    [
+      " mostrar meu ",
+      3
+    ],
+    [
+      " quem somos",
+      3
+    ],
+    [
+      " site simples",
+      5
+    ],
+    [
+      " explicar os servicos",
+      4
+    ],
+    [
+      " explicar meus servicos",
+      4
+    ],
+    [
+      " como falar comigo",
+      4
+    ],
+    [
+      " como falar com a gente",
+      4
+    ],
+    [
+      " queria um site",
+      4
+    ],
+    [
+      " quero um site",
+      4
+    ]
+  ],
+  "ramo-de-atividade": [
+    [
+      "barbearia",
+      "scheduling"
+    ],
+    [
+      "barbeiro",
+      "scheduling"
+    ],
+    [
+      "salao de beleza",
+      "scheduling"
+    ],
+    [
+      "manicure",
+      "scheduling"
+    ],
+    [
+      "cabeleireiro",
+      "scheduling"
+    ],
+    [
+      "clinica",
+      "scheduling"
+    ],
+    [
+      "consultorio",
+      "scheduling"
+    ],
+    [
+      "dentista",
+      "scheduling"
+    ],
+    [
+      "psicologa",
+      "scheduling"
+    ],
+    [
+      "psicologo",
+      "scheduling"
+    ],
+    [
+      "fisioterapia",
+      "scheduling"
+    ],
+    [
+      "estetica",
+      "scheduling"
+    ],
+    [
+      "delivery",
+      "catalog"
+    ],
+    [
+      "lanchonete",
+      "catalog"
+    ],
+    [
+      "pizzaria",
+      "catalog"
+    ],
+    [
+      "restaurante",
+      "catalog"
+    ],
+    [
+      "padaria",
+      "catalog"
+    ],
+    [
+      "confeitaria",
+      "catalog"
+    ],
+    [
+      "brecho",
+      "catalog"
+    ],
+    [
+      "oficina",
+      "crud-panel"
+    ],
+    [
+      "imobiliaria",
+      "catalog"
+    ],
+    [
+      "pet shop",
+      "catalog"
+    ],
+    [
+      "petshop",
+      "catalog"
+    ],
+    [
+      "academia",
+      "scheduling"
+    ],
+    [
+      "hotel",
+      "scheduling"
+    ],
+    [
+      "pousada",
+      "scheduling"
+    ],
+    [
+      "autoescola",
+      "scheduling"
+    ],
+    [
+      "lava jato",
+      "scheduling"
+    ],
+    [
+      "food truck",
+      "catalog"
+    ],
+    [
+      "mercadinho",
+      "catalog"
+    ],
+    [
+      "mercearia",
+      "catalog"
+    ],
+    [
+      "ifood",
+      "catalog"
+    ],
+    [
+      "buffet",
+      "catalog"
+    ],
+    [
+      "hamburgueria",
+      "catalog"
+    ],
+    [
+      "sorveteria",
+      "catalog"
+    ],
+    [
+      "oficina mecanica",
+      "crud-panel"
+    ]
+  ],
+  "outro": [
+    [
+      "jogo",
+      5
+    ],
+    [
+      "jogos",
+      5
+    ],
+    [
+      "jogar",
+      4
+    ],
+    [
+      "jogo da velha",
+      6
+    ],
+    [
+      "quiz",
+      5
+    ],
+    [
+      "perguntas e respostas",
+      5
+    ],
+    [
+      "simulador",
+      5
+    ],
+    [
+      "calculadora",
+      5
+    ],
+    [
+      "cronometro",
+      5
+    ],
+    [
+      "temporizador",
+      5
+    ],
+    [
+      "sorteio",
+      4
+    ],
+    [
+      "sortear",
+      4
+    ],
+    [
+      "conversor",
+      4
+    ],
+    [
+      "gerador",
+      3
+    ],
+    [
+      "ferramenta",
+      3
+    ],
+    [
+      "tabuleiro",
+      5
+    ],
+    [
+      "placar",
+      4
+    ],
+    [
+      "pontuacao",
+      3
+    ],
+    [
+      "contra o computador",
+      5
+    ],
+    [
+      "desenhar",
+      3
+    ],
+    [
+      "editor",
+      3
+    ],
+    [
+      "visualizador",
+      4
+    ],
+    [
+      "mapa interativo",
+      4
+    ],
+    [
+      "quebra-cabeca",
+      5
+    ]
+  ]
+}

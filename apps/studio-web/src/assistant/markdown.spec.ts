@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MARKDOWN_MAX_CHARS, inlineText, parseInline, parseMarkdown } from './markdown'
+import { MARKDOWN_MAX_CHARS, inlineText, parseInline, parseMarkdown } from './Markdown'
 
 describe('blocos', () => {
   it('parágrafo junta as linhas, e a linha em branco separa', () => {

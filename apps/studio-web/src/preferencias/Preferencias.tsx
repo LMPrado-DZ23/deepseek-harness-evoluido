@@ -4,7 +4,6 @@ import { useCatalogos, useIdioma } from '../i18n/IdiomaProvider'
 import { IDIOMAS, NOME_DO_IDIOMA } from '../i18n/idioma'
 import { comValores } from '../i18n/texto'
 import { iniciaisDaConta } from '../shell/tarefasDoTrilho'
-import { podeOperar, secaoInicial, secoesDePreferencias, type ContextoDasPreferencias, type GrupoDePreferencias, type SecaoDePreferencias } from './preferencias'
 import { chaveDoVeredito, contagemEmTexto, custoEmTexto, linhasDeUso, totalDeUso, type LinhaDeUso, type UsoDoEspaco } from './uso'
 import { atalhosDoStudio } from './atalhos'
 import { api } from '../api'
@@ -388,3 +387,53 @@ function Conteudo({ secao, conta, notificacao }: {
     <a className="dz-preferencias-destino" href={secao.href}>{preferencias.verDestino}</a>
   </p>
 }
+
+import { BIBLIOTECA_PATH, HABILIDADES_PATH, PLUGINS_PATH } from '../destinos/destinos'
+
+export type GrupoDePreferencias = 'configuracoes' | 'capacidades' | 'dados'
+
+export interface SecaoDePreferencias {
+  readonly id: string
+  readonly grupo: GrupoDePreferencias
+  readonly disponivel: boolean
+  readonly pendencia?: string
+  readonly href?: string
+}
+
+export interface ContextoDasPreferencias {
+  readonly autenticado: boolean
+  readonly notificacoesSuportadas: boolean
+}
+
+export function secoesDePreferencias(contexto: ContextoDasPreferencias): readonly SecaoDePreferencias[] {
+  return [
+    {
+      id: 'conta', grupo: 'configuracoes', disponivel: contexto.autenticado,
+      ...(contexto.autenticado ? {} : { pendencia: 'semSessao' }),
+    },
+    {
+      id: 'notificacoes', grupo: 'configuracoes', disponivel: contexto.notificacoesSuportadas,
+      ...(contexto.notificacoesSuportadas ? {} : { pendencia: 'semNotificacao' }),
+    },
+    { id: 'tema', grupo: 'configuracoes', disponivel: false, pendencia: 'temaUnico' },
+    { id: 'idioma', grupo: 'configuracoes', disponivel: true },
+    { id: 'atalhos', grupo: 'configuracoes', disponivel: true },
+    { id: 'uso', grupo: 'configuracoes', disponivel: true },
+    { id: 'conexoes', grupo: 'configuracoes', disponivel: true },
+    { id: 'habilidades', grupo: 'capacidades', disponivel: true, href: HABILIDADES_PATH },
+    { id: 'plugins', grupo: 'capacidades', disponivel: true, href: PLUGINS_PATH },
+    { id: 'computador', grupo: 'capacidades', disponivel: false, pendencia: 'semComputador' },
+    { id: 'biblioteca', grupo: 'dados', disponivel: true, href: BIBLIOTECA_PATH },
+    { id: 'privacidade', grupo: 'dados', disponivel: true },
+    { id: 'implantacoes', grupo: 'dados', disponivel: false, pendencia: 'semImplantacao' },
+  ]
+}
+
+export function secaoInicial(secoes: readonly SecaoDePreferencias[]): string | null {
+  return secoes.find(secao => secao.disponivel)?.id ?? null
+}
+
+export function podeOperar(secao: SecaoDePreferencias): boolean {
+  return secao.disponivel
+}
+

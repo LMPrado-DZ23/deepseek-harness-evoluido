@@ -1,0 +1,91 @@
+{
+  "path": "/studio/ajuda",
+  "navLabel": "Ajuda",
+  "title": "Ajuda do FRIGG",
+  "subtitle": "O que cada palavra desta tela quer dizer, em português comum.",
+  "backHome": "Voltar ao início",
+  "stepsTitle": "Como funciona, do começo ao fim",
+  "steps": [
+    "Você conta com suas palavras o que precisa. O FRIGG mostra o tipo de aplicativo que entendeu, e você corrige se não for isso.",
+    "Ele faz algumas perguntas curtas. Se você não souber responder, pode pedir uma recomendação.",
+    "Ele monta um plano em partes. Você lê, edita, pede mudança ou aprova.",
+    "Ele cria o aplicativo e roda os testes dentro do seu computador, num espaço separado do resto.",
+    "No fim, ele mostra o que foi conferido e o que não foi. Nada é publicado na internet."
+  ],
+  "glossaryTitle": "Palavras que aparecem nas telas",
+  "glossary": [
+    {
+      "term": "Protótipo",
+      "meaning": "Uma primeira versão do seu aplicativo, feita para você ver e experimentar. Ela funciona, mas ainda não é a versão final nem está publicada."
+    },
+    {
+      "term": "Prévia local",
+      "meaning": "A janela que mostra o protótipo rodando no seu próprio computador. Ninguém mais consegue abrir esse endereço."
+    },
+    {
+      "term": "Verificado",
+      "meaning": "O FRIGG rodou os testes que ele mesmo declarou e guardou a prova do que passou. Só aparece essa palavra quando existe essa prova."
+    },
+    {
+      "term": "Não verificado",
+      "meaning": "A criação parou, foi cancelada, ou os testes não passaram. O que existe continua no seu computador — só não foi conferido."
+    },
+    {
+      "term": "Ponto seguro",
+      "meaning": "Um retrato do projeto de antes de uma mudança. Voltar para ele desfaz a mudança sem apagar nada do que veio depois."
+    },
+    {
+      "term": "Ambiente isolado",
+      "meaning": "Uma caixa separada dentro do seu computador onde o aplicativo é criado e testado. O que roda lá não alcança seus outros arquivos nem a internet."
+    },
+    {
+      "term": "Perfil de privacidade",
+      "meaning": "Quem pensa por você: só a inteligência artificial do seu computador (privado-local), ela sempre que der (equilibrado), ou a melhor disponível, que pode ser de fora (melhor qualidade)."
+    },
+    {
+      "term": "IA local",
+      "meaning": "A inteligência artificial que roda no seu computador. Nada do que você escreve sai da máquina quando ela é usada."
+    },
+    {
+      "term": "Rota externa",
+      "meaning": "Um serviço de inteligência artificial fora do seu computador. A tela sempre diz o nome dele antes de usá-lo."
+    },
+    {
+      "term": "Limite de gasto",
+      "meaning": "O teto de quanto este espaço de trabalho pode gastar com serviços externos. Quando acaba, a criação para — não é um defeito no seu aplicativo."
+    },
+    {
+      "term": "Espaço de trabalho",
+      "meaning": "Onde seus projetos e as pessoas convidadas ficam. Cada espaço é separado dos outros."
+    },
+    {
+      "term": "Chave de acesso",
+      "meaning": "O jeito de entrar sem senha, usando a biometria ou o PIN do seu aparelho."
+    },
+    {
+      "term": "Integração",
+      "meaning": "Uma ligação com um serviço de fora — enviar e-mail, por exemplo. Você confirma cada uma antes de ela funcionar."
+    },
+    {
+      "term": "Segredo no cofre",
+      "meaning": "Uma senha ou chave de serviço guardada pelo servidor. Nas telas você usa apenas o NOME dela; o valor nunca aparece aqui."
+    },
+    {
+      "term": "Critério conferido",
+      "meaning": "Uma frase do plano que os testes verificaram. Ao lado dela a tela diz se passou, falhou, ou se não deu para conferir automaticamente."
+    },
+    {
+      "term": "Detalhes técnicos",
+      "meaning": "O código que a máquina usa para descrever o que houve. Serve para colar num pedido de ajuda; a explicação em português vem sempre antes dele."
+    }
+  ],
+  "privacyTitle": "O que o FRIGG nunca faz",
+  "privacy": [
+    "Não publica seu aplicativo na internet. Tudo o que ele cria fica no seu computador.",
+    "Não mostra o valor de nenhum segredo na tela, no registro nem nos arquivos que ele gera.",
+    "Não chama nada de verificado sem a prova correspondente.",
+    "Não apaga nada seu sem você confirmar."
+  ],
+  "moreTitle": "Ainda com dúvida?",
+  "more": "Abra os \"Detalhes técnicos\" da tela onde travou, copie o código que aparece lá e mande junto com a sua pergunta. É por ele que se descobre o que aconteceu."
+}

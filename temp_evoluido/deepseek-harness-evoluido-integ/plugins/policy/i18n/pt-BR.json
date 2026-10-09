@@ -1,0 +1,23 @@
+{
+  "audit.safeReadAutoAuthorized": "Leitura segura autorizada automaticamente.",
+  "policy.acaoBloqueadaPelaPolitica": "Ação bloqueada pela política do FRIGG.",
+  "policy.acaoSensivelBloqueadaAte": "Ação sensível bloqueada até uma confirmação forte de identidade estar ativa.",
+  "policy.acaoTentouAcessarOutra": "A ação tentou acessar outra organização ou espaço de trabalho.",
+  "policy.alteracaoReversivelAutorizadaRegistrada": "Alteração reversível autorizada e registrada.",
+  "policy.confirmacaoPessoaNecessariaAntes": "Confirmação da pessoa necessária antes de continuar.",
+  "policy.confirmacaoReforcadaNecessariaAntes": "Confirmação reforçada necessária antes da ação sensível.",
+  "policy.execucaoSessaoAuditavelFoi": "Execução sem sessão auditável foi bloqueada.",
+  "policy.ferramentaAindaNaoClassificada": "Ferramenta ainda não classificada: confirmação obrigatória.",
+  "policy.ferramentaDeclaracaoPermissaoFoi": "Ferramenta sem declaração de permissão foi bloqueada.",
+  "policy.ferramentaIdentificacaoFoiBloqueada": "Ferramenta sem identificação foi bloqueada por segurança.",
+  "policy.ferramentaPermissaoDeclaradaFoi": "Ferramenta sem permissão declarada foi bloqueada.",
+  "policy.naoFoiPossivelRegistrar": "Não foi possível registrar a auditoria; a ação foi bloqueada.",
+  "policy.nenhumVinculoAtivoAutoriza": "Nenhum vínculo ativo autoriza esta ação.",
+  "policy.pluginNaoAssinadoBloqueado": "Plugin não assinado é bloqueado no canal estável.",
+  "policy.regraSegurancaInvalidaExecucao": "Regra de segurança inválida: execução bloqueada.",
+  "policy.sessaoIdentidadeAusenteExpirada": "Sessão de identidade ausente, expirada ou revogada.",
+  "policy.seuPapelNesteEspaco": "Seu papel neste espaço não permite esta ação.",
+  "rbac.duplicateRouteContract": "Contrato de rota duplicado: {key}",
+  "rbac.rotaAutorizadaExigePermissao": "Rota autorizada exige permissão.",
+  "rbac.rotaPublicaAutenticadaNao": "Rota pública/autenticada não pode declarar permissão RBAC."
+}

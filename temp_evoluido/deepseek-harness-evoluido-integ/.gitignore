@@ -1,0 +1,33 @@
+node_modules/
+coverage/
+*.log
+
+dsh-home/.anonymous-user-id
+dsh-home/.credentials.yaml
+dsh-home/.env
+dsh-home/settings.yaml
+dsh-home/sessions/
+dsh-home/storages/
+dsh-home/attachments/
+dsh-home/deliverables/
+dsh-home/espacos/
+dsh-home/profiles/node_modules/
+dsh-home/profiles/studio/node_modules/
+dsh-home/profiles/studio/cordis.yml
+# Gerado pelo instalador do construtor: os caminhos absolutos DESTA máquina.
+dsh-home/profiles/studio/local.patch.yml
+dsh-home/profiles/studio/preview.patch.yml
+dsh-home/profiles/studio/preview.local.json
+
+runtime/
+
+# Build outputs: every plugin is compiled by `pnpm build`; committed copies drifted from src (route-health lacked markScope since b44ffe4).
+plugins/*/.lib-freshness-*/
+plugins/*/lib/
+plugins/prompt-to-app/template/
+apps/studio-web/dist/
+*.tsbuildinfo
+apps/studio-web/test-results/
+apps/studio-web/playwright-report/
+apps/studio-web/test-results-hub/
+sbom.cdx.json

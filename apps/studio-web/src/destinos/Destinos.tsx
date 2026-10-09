@@ -27,8 +27,48 @@ const clienteDoHub = createHubApi()
 import { createHubApi, type ExportRecord, type HubApi, type ProjectSummary } from '../hub/hubApi'
 import { formatBytes, formatDate } from '../hub/presentation'
 import { STUDIO_HOME_PATH } from '../navigation'
-import { DISPONIBILIDADE, ESCOPO } from './destinos'
 import './destinos.css'
+import type { IntegrationKind } from '../hub/presentation'
+
+export const HABILIDADES_PATH = '/studio/habilidades'
+export const PLUGINS_PATH = '/studio/plugins'
+export const BIBLIOTECA_PATH = '/studio/biblioteca'
+export const AGENDADO_PATH = '/studio/agendado'
+
+export type Destino = 'habilidades' | 'plugins' | 'biblioteca' | 'agendado'
+export type Disponibilidade = 'pronto' | 'pendente'
+
+export const DISPONIBILIDADE: Readonly<Record<Destino, Disponibilidade>> = {
+  habilidades: 'pronto',
+  plugins: 'pronto',
+  biblioteca: 'pronto',
+  agendado: 'pendente',
+}
+
+export const CAMINHOS: Readonly<Record<Destino, string>> = {
+  habilidades: HABILIDADES_PATH,
+  plugins: PLUGINS_PATH,
+  biblioteca: BIBLIOTECA_PATH,
+  agendado: AGENDADO_PATH,
+}
+
+export const ESCOPO: Readonly<Record<'habilidades' | 'plugins', readonly IntegrationKind[]>> = {
+  habilidades: ['skill'],
+  plugins: ['mcp', 'webhook', 'smtp'],
+}
+
+export const TODOS_OS_TIPOS: readonly IntegrationKind[] = ['smtp', 'mcp', 'skill', 'webhook']
+
+export function destinoDoCaminho(pathname: string): Destino | null {
+  for (const [destino, caminho] of Object.entries(CAMINHOS) as [Destino, string][]) {
+    if (pathname === caminho || pathname.startsWith(`${caminho}/`)) return destino
+  }
+  return null
+}
+
+export function pertenceAoDestino(destino: 'habilidades' | 'plugins', kind: string): boolean {
+  return (ESCOPO[destino] as readonly string[]).includes(kind)
+}
 
 /**
  * As telas dos destinos que o trilho ganhou: Habilidades, Plugins, Biblioteca

@@ -1,0 +1,1 @@
+{"id":"saas-authenticated-02","category":"saas-authenticated","sensitive":true,"acceptance":["acesso exige sessão e proteção CSRF","isolamento entre famílias com resposta 404","pergunta sobre menores"]}

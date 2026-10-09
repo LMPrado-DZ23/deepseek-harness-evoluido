@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BUILD_STEP_ORDER, buildStepLabel, buildStepRows, buildStepStateLabel, hasBuildSteps, type RunStepRecord } from './buildSteps'
+import { BUILD_STEP_ORDER, buildStepLabel, buildStepRows, buildStepStateLabel, hasBuildSteps, type RunStepRecord } from './buildSteps-utils'
 import t from './i18n/pt-BR.json'
 
 const step = (over: Partial<RunStepRecord> & Pick<RunStepRecord, 'step'>): RunStepRecord =>

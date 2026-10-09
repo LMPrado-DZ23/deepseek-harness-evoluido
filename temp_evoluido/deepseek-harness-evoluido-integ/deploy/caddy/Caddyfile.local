@@ -1,0 +1,13 @@
+{
+	admin off
+}
+
+import /etc/caddy/DZ23.common.caddy
+
+http://{$DZ23_SITE_HOST:studio.dz23.localhost} {
+	import dz23_edge
+}
+
+http://*.dz23.localhost {
+	import dz23_preview_edge
+}

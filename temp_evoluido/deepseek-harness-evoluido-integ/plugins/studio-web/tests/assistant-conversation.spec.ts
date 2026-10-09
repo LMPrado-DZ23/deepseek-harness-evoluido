@@ -1,0 +1,538 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { SessionRecord } from '@dz23-studio/identity'
+import { AssistantAttachmentStore } from '../src/assistant-attachments.js'
+import {
+  AssistantConversationError,
+  AssistantConversationService,
+  sanitizeAssistantEvent,
+  sanitizeAssistantSnapshot,
+  type AssistantConversationControllerPort,
+} from '../src/assistant-conversation.js'
+
+const identitySession = (overrides: Partial<SessionRecord> = {}): SessionRecord => ({
+  session_id: 'identity-1', user_id: 'user-1', org_id: 'org-1', tenant_id: 'tenant-1',
+  token_hash: 'a'.repeat(64), csrf_hash: 'b'.repeat(64), device_label: 'Notebook', user_agent: '', ip_truncated: '',
+  created_at: '2026-09-06T00:00:00.000Z', last_seen_at: '2026-09-06T00:00:00.000Z',
+  expires_sliding_at: '2026-09-07T00:00:00.000Z', expires_absolute_at: '2026-10-06T00:00:00.000Z',
+  last_strong_auth_at: null, last_strong_auth_method: null, revoked_at: null, revoked_reason: null,
+  harness_session_ids: ['conversation-1'], ...overrides,
+})
+
+function fixture(input: {
+  readonly allowed?: boolean
+  readonly owned?: boolean
+  readonly role?: 'owner' | 'admin' | 'builder' | 'viewer'
+  readonly randomRequestId?: boolean
+  readonly compaction?: 'absent' | 'empty' | 'fails' | 'organizes'
+  readonly attachments?: AssistantAttachmentStore | 'absent'
+} = {}) {
+  const inspect = vi.fn<AssistantConversationControllerPort['inspect']>(async () => ({ events: [] }))
+  const prompt = vi.fn<AssistantConversationControllerPort['prompt']>(async () => ({ accepted: true }))
+  const cancel = vi.fn<AssistantConversationControllerPort['cancel']>(() => ({ accepted: true }))
+  const launchTenantConversation = vi.fn(async () => ({
+    session_id: 'conversation-1', reused: false as const, preset: 'dz23-assistant' as const,
+  }))
+  const compactNow = vi.fn(async () => {
+    if (input.compaction === 'fails') throw new Error('busy')
+    if (input.compaction === 'empty') return null
+    return { items: 4, tokens: 900 }
+  })
+  const service = new AssistantConversationService({
+    identity: { ownsHarnessSession: () => input.owned !== false },
+    tenancy: { authorizationFor: () => input.allowed === false ? undefined : ({
+      userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', role: input.role ?? 'builder',
+    }) },
+    launcher: { launchTenantConversation },
+    sessions: { inspect, prompt, cancel },
+    ...(input.compaction === 'absent' ? {} : { compaction: () => ({ compactNow }) }),
+    ...(input.attachments === 'absent' ? {} : { attachments: input.attachments ?? new AssistantAttachmentStore() }),
+    ...(input.randomRequestId === true ? {} : { createRequestId: () => 'request-1' }),
+  })
+  return { service, inspect, prompt, cancel, launchTenantConversation, compactNow }
+}
+
+const event = (type: string, seq: number, data: Record<string, unknown>, time = 100 + seq) => ({ type, seq, time, data })
+
+describe('a imagem anexada na conversa', () => {
+  const userMessage = (content: unknown[]) => event('user/message', 1, { source: { kind: 'user' }, id: 'msg-1', content })
+
+  it('a mensagem que era SÓ imagem deixou de sumir da conversa', () => {
+    // Este era o defeito, e ele passava despercebido porque a imagem CHEGAVA
+    // ao modelo: quem anexava uma foto sem escrever nada perdia a mensagem
+    // inteira - `text === ''` a descartava - e ficava olhando o assistente
+    // falar sozinho sobre um anexo que a tela nunca mostrou.
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', [
+      userMessage([{ type: 'image', mediaType: 'image/png', data: 'AAAA', name: 'fachada-da-loja.png' }]),
+    ])
+    expect(snapshot.events).toHaveLength(1)
+    expect(snapshot.events[0]).toMatchObject({
+      type: 'message.user', text: '',
+      attachments: [{ name: 'fachada-da-loja.png', media_type: 'image/png' }],
+    })
+  })
+
+  it('os BYTES nunca voltam para o navegador', () => {
+    // Devolver a imagem transformaria a referência opaca num endereço de
+    // arquivo - exatamente o que a rota de anexo se recusa a ser (só POST, sem
+    // leitura). O que atravessa é o nome, que a pessoa já viu antes de enviar.
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', [
+      userMessage([{ type: 'text', text: 'o que acha desta fachada?' }, { type: 'image', mediaType: 'image/jpeg', data: 'SEGREDOEMBASE64', name: 'foto.jpg' }]),
+    ])
+    expect(JSON.stringify(snapshot)).not.toContain('SEGREDOEMBASE64')
+    expect(snapshot.events[0]).toMatchObject({ text: 'o que acha desta fachada?', attachments: [{ name: 'foto.jpg', media_type: 'image/jpeg' }] })
+  })
+
+  it('um tipo que não é imagem conhecida não vira anexo', () => {
+    // Bloco malformado ou tipo inesperado não pode desenhar meia coisa na tela
+    // de quem não programa - e um `mediaType` livre vindo de cima é entrada
+    // não confiável como qualquer outra.
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', [
+      userMessage([{ type: 'text', text: 'oi' }, { type: 'image', mediaType: 'application/x-msdownload', data: 'AA', name: 'virus.exe' }]),
+    ])
+    expect(snapshot.events[0]).toMatchObject({ text: 'oi' })
+    expect(JSON.stringify(snapshot)).not.toContain('virus.exe')
+  })
+
+  it('mensagem sem texto e sem anexo continua descartada', () => {
+    // Ela não tem nada para mostrar. Deixá-la passar desenharia uma bolha vazia
+    // na conversa.
+    expect(sanitizeAssistantSnapshot('conversation-1', [userMessage([])]).events).toHaveLength(0)
+  })
+})
+
+describe('AssistantConversationService', () => {
+  it('opens only a server-authorized tenant conversation', async () => {
+    const allowed = fixture()
+    await expect(allowed.service.open(identitySession())).resolves.toMatchObject({ session_id: 'conversation-1' })
+    expect(allowed.launchTenantConversation).toHaveBeenCalledWith(identitySession())
+
+    const forbidden = fixture({ allowed: false })
+    await expect(forbidden.service.open(identitySession())).rejects.toEqual(expect.objectContaining({ code: 'FORBIDDEN' }))
+    expect(forbidden.launchTenantConversation).not.toHaveBeenCalled()
+
+    const viewer = fixture({ role: 'viewer' })
+    await expect(viewer.service.open(identitySession())).rejects.toEqual(expect.objectContaining({ code: 'FORBIDDEN' }))
+    expect(viewer.launchTenantConversation).not.toHaveBeenCalled()
+  })
+
+  it('lets a viewer read an owned transcript but never create, send or cancel work', async () => {
+    const viewer = fixture({ role: 'viewer' })
+    await expect(viewer.service.snapshot(identitySession(), 'conversation-1')).resolves.toMatchObject({
+      conversation_id: 'conversation-1',
+    })
+    await expect(viewer.service.send(identitySession(), 'conversation-1', 'execute', new AbortController().signal))
+      .rejects.toEqual(expect.objectContaining({ code: 'FORBIDDEN' }))
+    expect(() => viewer.service.cancel(identitySession(), 'conversation-1'))
+      .toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }))
+    expect(viewer.prompt).not.toHaveBeenCalled()
+    expect(viewer.cancel).not.toHaveBeenCalled()
+  })
+
+  it('checks exact ownership before every read, send and cancel without revealing a foreign id', async () => {
+    const foreign = fixture({ owned: false })
+    await expect(foreign.service.snapshot(identitySession(), 'stolen')).rejects.toEqual(expect.objectContaining({
+      code: 'NOT_FOUND', message: 'Conversa não encontrada.',
+    }))
+    await expect(foreign.service.send(identitySession(), 'stolen', 'oi', new AbortController().signal))
+      .rejects.toEqual(expect.objectContaining({ code: 'NOT_FOUND' }))
+    expect(() => foreign.service.cancel(identitySession(), 'stolen')).toThrowError(AssistantConversationError)
+    expect(foreign.inspect).not.toHaveBeenCalled()
+    expect(foreign.prompt).not.toHaveBeenCalled()
+    expect(foreign.cancel).not.toHaveBeenCalled()
+  })
+
+  it('submits only bounded text with a server request id and maps runtime failures', async () => {
+    const f = fixture()
+    await expect(f.service.send(identitySession(), 'conversation-1', 'Olá', new AbortController().signal)).resolves.toEqual({
+      accepted: true, request_id: 'request-1',
+    })
+    expect(f.prompt).toHaveBeenCalledWith({
+      requestId: 'request-1', sessionId: 'conversation-1', mode: 'queue', content: [{ type: 'text', text: 'Olá' }],
+    }, expect.any(AbortSignal))
+    for (const invalid of ['', '   ', 'a\0b', 'x'.repeat(32 * 1024 + 1)]) {
+      await expect(f.service.send(identitySession(), 'conversation-1', invalid, new AbortController().signal))
+        .rejects.toEqual(expect.objectContaining({ code: 'INVALID_MESSAGE' }))
+    }
+    f.prompt.mockRejectedValueOnce(new Error('provider details must stay private'))
+    await expect(f.service.send(identitySession(), 'conversation-1', 'tente', new AbortController().signal))
+      .rejects.toEqual(expect.objectContaining({ code: 'SESSION_UNAVAILABLE', message: expect.not.stringContaining('provider') }))
+
+    const generated = fixture({ randomRequestId: true })
+    const receipt = await generated.service.send(identitySession(), 'conversation-1', 'id seguro', new AbortController().signal)
+    expect(receipt.request_id).toMatch(/^[0-9a-f-]{36}$/u)
+  })
+
+  it('returns a sanitized snapshot and contains inspection and cancellation failures', async () => {
+    const f = fixture()
+    f.inspect.mockResolvedValueOnce({ events: [
+      event('user/message', 0, { id: 'u1', source: { kind: 'user', rpcId: 'private' }, content: [{ type: 'text', text: 'Oi' }] }),
+      event('request/header', 1, { header: { cwd: '/segredo', token: 'secret' } }),
+      event('assistant/message', 2, { message: { id: 'a1', source: { kind: 'model', replayState: 'secret' }, content: [{ type: 'reasoning', text: 'private' }, { type: 'text', text: 'Olá!' }] } }),
+    ] as never })
+    const snapshot = await f.service.snapshot(identitySession(), 'conversation-1')
+    expect(snapshot).toMatchObject({ conversation_id: 'conversation-1', cursor: 2, truncated: false })
+    expect(snapshot.events).toHaveLength(2)
+    expect(JSON.stringify(snapshot)).not.toMatch(/segredo|secret|private|reasoning|replayState|cwd/u)
+
+    // Falha do Harness é indisponibilidade, NÃO "conversa não encontrada": a
+    // posse já foi verificada antes desta chamada, e dizer que a conversa sumiu
+    // faria a pessoa acreditar que perdeu o histórico por uma queda passageira.
+    f.inspect.mockRejectedValueOnce(new Error('storage path /private'))
+    await expect(f.service.snapshot(identitySession(), 'conversation-1')).rejects.toEqual(expect.objectContaining({
+      code: 'SESSION_UNAVAILABLE', message: expect.not.stringContaining('/private'),
+    }))
+    // E continua sendo 404 quando a conversa realmente não é da pessoa.
+    const foreign = fixture({ owned: false })
+    await expect(foreign.service.snapshot(identitySession(), 'conversa-de-outro'))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(f.service.cancel(identitySession(), 'conversation-1')).toEqual({ accepted: true })
+    f.cancel.mockImplementationOnce(() => { throw new Error('internal') })
+    expect(() => f.service.cancel(identitySession(), 'conversation-1')).toThrowError(expect.objectContaining({ code: 'SESSION_UNAVAILABLE' }))
+  })
+})
+
+describe('assistant transcript sanitization', () => {
+  it('projects only the closed public allowlist and drops secrets and internal context', () => {
+    const values = [
+      event('turn/start', 0, { turn: 1 }),
+      event('turn/end', 1, { turn: 1, reason: 'success' }),
+      event('user/message', 2, { id: 'u1', source: { kind: 'plugin', plugin: 'secrets' }, content: [{ type: 'text', text: 'hidden' }] }),
+      event('user/message', 3, { id: 'u2', source: { kind: 'user' }, content: [{ type: 'image', name: 'secret.png' }, { type: 'text', text: 'visível' }] }),
+      event('assistant/message', 4, { interrupted: true, message: { id: 'a1', content: [{ type: 'reasoning', text: 'não mostrar' }, { type: 'text', text: 'resposta' }] } }),
+      event('tool/call', 5, { callId: 'call-1', name: 'studio_agent_start', arguments: '{"password":"secret"}' }),
+      event('tool/result', 6, { message: { source: { kind: 'tool', callId: 'call-1' }, content: [{ type: 'tool-result', content: ['secret'] }] } }),
+      event('tool/result', 7, { message: { source: { kind: 'tool', callId: 'call-2' } }, error: { message: 'secret' } }),
+      event('approval/asked', 8, { id: 'approval-1', toolName: 'unknown-tool', reason: 'senha secret' }),
+      event('approval/decided', 9, { id: 'approval-1', outcome: 'rejected' }),
+      event('unknown/private', 10, { cwd: '/secret' }),
+    ]
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', values)
+    expect(snapshot.events.map(item => item.type)).toEqual([
+      'turn.state', 'turn.state', 'message.user', 'message.assistant',
+      'tool.state', 'tool.state', 'tool.state', 'approval.requested', 'approval.resolved',
+    ])
+    expect(snapshot.events[4]).toMatchObject({ label: 'Iniciar um assistente especializado', state: 'running' })
+    expect(snapshot.events[7]).toMatchObject({ tool_label: 'Ação do assistente' })
+    expect(JSON.stringify(snapshot)).not.toMatch(/password|senha|secret|reasoning|arguments|unknown-tool/u)
+  })
+
+  it('uses friendly labels for every supported assistant action and accepts only closed outcomes', () => {
+    const labels = [
+      ['studio_agent_list', 'Consultar assistentes disponíveis'],
+      ['studio_agent_start', 'Iniciar um assistente especializado'],
+      ['studio_agent_status', 'Acompanhar o trabalho do assistente'],
+      ['studio_agent_cancel', 'Interromper o trabalho do assistente'],
+      ['studio_agent_apply', 'Aplicar uma proposta ao projeto'],
+      ['studio_team_start', 'Coordenar uma equipe de assistentes'],
+      ['studio_echo', 'Executar uma ação do FRIGG'],
+      ['foreign', 'Ação do assistente'],
+    ] as const
+    for (const [name, label] of labels) {
+      expect(sanitizeAssistantEvent(event('tool/call', 1, { callId: `call-${name}`, name }))).toMatchObject({ label })
+    }
+    for (const outcome of ['allowed-once', 'rejected', 'cancelled', 'unavailable'] as const) {
+      expect(sanitizeAssistantEvent(event('approval/decided', 2, { id: `approval-${outcome}`, outcome }))).toMatchObject({ outcome })
+    }
+    expect(sanitizeAssistantEvent(event('assistant/message', 3, {
+      message: { id: 'complete', content: [{ type: 'text', text: 'fim' }] },
+    }))).toMatchObject({ interrupted: false })
+    expect(sanitizeAssistantEvent(event('tool/call', 4, { callId: 'generic', name: 123 }))).toMatchObject({ label: 'Ação do assistente' })
+  })
+
+  it('drops malformed events, invalid decisions and empty messages', () => {
+    const malformed = [
+      null, [], {}, { type: 'turn/start', seq: -1, time: 1, data: {} },
+      { type: 'turn/start', seq: 0.5, time: 1, data: {} },
+      { type: 'turn/start', seq: 0, time: Number.NaN, data: {} },
+      { type: 'turn/start', seq: 0, time: 1, data: null },
+      event('user/message', 1, { id: '', source: { kind: 'user' }, content: [] }),
+      event('user/message', 1, { id: 'x', source: { kind: 'user' }, content: null }),
+      event('user/message', 1, { id: 'x', source: { kind: 'user' }, content: [{ type: 'image' }] }),
+      event('assistant/message', 2, { message: null }),
+      event('tool/call', 3, { callId: '', name: 'studio_agent_start' }),
+      event('tool/call', 3, { callId: 'x'.repeat(257), name: 'studio_agent_start' }),
+      event('tool/call', 3, { callId: 'a\0b', name: 'studio_agent_start' }),
+      event('tool/result', 4, { message: {} }),
+      event('tool/result', 4, { message: null }),
+      event('approval/asked', 5, { id: '', toolName: 'x' }),
+      event('approval/asked', 5, { id: 'valid-id', toolName: 123 }),
+      event('approval/decided', 6, { id: 'x', outcome: 'invented' }),
+    ]
+    const projected = malformed.map(sanitizeAssistantEvent)
+    expect(projected.filter(value => value !== undefined)).toEqual([
+      expect.objectContaining({ type: 'approval.requested', tool_label: 'Ação do assistente' }),
+    ])
+    expect(sanitizeAssistantSnapshot('empty', malformed)).toEqual({
+      conversation_id: 'empty', cursor: 6,
+      events: [expect.objectContaining({ type: 'approval.requested', tool_label: 'Ação do assistente' })],
+      truncated: false,
+    })
+  })
+
+  it('projeta a compactação real do Harness sem vazar resumo, modelo, provedor ou erro', () => {
+    const values = [
+      event('compaction/start', 20, { compactionId: 'comp-1', sourceCommandId: 'cmd-1', turn: 3 }),
+      event('compaction/summary', 21, {
+        compactionId: 'comp-1',
+        sourceCommandId: 'cmd-1',
+        summary: [{ type: 'text', text: 'RESUMO INTERNO SIGILOSO' }],
+        rawOutput: [{ type: 'text', text: 'SAIDA CRUA DO MODELO' }],
+        llmStreamCall: true,
+        provider: 'provedor-secreto',
+        model: 'modelo-secreto',
+        maxTokens: 4096,
+        usage: { inputTokens: 900, outputTokens: 120 },
+        shadowedRange: { start: 2, end: 18 },
+        shadowedSeqs: [2, 3, 4, 5, 6, 7],
+        shadowedTokenCount: 12_345,
+      }),
+      event('compaction/end', 22, { compactionId: 'comp-1', sourceCommandId: 'cmd-1', turn: 3 }),
+    ]
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', values)
+    expect(snapshot.events).toEqual([
+      { type: 'compaction.state', seq: 20, at: 120, compaction_id: 'comp-1', state: 'summarizing' },
+      { type: 'compaction.state', seq: 21, at: 121, compaction_id: 'comp-1', state: 'committing', items: 6, tokens: 12_345 },
+      { type: 'compaction.state', seq: 22, at: 122, compaction_id: 'comp-1', state: 'completed' },
+    ])
+    const wire = JSON.stringify(snapshot)
+    expect(wire).not.toMatch(/RESUMO INTERNO|SAIDA CRUA|provedor-secreto|modelo-secreto|rawOutput|usage|maxTokens|cmd-1/u)
+    // Nenhuma fração de progresso atravessa: o contrato upstream não tem uma.
+    expect(wire).not.toMatch(/percent|progress|"ratio"/u)
+  })
+
+  it('conta apenas o que o Harness realmente informou e nunca inventa número nem texto de erro', () => {
+    // Contagens ausentes ou impossíveis são omitidas, não chutadas.
+    expect(sanitizeAssistantEvent(event('compaction/summary', 1, {
+      compactionId: 'comp-2', shadowedTokenCount: -5, shadowedSeqs: 'nada',
+    }))).toEqual({ type: 'compaction.state', seq: 1, at: 101, compaction_id: 'comp-2', state: 'committing' })
+    expect(sanitizeAssistantEvent(event('compaction/summary', 2, {
+      compactionId: 'comp-2', shadowedTokenCount: 1.5, shadowedSeqs: [],
+    }))).toEqual({ type: 'compaction.state', seq: 2, at: 102, compaction_id: 'comp-2', state: 'committing', items: 0 })
+
+    // Fim com erro vira estado de falha; o texto do erro fica no servidor.
+    expect(sanitizeAssistantEvent(event('compaction/end', 3, {
+      compactionId: 'comp-2', error: 'ENOENT /home/pessoa/segredo.json',
+    }))).toEqual({ type: 'compaction.state', seq: 3, at: 103, compaction_id: 'comp-2', state: 'failed' })
+
+    // Sem identidade de compactação não há evento: melhor nada do que um estado órfão.
+    for (const broken of [{}, { compactionId: '' }, { compactionId: 1 }, { compactionId: 'a\u0000b' }]) {
+      expect(sanitizeAssistantEvent(event('compaction/start', 4, broken))).toBeUndefined()
+      expect(sanitizeAssistantEvent(event('compaction/end', 5, broken))).toBeUndefined()
+      expect(sanitizeAssistantEvent(event('compaction/summary', 6, broken))).toBeUndefined()
+    }
+  })
+
+  it('bounds public text and transcript size while retaining the durable cursor', () => {
+    const values = Array.from({ length: 505 }, (_, seq) => event('user/message', seq, {
+      id: `m-${seq}`, source: { kind: 'user' }, content: [{ type: 'text', text: seq === 504 ? 'x'.repeat(64 * 1024 + 1) : 'x' }],
+    }))
+    const snapshot = sanitizeAssistantSnapshot('conversation-1', values)
+    expect(snapshot).toMatchObject({ cursor: 504, truncated: true })
+    expect(snapshot.events).toHaveLength(500)
+    expect(snapshot.events[0]).toMatchObject({ id: 'm-5' })
+    expect(snapshot.events.at(-1)).toMatchObject({ id: 'm-504', truncated: true })
+    expect((snapshot.events.at(-1) as { text: string }).text).toHaveLength(64 * 1024)
+  })
+})
+
+describe('M91: o checkpoint da compactação chega ao navegador', () => {
+  it('deixa passar o resumo que substituiu o histórico, com tipo próprio', () => {
+    // O checkpoint é um `user/message` cujo `source` é
+    // `{ kind: 'plugin', plugin: 'compact' }` (contrato do upstream em
+    // `compactCheckpointSource`). A projeção descartava tudo que não fosse
+    // `kind: 'user'`, então a pessoa via o histórico encolher sem nunca ver o
+    // que ficou no lugar — enquanto o comentário do código afirmava o
+    // contrário.
+    const projected = sanitizeAssistantEvent(event('user/message', 11, {
+      id: 'chk-1',
+      source: { kind: 'plugin', plugin: 'compact', compactionId: 'c-1' },
+      content: [{ type: 'text', text: 'Resumo do que foi conversado até aqui.' }],
+    }))
+    expect(projected).toMatchObject({
+      type: 'compaction.checkpoint', id: 'chk-1', text: 'Resumo do que foi conversado até aqui.',
+    })
+  })
+
+  it('não afirma que a pessoa escreveu o resumo', () => {
+    const projected = sanitizeAssistantEvent(event('user/message', 12, {
+      id: 'chk-2', source: { kind: 'plugin', plugin: 'compact' },
+      content: [{ type: 'text', text: 'resumo' }],
+    }))
+    expect(projected?.type).not.toBe('message.user')
+  })
+
+  it('continua descartando mensagem de qualquer outro plugin', () => {
+    // A abertura é para UM marcador. Sem isto, qualquer plugin poderia escrever
+    // no transcrito da pessoa.
+    expect(sanitizeAssistantEvent(event('user/message', 13, {
+      id: 'x', source: { kind: 'plugin', plugin: 'secrets' }, content: [{ type: 'text', text: 'hidden' }],
+    }))).toBeUndefined()
+  })
+})
+
+describe('M91: "Organizar conversa agora" chama a compactação de verdade', () => {
+  it('organiza pela compactação do Harness, e não mandando texto ao modelo', async () => {
+    // O botão enviava a STRING "/compact" como mensagem. O controlador de
+    // sessão não faz parsing de comando, então o modelo recebia um texto
+    // estranho e nada era organizado.
+    const f = fixture({ compaction: 'organizes' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .resolves.toEqual({ accepted: true, organized: true, items: 4, tokens: 900 })
+    expect(f.compactNow).toHaveBeenCalledTimes(1)
+    expect(f.prompt).not.toHaveBeenCalled()
+  })
+
+  it('diz que não havia o que organizar, em vez de anunciar um trabalho que não houve', async () => {
+    const f = fixture({ compaction: 'empty' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .resolves.toEqual({ accepted: true, organized: false })
+  })
+
+  it('falha preservando o original, sem virar mensagem na conversa', async () => {
+    const f = fixture({ compaction: 'fails' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .rejects.toMatchObject({ code: 'SESSION_UNAVAILABLE' })
+    expect(f.prompt).not.toHaveBeenCalled()
+  })
+
+  it('sem compactação montada, recusa em vez de fingir', async () => {
+    const f = fixture({ compaction: 'absent' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .rejects.toMatchObject({ code: 'SESSION_UNAVAILABLE' })
+  })
+
+  it('não organiza conversa de outra pessoa', async () => {
+    const f = fixture({ owned: false, compaction: 'organizes' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(f.compactNow).not.toHaveBeenCalled()
+  })
+
+  it('leitor não organiza a conversa', async () => {
+    const f = fixture({ role: 'viewer', compaction: 'organizes' })
+    await expect(f.service.compact(identitySession(), 'conversation-1', AbortSignal.timeout(1_000)))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(f.compactNow).not.toHaveBeenCalled()
+  })
+})
+
+const PNG_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), Buffer.from('pixels')])
+const TEXT_BYTES = Buffer.from('linha um\nlinha dois\n', 'utf8')
+
+describe('anexos da conversa', () => {
+  it('anexar devolve referência opaca e o escopo sai da sessão, nunca do pedido', async () => {
+    const store = new AssistantAttachmentStore({ createId: () => 'ref-1' })
+    const f = fixture({ attachments: store })
+    const referencia = await f.service.attach(identitySession(), 'conversation-1', '../../etc/passwd', TEXT_BYTES)
+    expect(referencia).toEqual({
+      attachment_id: 'ref-1', name: 'passwd', size: TEXT_BYTES.length, media_type: 'text/plain',
+    })
+    // O anexo caiu no escopo da SESSÃO. Quem provou isso é o teste de baixo:
+    // a mesma referência lida de outra organização não existe.
+    expect(store.resolve({
+      userId: 'user-1', orgId: 'org-1', tenantId: 'tenant-1', conversationId: 'conversation-1',
+    }, ['ref-1'])).toHaveLength(1)
+  })
+
+  it('anexar exige o mesmo acesso que enviar, e conversa alheia não recebe anexo', async () => {
+    const viewer = fixture({ role: 'viewer' })
+    await expect(viewer.service.attach(identitySession(), 'conversation-1', 'a.txt', TEXT_BYTES))
+      .rejects.toEqual(expect.objectContaining({ code: 'FORBIDDEN' }))
+    const foreign = fixture({ owned: false })
+    await expect(foreign.service.attach(identitySession(), 'roubada', 'a.txt', TEXT_BYTES))
+      .rejects.toEqual(expect.objectContaining({ code: 'NOT_FOUND' }))
+    // Instalação sem guarda-anexos diz isso, em vez de aceitar e descartar.
+    const off = fixture({ attachments: 'absent' })
+    await expect(off.service.attach(identitySession(), 'conversation-1', 'a.txt', TEXT_BYTES))
+      .rejects.toEqual(expect.objectContaining({ code: 'SESSION_UNAVAILABLE' }))
+  })
+
+  it('enviar com anexo leva o conteúdo ao Harness e nenhum caminho junto', async () => {
+    const store = new AssistantAttachmentStore({ createId: () => 'ref-img' })
+    const f = fixture({ attachments: store })
+    await f.service.attach(identitySession(), 'conversation-1', '/tmp/uploads/foto.png', PNG_BYTES)
+    await expect(f.service.send(identitySession(), 'conversation-1', 'veja isto', new AbortController().signal, ['ref-img']))
+      .resolves.toEqual({ accepted: true, request_id: 'request-1' })
+    const enviado = f.prompt.mock.calls[0]![0]
+    expect(enviado.content).toEqual([
+      { type: 'text', text: 'veja isto' },
+      { type: 'image', mediaType: 'image/png', data: PNG_BYTES.toString('base64'), name: 'foto.png' },
+    ])
+    // Nada do disco atravessou: nem o diretório, nem o identificador opaco.
+    const serializado = JSON.stringify(enviado)
+    for (const vazamento of ['/tmp', 'uploads', 'ref-img']) {
+      expect(serializado, vazamento).not.toContain(vazamento)
+    }
+  })
+
+  it('o anexo de texto viaja como texto, com o nome exibível anunciado antes', async () => {
+    const store = new AssistantAttachmentStore({ createId: () => 'ref-txt' })
+    const f = fixture({ attachments: store })
+    await f.service.attach(identitySession(), 'conversation-1', 'notas.txt', TEXT_BYTES)
+    await f.service.send(identitySession(), 'conversation-1', 'leia', new AbortController().signal, ['ref-txt'])
+    expect(f.prompt.mock.calls[0]![0].content[1]).toEqual({
+      type: 'text', text: `notas.txt\n${TEXT_BYTES.toString('utf8')}`,
+    })
+  })
+
+  it('a referência de OUTRO escopo mata o envio inteiro, antes de falar com o Harness', async () => {
+    const store = new AssistantAttachmentStore({ createId: () => 'ref-alheia' })
+    // A outra pessoa anexa o arquivo dela, na organização dela.
+    const outra = fixture({ attachments: store })
+    await outra.service.attach(
+      identitySession({ user_id: 'user-2', org_id: 'org-2', tenant_id: 'tenant-2' }),
+      'conversation-1', 'segredo.txt', TEXT_BYTES,
+    )
+    // E eu tento enviar a MINHA mensagem carregando a referência dela.
+    const eu = fixture({ attachments: store })
+    await expect(eu.service.send(identitySession(), 'conversation-1', 'me dá', new AbortController().signal, ['ref-alheia']))
+      .rejects.toEqual(expect.objectContaining({ code: 'NOT_FOUND' }))
+    // Meia mensagem nunca entrou na conversa: o Harness não foi chamado.
+    expect(eu.prompt).not.toHaveBeenCalled()
+  })
+
+  it('mais de cinco anexos numa mensagem é recusado antes de resolver qualquer um', async () => {
+    const f = fixture()
+    await expect(f.service.send(
+      identitySession(), 'conversation-1', 'muitos', new AbortController().signal,
+      ['a', 'b', 'c', 'd', 'e', 'f'],
+    )).rejects.toEqual(expect.objectContaining({ code: 'INVALID_MESSAGE' }))
+    expect(f.prompt).not.toHaveBeenCalled()
+  })
+
+  it('sem guarda-anexos, toda referência é desconhecida - e não é aceita em silêncio', async () => {
+    const f = fixture({ attachments: 'absent' })
+    await expect(f.service.send(identitySession(), 'conversation-1', 'oi', new AbortController().signal, ['ref-1']))
+      .rejects.toEqual(expect.objectContaining({ code: 'NOT_FOUND' }))
+    expect(f.prompt).not.toHaveBeenCalled()
+  })
+
+  it('o anexo é consumido no aceite, e sobrevive à falha para a pessoa tentar de novo', async () => {
+    const store = new AssistantAttachmentStore({ createId: () => 'ref-1' })
+    const falha = fixture({ attachments: store })
+    falha.prompt.mockRejectedValueOnce(new Error('upstream'))
+    await falha.service.attach(identitySession(), 'conversation-1', 'notas.txt', TEXT_BYTES)
+    await expect(falha.service.send(identitySession(), 'conversation-1', 'vai', new AbortController().signal, ['ref-1']))
+      .rejects.toEqual(expect.objectContaining({ code: 'SESSION_UNAVAILABLE' }))
+    // Ainda está lá: obrigar a escolher o arquivo de novo depois de um erro do
+    // servidor seria cobrar da pessoa o preço de uma falha que não foi dela.
+    expect(store.size()).toBe(1)
+    await expect(falha.service.send(identitySession(), 'conversation-1', 'vai', new AbortController().signal, ['ref-1']))
+      .resolves.toMatchObject({ accepted: true })
+    // Aceito: a referência morre, e não serve para uma segunda mensagem.
+    expect(store.size()).toBe(0)
+    await expect(falha.service.send(identitySession(), 'conversation-1', 'de novo', new AbortController().signal, ['ref-1']))
+      .rejects.toEqual(expect.objectContaining({ code: 'NOT_FOUND' }))
+  })
+})
+
+describe('o turno que termina em ERRO aparece na conversa (19/09/2026)', () => {
+  it('turn/end com erro vira turn.failed, com o código e a primeira linha', () => {
+    const projetado = sanitizeAssistantEvent(event('turn/end', 9, { turn: 1, reason: { kind: 'error', error: { code: 'AUTH', message: 'no credential for provider route deepseek-official\n    at stack' } } }))
+    expect(projetado).toEqual({ type: 'turn.failed', seq: 9, at: expect.any(Number), reason: 'O FRIGG não conseguiu responder (AUTH): no credential for provider route deepseek-official' })
+  })
+
+  it('turn/end sem erro continua sendo só o fim do turno', () => {
+    expect(sanitizeAssistantEvent(event('turn/end', 9, { turn: 1, reason: { kind: 'completed' } }))).toMatchObject({ type: 'turn.state', state: 'idle' })
+  })
+})

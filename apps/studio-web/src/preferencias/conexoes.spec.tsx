@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { comMudanca, lerConexoes, linhasDeConexao, mudarConexao, tipoDaRota, type RespostaDasRotas } from './conexoes'
 import { ConexoesDeIa, ListaDeConexoes } from './Preferencias'
-import { secoesDePreferencias } from './preferencias'
+import { secoesDePreferencias } from './Preferencias'
 
 const RESPOSTA: RespostaDasRotas = {
   routes: [

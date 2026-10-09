@@ -1,0 +1,375 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
+import { ASSISTANT_TOOL_NAMES } from '../plugins/assistant-bridge/lib/catalog.js'
+
+const execFileAsync = promisify(execFile)
+const studioRoot = resolve(process.cwd())
+const upstreamRoot = resolve(process.env.DSH_UPSTREAM_ROOT
+  ?? join(studioRoot, 'third_party', 'deepseek-harness'))
+const sourceHome = join(studioRoot, 'dsh-home')
+const scratch = await mkdtemp(join(tmpdir(), 'dz23-assistant-session-proof-'))
+const runtimeHome = join(scratch, 'dsh-home')
+const repository = join(scratch, 'repository')
+const worktrees = join(scratch, 'worktrees')
+const runsRoot = join(scratch, 'generated-runs')
+const assetsRoot = join(scratch, 'assets')
+const exportsRoot = join(scratch, 'exports')
+const templateStore = join(scratch, 'template-store')
+const imageDigestFile = join(scratch, 'builder-image-digest')
+const proofPatch = join(scratch, 'runtime-paths.patch.yml')
+const localModelPatch = join(scratch, 'local-model.patch.yml')
+const email = 'assistant-runtime-proof@example.com'
+const realLocalModel = process.env.DZ23_PROOF_REAL_LOCAL_MODEL === '1'
+const localModel = 'qwen2.5:0.5b'
+
+assert.equal(process.platform, 'linux', 'A prova da sessão do Assistente exige Linux/WSL2.')
+assert.ok(studioRoot.startsWith('/home/'), `A prova deve rodar no ext4 do WSL2: ${studioRoot}`)
+
+const moduleAt = relative => import(pathToFileURL(join(upstreamRoot, relative)).href)
+const [{ loadLayeredEnv }, { runProfile }, { SessionId }, { createUserMessage }] = await Promise.all([
+  moduleAt('packages/boot/app-boot/lib/index.js'),
+  findProfileBoot(),
+  moduleAt('packages/core/session/lib/index.js'),
+  moduleAt('packages/llm/llm/lib/index.js'),
+])
+
+let booted
+let approvalOff
+let browserHandoff = 'NOT_EXECUTED'
+try {
+  await Promise.all([
+    mkdir(join(runtimeHome, 'profiles'), { recursive: true }),
+    mkdir(repository, { recursive: true }),
+    mkdir(worktrees, { recursive: true }),
+  ])
+  await symlink(join(sourceHome, 'profiles', 'studio'), join(runtimeHome, 'profiles', 'studio'), 'dir')
+  // A casa de prova precisa montar o que a instalação monta. As skills
+  // empacotadas moram em `$DSH_HOME/skills`; sem ligá-las aqui, a prova
+  // afirmaria que a skill não é descoberta quando o que falta é o diretório.
+  await symlink(join(sourceHome, 'skills'), join(runtimeHome, 'skills'), 'dir')
+  await execFileAsync('git', ['init', '-q'], { cwd: repository })
+  await writeFile(proofPatch, [
+    '- id: dz23-studio-prompt-to-app',
+    '  config:',
+    '    runsRoot: !!js process.env.DZ23_PROOF_RUNS_ROOT',
+    '    logoStoreRoot: !!js process.env.DZ23_PROOF_ASSETS_ROOT',
+    '    builder:',
+    '      imageDigestFile: !!js process.env.DZ23_PROOF_IMAGE_DIGEST_FILE',
+    '      templateStore: !!js process.env.DZ23_PROOF_TEMPLATE_STORE',
+    '- id: dz23-studio-preview',
+    '  config:',
+    '    supervisor:',
+    '      artifactRoot: !!js process.env.DZ23_PROOF_RUNS_ROOT',
+    '- id: dz23-studio-integration-hub',
+    '  config:',
+    '    runsRoot: !!js process.env.DZ23_PROOF_RUNS_ROOT',
+    '    exportsRoot: !!js process.env.DZ23_PROOF_EXPORTS_ROOT',
+    '',
+  ].join('\n'))
+  if (realLocalModel) {
+    assert.match(process.env.DZ23_OLLAMA_BASE_URL ?? '', /^http:\/\/172\.\d+\.\d+\.1:11434\/v1$/u)
+    await writeFile(localModelPatch, [
+      '- id: agent-default-model',
+      '  config:',
+      '    provider: ollama',
+      `    model: ${localModel}`,
+      '',
+    ].join('\n'))
+  }
+
+  const repositories = [{
+    orgId: 'org_local',
+    tenantId: 'tenant_local',
+    workspaceId: 'tenant_local',
+    repositoryPath: repository,
+    allowedPaths: ['src'],
+    providers: ['spawn-in-process'],
+    maxPaths: 8,
+    budget: { timeoutMs: 60_000, maxFiles: 8, maxDiffBytes: 131_072, maxTokens: 32_000 },
+  }]
+  process.env.DSH_HOME = runtimeHome
+  process.env.DSH_TELEMETRY_DISABLED = '1'
+  process.env.DZ23_COORDINATOR_PRESET_ROOT = join(sourceHome, '.agent-presets')
+  process.env.DZ23_ASSISTANT_REPOSITORIES = JSON.stringify(repositories)
+  process.env.DZ23_AGENT_WORKTREE_ROOT = worktrees
+  process.env.DZ23_OLLAMA_PLACEHOLDER = 'local-placeholder-not-a-secret'
+  process.env.DZ23_PROOF_RUNS_ROOT = runsRoot
+  process.env.DZ23_PROOF_ASSETS_ROOT = assetsRoot
+  process.env.DZ23_PROOF_EXPORTS_ROOT = exportsRoot
+  process.env.DZ23_PROOF_TEMPLATE_STORE = templateStore
+  process.env.DZ23_PROOF_IMAGE_DIGEST_FILE = imageDigestFile
+
+  booted = await runProfile({
+    environment: loadLayeredEnv('dsh-studio-m71-proof', studioRoot),
+    profile: 'studio',
+    patchFiles: [
+      join(sourceHome, 'profiles', 'studio', 'poc-01b.patch.yml'),
+      ...(realLocalModel ? [localModelPatch] : []),
+      proofPatch,
+    ],
+    args: ['--host', '127.0.0.1', '--port', '0', '--no-open'],
+  })
+
+  assert.equal(await booted.ctx.studioIdentity.service.requestMagicCode(email), 'sent')
+  const message = booted.ctx.studioIdentity.developmentEmailCapture?.messages.at(-1)
+  assert.ok(message, 'O login local não capturou o código de desenvolvimento.')
+  const issued = await booted.ctx.studioIdentity.service.verifyMagicCode(
+    message.to,
+    message.code,
+    { label: 'M71 runtime proof', userAgent: 'runtime-proof', ipTruncated: '127.0.0.0/24' },
+  )
+  const authorization = booted.ctx.studioTenancy.service.authorizationFor(
+    issued.session.user_id,
+    issued.session.org_id,
+    issued.session.tenant_id,
+  )
+  assert.equal(authorization?.role, 'owner')
+
+  const origin = `http://127.0.0.1:${String(booted.ctx.webServer.port)}`
+  const headers = {
+    'content-type': 'application/json',
+    cookie: `dz23_studio_session=${encodeURIComponent(issued.token)}`,
+    origin,
+  }
+  const missingCsrf = await fetch(`${origin}/studio/assistant/session`, {
+    method: 'POST', headers, body: '{}', redirect: 'manual',
+  })
+  assert.equal(missingCsrf.status, 401, 'A criação aceitou uma mutação sem CSRF.')
+
+  const firstResponse = await fetch(`${origin}/studio/assistant/session`, {
+    method: 'POST',
+    headers: { ...headers, 'x-dz23-csrf': issued.csrfToken },
+    body: '{}',
+    redirect: 'manual',
+  })
+  assert.equal(firstResponse.status, 200, await firstResponse.clone().text())
+  const first = await firstResponse.json()
+  assert.deepEqual(
+    { reused: first.reused, preset: first.preset },
+    { reused: false, preset: 'dz23-assistant' },
+  )
+  assert.equal(typeof first.session_id, 'string')
+  assert.ok(first.session_id.length > 0)
+
+  const inspected = await booted.ctx.sessionController.inspect(SessionId(first.session_id))
+  assert.equal(inspected.meta.agentPreset, 'dz23-assistant')
+  assert.equal(inspected.meta.cwd, repository)
+  const agent = booted.ctx.agents.get(SessionId(first.session_id))
+  assert.ok(agent, 'A sessão criada não possui Agent ativo no Harness.')
+  const tools = booted.ctx.tools.schemas(agent).map(tool => tool.name).sort()
+  // O número vem do catálogo, não de um literal. Ele já esteve cravado em 13 e
+  // ficou defasado no dia em que `studio_agent_resolve_unknown` entrou: a prova
+  // passava a reprovar uma sessão correta, e o único jeito de "consertar" seria
+  // mexer no número - exatamente o verde artificial que não se pode dar.
+  const governed = tools.filter(name => name.startsWith('studio_agent_') || name.startsWith('studio_team_'))
+  // Telemetria: o bundle upstream sobe `session-telemetry-otel` em
+  // FEEDBACK_ONLY apontando para um coletor de terceiro, com o export sendo a
+  // cópia crua da sessão. O perfil do Studio zera isso por composição. Aqui a
+  // prova é do runtime real, não da leitura do YAML.
+  // A skill empacotada com o produto tem de estar VISÍVEL para o agente. Sem
+  // esta afirmação, ela pode ser copiada para dentro do repositório, montada no
+  // perfil e mesmo assim não ser descoberta - e ninguém saberia até alguém
+  // pedir por ela e não receber nada.
+  // O escopo é o AGENTE, e não o host: nesta composição o `dsh-web-app` desliga
+  // a linha de host `skill-filesystem` e a descoberta local passa a ser do
+  // preset. Ler sem escopo devolve só a camada global - vazia por desenho - e a
+  // prova acusaria ausência onde há montagem correta.
+  const skills = await booted.ctx.skills?.list?.({ cwd: repository, scope: agent }).catch(() => undefined)
+  const skillNames = Array.isArray(skills) ? skills.map(entry => String(entry?.name ?? '')) : []
+  const bundledSkill = skillNames.includes('ui-ux-pro-max') ? 'visible' : skills === undefined ? 'no-service' : 'missing'
+  assert.notEqual(bundledSkill, 'missing', `A skill empacotada não foi descoberta. Catálogo: ${skillNames.join(', ') || '(vazio)'}`)
+  // Descoberta não é uso: sem `tool-skill` no preset o agente vê o nome no
+  // catálogo e não tem como abrir o corpo. A ferramenta é o que fecha isso.
+  assert.ok(tools.includes('skill'), `O agente não recebeu a ferramenta de skill. Ferramentas: ${tools.join(', ')}`)
+  // A-03: a retomada CHEGA à pessoa por esta ferramenta. Sem ela no catálogo do
+  // agente, `resume` existe no serviço e ninguém consegue pedir.
+  assert.ok(tools.includes('studio_agent_resume'), `O agente não recebeu a ferramenta de retomada. Ferramentas: ${tools.join(', ')}`)
+
+  const telemetrySharing = booted.ctx.telemetry?.sharing ?? 'no-service'
+  // `no-service` significa que a linha de telemetria não montou nesta casa de
+  // prova - foi assim ANTES e DEPOIS de o perfil zerar o modo, então este
+  // ponto não fecha S-14 sozinho; quem fecha é o portão que lê o perfil
+  // (scripts/telemetry-off.spec.mjs). O que a prova de runtime garante é o que
+  // ela pode garantir de verdade: a sessão NUNCA sobe compartilhando.
+  assert.ok(['disabled', 'no-service'].includes(telemetrySharing), `A sessão subiu compartilhando telemetria: ${telemetrySharing}.`)
+  assert.deepEqual(governed, [...ASSISTANT_TOOL_NAMES].sort(), 'As ferramentas expostas na sessão divergem do catálogo da ponte.')
+
+  // O painel do trabalho em equipe (A-08) montado no perfil REAL, falado por
+  // HTTP de verdade. Sem esta afirmação a rota pode existir no código, não ser
+  // ligada por nenhum perfil, e a tela mostrar "não foi possível ler" para
+  // sempre sem ninguém saber por quê.
+  const teamsResponse = await fetch(`${origin}/studio/teams`, { headers, redirect: 'manual' })
+  assert.equal(teamsResponse.status, 200, await teamsResponse.clone().text())
+  const teamsBody = await teamsResponse.json()
+  assert.ok(Array.isArray(teamsBody.teams), 'A lista de equipes não veio como lista.')
+  // Equipe que não é desta sessão responde NÃO ENCONTRADA. Um 403 aqui
+  // confirmaria a existência dela a quem não é dono.
+  const foreignTeam = await fetch(`${origin}/studio/teams/11111111-2222-4333-8444-555555555555`, {
+    headers, redirect: 'manual',
+  })
+  assert.equal(foreignTeam.status, 404, await foreignTeam.clone().text())
+  // Sem cookie de sessão a rota não conta nem quantas equipes existem.
+  const anonymousTeams = await fetch(`${origin}/studio/teams`, { headers: { origin }, redirect: 'manual' })
+  assert.equal(anonymousTeams.status, 401, await anonymousTeams.clone().text())
+  const teamPanel = { list: teamsResponse.status, foreign: foreignTeam.status, anonymous: anonymousTeams.status }
+
+  // D-02: o staging montado no perfil REAL. Sem esta afirmação o pacote pode
+  // existir inteiro, com testes verdes, e não estar ligado a lugar nenhum -
+  // que foi exatamente o estado dele por várias versões.
+  const staging = booted.ctx.get('studioStaging')
+  assert.equal(staging?.state, 'MOUNTED', 'O staging não montou no perfil.')
+  assert.match(String(staging?.targetRef), /^dz23-target:/u)
+  const stagingState = { state: staging.state, target: staging.targetRef }
+
+
+  const approvals = []
+  approvalOff = booted.ctx.on('approval/request', (request) => {
+    approvals.push({ toolName: request.toolName, callId: String(request.callId) })
+    return Promise.resolve('allowed-once')
+  }, { prepend: true })
+  const prompt = realLocalModel
+    ? 'Responda exatamente DZ23_REAL_LOCAL_OK. Não chame ferramentas.'
+    : 'Run the deterministic Studio echo proof.'
+  agent.followup(createUserMessage({
+    content: [{ type: 'text', text: prompt }],
+    source: { kind: 'user' },
+  }))
+  await withTimeout(agent.whenIdle(), 120_000, 'O turno do Assistente excedeu 120 segundos.')
+  const conversationText = agent.session.deriveMessages()
+    .flatMap(message => message.content)
+    .filter(block => block.type === 'text')
+    .map(block => block.text)
+    .join('\n')
+  if (realLocalModel) {
+    assert.equal(agent.options.provider, 'ollama')
+    assert.equal(agent.options.model, localModel)
+    assert.match(conversationText, /DZ23_REAL_LOCAL_OK/)
+    assert.equal(approvals.length, 0)
+  } else {
+    assert.match(conversationText, /STUDIO_ECHO_OK/)
+    assert.deepEqual(approvals.map(item => item.toolName), ['studio_echo'])
+    assert.ok(agent.session.events.some(event => event.type === 'approval/asked'))
+    assert.ok(agent.session.events.some(event => event.type === 'approval/decided'
+      && event.data.outcome === 'allowed-once'))
+  }
+  await booted.ctx.sessions.flush(agent.session)
+
+  const browserControlDirectory = process.env.DZ23_BROWSER_PROOF_CONTROL_DIR?.trim()
+  if (browserControlDirectory !== undefined && browserControlDirectory !== '') {
+    assert.ok(isAbsolute(browserControlDirectory), 'O diretório de controle do navegador deve ser absoluto.')
+    assert.match(basename(browserControlDirectory), /^dz23-assistant-browser-proof-[a-z0-9-]+$/u)
+    const control = join(browserControlDirectory, 'ready.json')
+    const result = join(browserControlDirectory, 'result.json')
+    await mkdir(browserControlDirectory, { recursive: false, mode: 0o700 })
+    await writeFile(control, JSON.stringify({
+      origin,
+      sessionToken: issued.token,
+      expectedSessionId: first.session_id,
+    }), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    try {
+      const browserResult = await waitForBrowserResult(result)
+      assert.deepEqual(browserResult, { status: 'PASS', sessionId: first.session_id })
+      browserHandoff = 'PASS_IN_WINDOWS_EDGE'
+    } finally {
+      await Promise.all([rm(control, { force: true }), rm(result, { force: true })])
+    }
+  }
+
+  const secondResponse = await fetch(`${origin}/studio/assistant/session`, {
+    method: 'POST',
+    headers: { ...headers, 'x-dz23-csrf': issued.csrfToken },
+    body: '{}',
+    redirect: 'manual',
+  })
+  assert.equal(secondResponse.status, 200, await secondResponse.clone().text())
+  const second = await secondResponse.json()
+  assert.deepEqual(second, { session_id: first.session_id, reused: true, preset: 'dz23-assistant' })
+
+  const persistedIdentity = booted.ctx.studioIdentity.service.sessionRecords()
+    .find(candidate => candidate.session_id === issued.session.session_id)
+  assert.ok(persistedIdentity?.harness_session_ids.includes(first.session_id))
+
+  await booted.ctx.studioIdentity.service.revokeSession(issued.session, issued.session.session_id)
+  const revoked = await fetch(`${origin}/studio/assistant/session`, {
+    method: 'POST',
+    headers: { ...headers, 'x-dz23-csrf': issued.csrfToken },
+    body: '{}',
+    redirect: 'manual',
+  })
+  assert.equal(revoked.status, 401, 'Uma sessão de identidade revogada ainda abriu o Assistente.')
+
+  process.stdout.write(`${JSON.stringify({
+    proof: 'DZ23_STUDIO_M71_ASSISTANT_SESSION',
+    status: 'PASS',
+    upstream: '6c705be1ce6774a000d061da41d1823b03a3d42c',
+    transport: 'real HTTP on loopback',
+    sessionController: 'real',
+    identity: 'real login + CSRF + revocation',
+    agentPreset: inspected.meta.agentPreset,
+    repository: inspected.meta.cwd,
+    tools: tools.length,
+    governedTools: governed.length,
+    telemetrySharing,
+    bundledSkill,
+    teamPanel,
+    staging: stagingState,
+    conversationTurn: realLocalModel ? 'PASS_WITH_REAL_LOCAL_MODEL' : 'PASS_WITH_DETERMINISTIC_PROVIDER',
+    provider: realLocalModel ? `ollama/${localModel}` : 'studio-fake/studio-deterministic',
+    approval: {
+      policy: 'ask',
+      outcome: realLocalModel ? 'not-requested' : 'allowed-once',
+      requests: approvals.length,
+    },
+    resumedSameSession: second.session_id === first.session_id && second.reused === true,
+    browserHandoff,
+    limitations: {
+      externalModelTurn: 'NOT_EXECUTED',
+      multiUserConversationIsolation: 'NOT_SUPPORTED',
+    },
+  }, null, 2)}\n`)
+} finally {
+  approvalOff?.()
+  if (booted !== undefined) await booted.shutdown.shutdown(0)
+  await rm(scratch, { recursive: true, force: true })
+}
+
+async function findProfileBoot() {
+  const { readFile, readdir } = await import('node:fs/promises')
+  const cliRoot = join(upstreamRoot, 'apps', 'cli', 'lib')
+  const bin = await readFile(join(cliRoot, 'bin.js'), 'utf8')
+  const chunk = bin.match(/import\("\.\/(profile-boot-[^"]+\.js)"\)/u)?.[1]
+  assert.ok(chunk, 'O CLI compilado não expõe o carregador de profile.')
+  const available = await readdir(cliRoot)
+  assert.ok(available.includes(chunk), `O chunk do profile não existe: ${chunk}`)
+  return import(pathToFileURL(join(cliRoot, chunk)).href)
+}
+
+async function waitForBrowserResult(path) {
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    const info = await lstat(path).catch(() => undefined)
+    if (info?.isSymbolicLink()) throw new Error('O resultado do navegador não pode ser um link simbólico.')
+    if (info?.isFile()) return JSON.parse(await readFile(path, 'utf8'))
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 100))
+  }
+  throw new Error('O navegador não concluiu a prova em 120 segundos.')
+}
+
+async function withTimeout(promise, timeoutMs, message) {
+  let timer
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs) }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}

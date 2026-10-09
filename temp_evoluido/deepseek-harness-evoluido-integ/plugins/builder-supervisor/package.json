@@ -1,0 +1,30 @@
+{
+  "name": "@dz23-studio/builder-supervisor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "dz23-build": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
+      "types": "./src/index.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start:manager": "node lib/start-builder-manager.js",
+    "start": "node lib/supervisor-main.js",
+    "provision": "node lib/provision-cli.js",
+    "test": "vitest run --config vitest.config.ts",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage"
+  },
+  "license": "Apache-2.0"
+}

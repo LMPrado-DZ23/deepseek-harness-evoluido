@@ -1,4 +1,4 @@
-import { textoNormalizado } from './empresa'
+import { textoNormalizado } from './Empresa'
 
 /**
  * O que a tela do CATÁLOGO decide antes de falar com o servidor — `BUS-03`.

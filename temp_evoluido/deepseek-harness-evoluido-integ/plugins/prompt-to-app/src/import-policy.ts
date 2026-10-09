@@ -1,0 +1,544 @@
+import { posix } from 'node:path'
+import { assertSemEsboco } from './esboco.js'
+import type { PerfilDeGeracao } from './perfil-de-geracao.js'
+import ts from 'typescript'
+import type { GeneratedFile } from './generator.js'
+import { GeneratedFileRejectedError, validateGeneratedPath } from './generator.js'
+import { prompt, t } from './i18n.js'
+
+const ALLOWED_MODULES = new Set([
+  'react', 'next/link', 'next/navigation',
+  'react-hook-form', '@hookform/resolvers/zod', 'zod',
+  '@/src/components/generated', '@/components/generated',
+  '@/src/lib/utils', '@/lib/utils',
+])
+const ALLOWED_PREFIXES = [
+  '@/src/server/repositories/', '@/server/repositories/',
+  '@/src/components/generated/', '@/components/generated/',
+  '@/src/components/ui/', '@/components/ui/',
+] as const
+const FORBIDDEN_GLOBALS = new Set([
+  'process', 'global', 'globalThis', 'window', 'self', 'document', 'frames', 'top', 'parent',
+  'navigator', 'location', 'localStorage', 'sessionStorage', 'indexedDB', 'caches',
+  'module', 'exports', 'require', '__dirname', '__filename', 'Bun', 'Deno',
+  'Reflect', 'eval', 'Function',
+])
+const FORBIDDEN_NETWORK_APIS = new Set(['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource'])
+const FORBIDDEN_ESCAPE_PROPERTIES = new Set(['constructor', '__proto__', 'prototype'])
+const FORBIDDEN_ELEMENT_FACTORIES = new Set(['createElement', 'jsx', 'jsxs', 'jsxDEV'])
+const FORBIDDEN_JSX_TAGS = new Set([
+  'script', 'iframe', 'object', 'embed', 'base', 'meta',
+  'svg', 'g', 'path', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'rect', 'text', 'title',
+])
+const SAFE_INTRINSIC_JSX_TAGS = new Set([
+  'a', 'article', 'aside', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup',
+  'dd', 'details', 'div', 'dl', 'dt', 'em', 'fieldset', 'figcaption', 'figure', 'footer', 'form',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'i', 'img', 'input', 'label', 'legend',
+  'li', 'main', 'mark', 'nav', 'ol', 'option', 'p', 'picture', 'pre', 'section', 'select', 'small',
+  'span', 'strong', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'textarea', 'tfoot', 'th',
+  'thead', 'time', 'tr', 'u', 'ul',
+])
+const FORBIDDEN_JSX_ATTRIBUTES = new Set(['dangerouslysetinnerhtml', 'srcdoc', 'style'])
+const URL_JSX_ATTRIBUTES = new Set([
+  'href', 'src', 'action', 'formaction', 'xlinkhref',
+  'srcset', 'ping', 'background', 'cite', 'longdesc',
+])
+const URL_CANDIDATE_LIST_ATTRIBUTES = new Set(['srcset'])
+const URL_WHITESPACE_LIST_ATTRIBUTES = new Set(['ping'])
+const URL_IGNORED_CODE_POINTS = /[\u0000-\u0020]/gu
+const HTTPS_URL = /^https:\/\//iu
+const FIXED_COMPONENT_PATHS = [
+  'src/components/generated', 'components/generated',
+  'src/components/ui', 'components/ui',
+] as const
+
+export function assertGeneratedSource(files: readonly GeneratedFile[], perfil: PerfilDeGeracao = 'declarativo'): void {
+  const validated = files.map(file => ({ ...file, path: validateGeneratedPath(file.path) }))
+  const generatedPaths = new Set(validated.map(file => normalizePath(file.path)))
+  for (const file of validated) {
+    if (!/\.[cm]?[jt]sx?$/u.test(file.path.toLowerCase())) continue
+    if (isFixedComponentPath(normalizePath(file.path))) throw rejectedSource(file.path, 'reserved Studio component path')
+    const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, scriptKind(file.path))
+    visitImports(source, moduleName => assertAllowedModule(file.path, moduleName, generatedPaths))
+    assertNoServerOrUnsafeSource(file.path, source, generatedPaths, perfil)
+    /*
+      A última pergunta é a que nenhuma das outras faz. Todas elas perguntam "o
+      que este código pode fazer de errado?", e um corpo de função vazio não
+      pode fazer nada — que é exatamente o defeito. Só vale no perfil
+      interativo: uma tela declarativa não tem corpo de função para preencher.
+    */
+    if (perfil === 'interativo') assertSemEsboco(file.path, source)
+    if (perfil === 'interativo') assertClienteDeclarado(file.path, source)
+  }
+}
+
+/**
+ * Arquivo com estado ou evento precisa declarar `'use client'`.
+ *
+ * Medido em 19/09/2026 na primeira jornada real que chegou ao construtor: o
+ * qwen2.5-coder:7b escreveu um contador CORRETO — `useState`, `onClick`,
+ * "Faltam N copos", "Meta cumprida!" — e o `next build` recusou porque
+ * `app/page.tsx` (do template, servidor) importava um arquivo com `useState`
+ * sem a diretiva. A tentativa inteira (instalação e montagem, minutos) foi
+ * gasta numa linha que dá para conferir aqui, antes do disco, com a causa
+ * exata. A diretiva não entra sozinha: o texto do modelo não é reescrito.
+ * @param path - o arquivo.
+ * @param source - a árvore.
+ */
+export function assertClienteDeclarado(path: string, source: ts.SourceFile): void {
+  const motivo = motivoDeCliente(source)
+  if (motivo !== undefined) throw new GeneratedFileRejectedError(t('errors.generatedUseClient', { path, construct: motivo }))
+}
+
+/**
+ * O que obriga o arquivo a ser de cliente, quando ele ainda não declara.
+ * @param source - a árvore.
+ * @returns a construção (`useState`, `onClick`…), ou `undefined`.
+ */
+function motivoDeCliente(source: ts.SourceFile): string | undefined {
+  if (temDiretivaCliente(source)) return undefined
+  let motivo: string | undefined
+  const walk = (node: ts.Node): void => {
+    if (motivo !== undefined) return
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && /^use[A-Z]/u.test(node.expression.text)) motivo = node.expression.text
+    else if (ts.isJsxAttribute(node) && /^on[A-Z]/u.test(node.name.getText(source))) motivo = node.name.getText(source)
+    ts.forEachChild(node, walk)
+  }
+  walk(source)
+  return motivo
+}
+
+/** A linha que o FRIGG acrescenta, dizendo que foi ele. */
+const DIRETIVA_DE_CLIENTE = "'use client'"
+export const DIRETIVA_COMPLETADA = ['// ' + t('values.diretivaCompletada'), DIRETIVA_DE_CLIENTE, ''].join('\n')
+
+/**
+ * COMPLETA a diretiva de cliente no perfil interativo.
+ *
+ * Medido em 19/09/2026: a recusa com a causa exata ("ponha 'use client'; como
+ * a primeira linha") foi IGNORADA pelo qwen2.5-coder:7b duas vezes seguidas —
+ * duas tentativas inteiras, e a tarefa terminou em falha com o contador certo
+ * na mão. A diretiva é exigência mecânica do framework, não decisão do
+ * aplicativo: ela não muda o que o código pode fazer (a varredura inteira
+ * continua valendo, e roda DEPOIS disto), só diz ao Next onde ele roda.
+ *
+ * Por isso aqui o texto do modelo GANHA uma linha — e a linha diz que foi o
+ * FRIGG, no próprio arquivo, para ninguém atribuí-la ao modelo. Só no perfil
+ * interativo, só em arquivo que usa estado ou evento e ainda não declara.
+ * `assertClienteDeclarado` continua de guarda para o que chegar sem passar
+ * por aqui.
+ * @param files - os arquivos da resposta.
+ * @param perfil - o perfil do projeto.
+ * @returns os arquivos, com a diretiva onde ela faltava.
+ */
+export function completarDiretivaCliente(files: readonly GeneratedFile[], perfil: PerfilDeGeracao): readonly GeneratedFile[] {
+  if (perfil !== 'interativo') return files
+  return files.map(file => {
+    if (!/\.[cm]?[jt]sx?$/u.test(file.path.toLowerCase())) return file
+    const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, scriptKind(file.path))
+    return motivoDeCliente(source) === undefined ? file : { ...file, content: `${DIRETIVA_COMPLETADA}${file.content}` }
+  })
+}
+
+function temDiretivaCliente(source: ts.SourceFile): boolean {
+  for (const statement of source.statements) {
+    if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) return false
+    if (statement.expression.text === 'use client') return true
+  }
+  return false
+}
+
+export const assertGeneratedImports = assertGeneratedSource
+
+function visitImports(source: ts.SourceFile, inspect: (moduleName: string | undefined) => void): void {
+  const walk = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      if (node.moduleSpecifier !== undefined) inspect(literalModule(node.moduleSpecifier))
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      inspect(literalModule(node.moduleReference.expression as ts.Expression))
+    } else if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))) {
+      inspect(node.arguments.length === 1 ? literalModule(node.arguments[0]!) : undefined)
+    }
+    ts.forEachChild(node, walk)
+  }
+  walk(source)
+}
+
+function assertNoServerOrUnsafeSource(path: string, source: ts.SourceFile, generatedPaths: ReadonlySet<string>, perfil: PerfilDeGeracao): void {
+  /*
+    As TRÊS construções que o perfil interativo libera, e só elas.
+
+    Tudo o que vem antes e depois neste percurso — globais, rede, `eval`,
+    `import.meta`, acesso dinâmico, `constructor`, fábricas de elemento, tags,
+    `dangerouslySetInnerHTML`, espalhamento, URL — vale igual nos dois perfis.
+    Essas guardas não existem para impedir um clique, e nenhuma delas é
+    afrouxada aqui.
+  */
+  const interativo = perfil === 'interativo'
+  const importedJsxBindings = importedBindings(source, generatedPaths)
+  const walk = (node: ts.Node): void => {
+    // O atalho carrega a POSIÇÃO do nó em que o percurso está: cada recusa
+    // daqui para baixo passa a dizer onde, sem repetir o argumento 26 vezes.
+    const recusar = (construct: string): GeneratedFileRejectedError => rejectedSource(path, construct, source, node)
+    if (ts.isExpressionStatement(node) && ts.isStringLiteral(node.expression) && node.expression.text === 'use server') throw recusar('use server')
+    if (ts.isIdentifier(node) && !isPropertyLabel(node) && (FORBIDDEN_GLOBALS.has(node.text) || FORBIDDEN_NETWORK_APIS.has(node.text))) throw recusar(node.text)
+    if (ts.isIdentifier(node) && FORBIDDEN_ELEMENT_FACTORIES.has(node.text) && !isPropertyLabel(node)) throw recusar(node.text)
+    if (ts.isImportSpecifier(node) && FORBIDDEN_ELEMENT_FACTORIES.has((node.propertyName ?? node.name).text)) throw recusar((node.propertyName ?? node.name).text)
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_NETWORK_APIS.has(node.name.text)) throw recusar(node.name.text)
+    const elementName = ts.isElementAccessExpression(node) ? staticPropertyName(node.argumentExpression) : undefined
+    /*
+      ACESSO POR ÍNDICE calculado: proibido no declarativo, permitido no interativo.
+
+      No declarativo ele é desnecessário — não há lógica —, e proibi-lo fecha de
+      graça a família de escapes por chave calculada. No interativo ele é
+      inevitável: `casas[indice]` é o que um tabuleiro é.
+
+      LIMITE DECLARADO, e ele é real: com índice calculado, um aplicativo pode
+      escrever numa chave que a análise estática não vê, incluindo poluição de
+      protótipo do próprio documento dele. Os nomes perigosos escritos
+      literalmente — `constructor`, `__proto__`, `prototype` — continuam
+      recusados nos dois perfis, e o que contém o resto é o ISOLAMENTO da prévia,
+      não esta varredura. Análise estática aqui é camada de defesa, e nunca o
+      lugar onde a contenção mora.
+    */
+    if (ts.isElementAccessExpression(node) && elementName === undefined && !interativo) throw recusar('dynamic property access')
+    if (elementName !== undefined && FORBIDDEN_NETWORK_APIS.has(elementName)) throw recusar(elementName)
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_ELEMENT_FACTORIES.has(node.name.text)) throw recusar(node.name.text)
+    if (elementName !== undefined && FORBIDDEN_ELEMENT_FACTORIES.has(elementName)) throw recusar(elementName)
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_ESCAPE_PROPERTIES.has(node.name.text)) throw recusar(node.name.text)
+    if (elementName !== undefined && FORBIDDEN_ESCAPE_PROPERTIES.has(elementName)) throw recusar(elementName)
+    if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) throw recusar('import.meta')
+    if (ts.isCallExpression(node) && factoryName(node.expression) !== undefined && FORBIDDEN_ELEMENT_FACTORIES.has(factoryName(node.expression)!)) throw recusar(factoryName(node.expression)!)
+    if (ts.isJsxAttribute(node)) {
+      const name = node.name.getText(source)
+      const normalizedName = normalizeJsxAttributeName(name)
+      // `ref` continua proibido nos DOIS perfis: ele é a porta para o DOM cru,
+      // e liberar o clique não é liberar o documento.
+      if (name === 'ref') throw recusar(`interactive JSX attribute ${name}`)
+      if (/^on/iu.test(name) && !interativo) throw recusar(`interactive JSX attribute ${name}`)
+      if (FORBIDDEN_JSX_ATTRIBUTES.has(normalizedName)) throw recusar(name)
+      if (URL_JSX_ATTRIBUTES.has(normalizedName)) {
+        const value = staticJsxAttributeValue(node)
+        if (value === undefined) throw recusar(`dynamic URL attribute ${name}`)
+        const candidates = URL_CANDIDATE_LIST_ATTRIBUTES.has(normalizedName)
+          ? splitCandidateList(value)
+          : URL_WHITESPACE_LIST_ATTRIBUTES.has(normalizedName) ? splitWhitespaceList(value) : [value]
+        for (const candidate of candidates) {
+          if (!isSafeStaticUrl(candidate)) throw recusar(`unsafe URL attribute ${name}`)
+        }
+      }
+    }
+    if (ts.isJsxSpreadAttribute(node)) throw recusar('JSX spread attribute')
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const tag = node.tagName.getText(source)
+      if (!ts.isIdentifier(node.tagName)) throw recusar(`compound JSX tag ${tag}`)
+      if (FORBIDDEN_JSX_TAGS.has(tag)) throw recusar(`<${tag}>`)
+      if (tag === tag.toLowerCase() && !SAFE_INTRINSIC_JSX_TAGS.has(tag)) throw recusar(`unknown JSX tag ${tag}`)
+      if (tag !== tag.toLowerCase() && !importedJsxBindings.has(tag)) throw recusar(`dynamic JSX tag ${tag} (${t('values.componenteProprio')})`)
+    }
+    ts.forEachChild(node, walk)
+    // Modelo com etiqueta continua proibido nos dois: é uma chamada com
+    // analisador próprio, e nenhum aplicativo desta lista precisou dele.
+    if (ts.isTaggedTemplateExpression(node)) throw recusar('tagged template call')
+    if (ts.isCallExpression(node) && !interativo) throw recusar('runtime call')
+    if (ts.isNewExpression(node) && !interativo) throw recusar('runtime constructor')
+  }
+  walk(source)
+}
+
+function isSafeStaticUrl(value: string): boolean {
+  // JSX compilers decode character references in quoted attributes before the
+  // value reaches the DOM. Refuse them at this trust boundary so an apparently
+  // local path such as `/&#47;host` cannot become `//host` after compilation.
+  if (value.includes('&')) return false
+  if (value.includes('\\')) return false
+  const normalized = value.replace(URL_IGNORED_CODE_POINTS, '')
+  if (normalized === '' || normalized.startsWith('#') || normalized.startsWith('./')) return true
+  if (normalized.startsWith('/') && !normalized.startsWith('//')) return true
+  return HTTPS_URL.test(normalized)
+}
+
+function splitCandidateList(value: string): string[] {
+  // String#split always returns at least one item; avoid an impossible fallback
+  // branch so the security-critical policy remains fully covered.
+  return value.split(',').map(part => part.trim().split(/\s+/u)[0] as string).filter(part => part !== '')
+}
+
+function splitWhitespaceList(value: string): string[] {
+  return value.trim().split(/\s+/u).filter(part => part !== '')
+}
+
+function normalizeJsxAttributeName(value: string): string {
+  return value.replace(/[^a-z0-9]/giu, '').toLowerCase()
+}
+
+function importedBindings(source: ts.SourceFile, generatedPaths: ReadonlySet<string>): ReadonlySet<string> {
+  const names = new Set<string>()
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || statement.importClause === undefined) continue
+    const moduleName = literalModule(statement.moduleSpecifier)
+    if (moduleName === undefined || !trustedJsxModule(moduleName) || aliasTargetsGeneratedFile(moduleName, generatedPaths)) continue
+    if (statement.importClause.isTypeOnly) continue
+    if (statement.importClause.name !== undefined) names.add(statement.importClause.name.text)
+    if (moduleName === 'next/link') continue
+    const bindings = statement.importClause.namedBindings
+    if (bindings === undefined) continue
+    if (ts.isNamespaceImport(bindings)) names.add(bindings.name.text)
+    else for (const element of bindings.elements) if (!element.isTypeOnly) names.add(element.name.text)
+  }
+  return names
+}
+
+function trustedJsxModule(moduleName: string): boolean {
+  return moduleName === 'next/link'
+    || moduleName === '@/src/components/generated'
+    || moduleName === '@/components/generated'
+}
+
+function aliasTargetsGeneratedFile(moduleName: string, generatedPaths: ReadonlySet<string>): boolean {
+  if (!moduleName.startsWith('@/')) return false
+  const target = normalizePath(moduleName.slice(2))
+  return generatedPaths.has(target) || generatedPaths.has(`${target}/index`)
+}
+
+function isFixedComponentPath(path: string): boolean {
+  const folded = path.toLowerCase()
+  return FIXED_COMPONENT_PATHS.some(prefix => folded === prefix || folded.startsWith(`${prefix}/`))
+}
+
+function factoryName(node: ts.Expression): string | undefined {
+  if (ts.isIdentifier(node)) return node.text
+  if (ts.isPropertyAccessExpression(node)) return node.name.text
+  if (ts.isElementAccessExpression(node)) return staticPropertyName(node.argumentExpression)
+  return undefined
+}
+
+function staticJsxAttributeValue(node: ts.JsxAttribute): string | undefined {
+  if (node.initializer === undefined) return ''
+  if (ts.isStringLiteral(node.initializer)) return node.initializer.text
+  if (ts.isJsxExpression(node.initializer) && node.initializer.expression !== undefined) return staticPropertyName(node.initializer.expression)
+  return undefined
+}
+
+function staticPropertyName(node: ts.Expression): string | undefined {
+  if (ts.isStringLiteralLike(node)) return node.text
+  if (ts.isNumericLiteral(node)) return node.text
+  if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node)) return staticPropertyName(node.expression)
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticPropertyName(node.left)
+    const right = staticPropertyName(node.right)
+    return left === undefined || right === undefined ? undefined : left + right
+  }
+  return undefined
+}
+
+function isPropertyLabel(node: ts.Identifier): boolean {
+  const parent = node.parent
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return true
+  if ((ts.isPropertyAssignment(parent) || ts.isShorthandPropertyAssignment(parent) || ts.isMethodDeclaration(parent) || ts.isPropertyDeclaration(parent) || ts.isPropertySignature(parent) || ts.isMethodSignature(parent)) && parent.name === node) return !ts.isShorthandPropertyAssignment(parent)
+  return false
+}
+
+function assertAllowedModule(fromPath: string, moduleName: string | undefined, generatedPaths: ReadonlySet<string>): void {
+  if (moduleName === undefined) throw rejected(fromPath, t('values.dynamicImport'))
+  if (ALLOWED_MODULES.has(moduleName) || ALLOWED_PREFIXES.some(prefix => moduleName.startsWith(prefix) && safeSuffix(moduleName.slice(prefix.length)))) return
+  if (moduleName.startsWith('.')) {
+    const target = normalizePath(posix.join(posix.dirname(fromPath), moduleName))
+    const candidates = [target, `${target}/index`]
+    if (candidates.some(candidate => generatedPaths.has(candidate))) return
+  }
+  // `@/X` resolve para `./X` no tsconfig do template (`"@/*": ["./*"]`). Quando
+  // o alvo é um arquivo que o próprio modelo escreveu, a importação compila e é
+  // tão confiável quanto a relativa, que já passava.
+  if (aliasTargetsGeneratedFile(moduleName, generatedPaths)) return
+  throw rejectedLocal(fromPath, moduleName, generatedPaths)
+}
+
+/**
+ * A recusa de uma importação LOCAL diz o caminho certo, quando ele existe.
+ *
+ * Medido em 19/09/2026 na jornada real (qwen2.5-coder:7b): o plano previa
+ * `src/components/Counter.tsx`, o modelo importou `@/components/Counter` — que
+ * pelo tsconfig aponta para `./components/Counter`, fora de `src/` — e as DUAS
+ * rodadas de reparo receberam só "módulo não permitido" e repetiram a mesma
+ * linha. Uma causa que não diz o que fazer não é reparável por um modelo
+ * pequeno. A política NÃO afrouxa: o import errado continua recusado, porque
+ * não compilaria; o que muda é a mensagem.
+ * @param fromPath - o arquivo que importa.
+ * @param moduleName - o que ele importou.
+ * @param generatedPaths - os arquivos desta resposta, sem extensão.
+ * @returns a recusa.
+ */
+export function rejectedLocal(fromPath: string, moduleName: string, generatedPaths: ReadonlySet<string>): GeneratedFileRejectedError {
+  const local = moduleName.startsWith('@/') || moduleName.startsWith('.') || moduleName.startsWith('src/') || moduleName.startsWith('components/')
+  if (!local) return rejected(fromPath, moduleName)
+  const resto = normalizePath(moduleName.replace(/^@\//u, '').replace(/^(?:\.\/)+/u, ''))
+  const alvo = [resto, `src/${resto}`, `${resto}/index`, `src/${resto}/index`].find(candidato => generatedPaths.has(candidato))
+  if (alvo !== undefined) {
+    const relativo = posix.relative(posix.dirname(normalizePath(fromPath)), alvo.replace(/\/index$/u, ''))
+    const sugestao = relativo.startsWith('.') ? relativo : `./${relativo}`
+    return new GeneratedFileRejectedError(t('errors.generatedImportHint', { path: fromPath, module: moduleName, target: alvo, suggestion: sugestao }))
+  }
+  return new GeneratedFileRejectedError(t('errors.generatedImportMissing', { path: fromPath, module: moduleName }))
+}
+
+function literalModule(node: ts.Expression): string | undefined {
+  return ts.isStringLiteralLike(node) ? node.text : undefined
+}
+
+function rejected(path: string, moduleName: string): GeneratedFileRejectedError {
+  return new GeneratedFileRejectedError(t('errors.generatedImport', { path, module: moduleName }))
+}
+
+/**
+ * A recusa, com o LUGAR quando ele é conhecido.
+ *
+ * A linha não é enfeite: este texto é o diagnóstico que volta ao modelo na
+ * rodada de reparo. Medido em 18/09/2026 contra o Ollama do titular — "o
+ * arquivo X tentou usar uma construção não permitida: style" fez o modelo
+ * devolver o MESMO arquivo, byte a byte, com o `style` no lugar. Um rótulo sem
+ * endereço não diz o que mudar, e o que não se sabe mudar não se muda.
+ * @param path - o arquivo gerado.
+ * @param construct - a construção recusada.
+ * @param source - o arquivo analisado, quando a recusa veio do percurso.
+ * @param node - o nó exato, quando ele é conhecido.
+ * @returns o erro pronto para ser lançado.
+ */
+/**
+ * O que USAR no lugar, quando existe um lugar.
+ *
+ * Medido em 18/09/2026 contra o Ollama do titular: com a recusa dizendo apenas
+ * "construção não permitida: style", o `qwen2.5-coder:7b` devolveu o MESMO
+ * arquivo byte a byte em TRÊS rodadas de reparo — sem o artefato anterior, com
+ * ele, e com temperatura 0,4. Não era teimosia nem temperatura: `style` é o
+ * único jeito que o modelo conhecia de posicionar um tabuleiro, e uma proibição
+ * sem alternativa não deixa nada a fazer além de repetir.
+ *
+ * A tabela cobre as famílias em que existe SUBSTITUTO dentro do que o perfil
+ * permite. Onde não existe — `eval`, `use server` —, não há linha, e a recusa
+ * continua só nomeando: inventar uma alternativa que não existe seria pior que
+ * calar, porque mandaria o modelo gastar a tentativa seguinte atrás dela.
+ * @param construct - a construção recusada.
+ * @returns a frase do remédio, ou vazio quando não há um.
+ */
+function remedioPara(construct: string): string {
+  const nome = construct.toLowerCase()
+  if (nome.includes('style')) return t('errors.remedioStyle')
+  if (/^<(?:svg|path|circle|ellipse|line|polygon|polyline|rect|g|text)>$/u.test(nome)) return t('errors.remedioSvg')
+  if (['fetch', 'xmlhttprequest', 'websocket', 'eventsource'].includes(nome)) return t('errors.remedioRede')
+  if (['localstorage', 'sessionstorage', 'indexeddb', 'caches'].includes(nome)) return t('errors.remedioArmazenamento')
+  return ''
+}
+
+function rejectedSource(path: string, construct: string, source?: ts.SourceFile, node?: ts.Node): GeneratedFileRejectedError {
+  if (source === undefined || node === undefined) {
+    return new GeneratedFileRejectedError(t('errors.generatedSource', { path, construct }))
+  }
+  const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source))
+  return new GeneratedFileRejectedError(t('errors.generatedSourceNaLinha', {
+    path, construct, linha: String(line + 1), coluna: String(character + 1), remedio: remedioPara(construct),
+  }))
+}
+
+function normalizePath(path: string): string {
+  return posix.normalize(path.replaceAll('\\', '/')).replace(/\.(?:[cm]?[jt]sx?)$/iu, '')
+}
+
+function safeSuffix(value: string): boolean {
+  return value.length > 0
+    && !value.startsWith('/')
+    && !/[\\?#\u0000-\u001f\u007f]/u.test(value)
+    && !value.split('/').some(part => part === '' || part === '.' || part === '..')
+}
+
+function scriptKind(path: string): ts.ScriptKind {
+  const normalizedPath = path.toLowerCase()
+  if (/\.tsx$/u.test(normalizedPath)) return ts.ScriptKind.TSX
+  if (/\.jsx$/u.test(normalizedPath)) return ts.ScriptKind.JSX
+  if (/\.[cm]?js$/u.test(normalizedPath)) return ts.ScriptKind.JS
+  return ts.ScriptKind.TS
+}
+
+/**
+ * AS REGRAS QUE SERAO APLICADAS, DITAS AO GERADOR (T-10).
+ *
+ * Elas eram escritas DUAS VEZES: uma como prosa no catalogo de prompts, outra
+ * como constante aqui. As duas listas nao conversavam — um modulo acrescentado
+ * a `ALLOWED_MODULES` nunca chegava ao prompt, e uma tag acrescentada a
+ * `FORBIDDEN_JSX_TAGS` tambem nao. O gerador continuava chutando e sendo
+ * recusado, e cada chute custava uma tentativa inteira.
+ *
+ * Segunda verdade classica: duas descricoes do mesmo fato, que divergem no
+ * primeiro conserto de uma delas — e aqui a que diverge em silencio e
+ * justamente a que o modelo le.
+ *
+ * A prosa continua no catalogo (o portao de i18n exige), mas ela recebe A LISTA
+ * como parametro. Existe UMA lista, e ela e a que recusa.
+ */
+/**
+ * AS MESMAS REGRAS, DITAS A QUEM PLANEJA (T-10, segunda metade).
+ *
+ * O gerador precisa saber COMO escrever; o planejador precisa saber O QUE
+ * PODE PROMETER. São duas frases diferentes sobre a mesma lista, e por isso
+ * elas saem da mesma lista.
+ *
+ * O buraco era concreto e caro: nada impedia o plano de prometer "busca o
+ * endereço pelo CEP" ou "manda um e-mail de confirmação". A pessoa lia isso,
+ * APROVAVA, e só na criação o construtor recusava `fetch` — gastando tentativa
+ * atrás de tentativa num plano que ele nunca poderia satisfazer. Quem pagava
+ * era quem não programa: ela aprovou uma promessa que o sistema já sabia ser
+ * impossível quando a mostrou.
+ *
+ * NÃO é uma cópia amigável das regras do gerador: repetir "importe somente
+ * destes módulos" para quem escreve título e critério de aceite seria ruído
+ * que empurra a evidência para fora do teto. O que o planejador recebe é a
+ * CONSEQUÊNCIA — o que o aplicativo gerado consegue e não consegue fazer.
+ * @returns as regras de planejamento, em português.
+ */
+export function planningRules(): readonly string[] {
+  // Derivada da MESMA constante que RECUSA no gerador. Escrever "sem rede" à
+  // mão aqui recriaria a segunda verdade que a `generationRules` acabou de
+  // fechar: no dia em que a lista mudar, esta frase muda junto.
+  const network = [...FORBIDDEN_NETWORK_APIS].sort()
+  return [
+    prompt('prompts.planNoNetwork', { apis: network.join(', ') }),
+    prompt('prompts.planLocalOnly'),
+    // Dita a partir da MESMA regra que recusa a tag (`dynamic JSX tag`). Em
+    // 19/09/2026 o plano de um modelo real previu `Counter.tsx`, `Meta.tsx` e
+    // `ResetButton.tsx`, e a geração — que só aceita como tag os componentes
+    // protegidos do FRIGG — nunca poderia compô-los: o plano aprovado era
+    // impossível de construir, e a pessoa só descobria depois de três tentativas.
+    prompt('prompts.planSemComponenteProprio'),
+  ]
+}
+
+export function generationRules(perfil: PerfilDeGeracao = 'declarativo'): readonly string[] {
+  const modules = [...ALLOWED_MODULES].sort()
+  const prefixes = [...ALLOWED_PREFIXES].sort()
+  const tags = [...FORBIDDEN_JSX_TAGS].sort()
+  const attributes = [...FORBIDDEN_JSX_ATTRIBUTES].sort()
+  const globals = [...FORBIDDEN_GLOBALS, ...FORBIDDEN_NETWORK_APIS].sort()
+  return [
+    prompt('prompts.ruleModules', { modules: modules.join(', '), prefixes: prefixes.join(', ') }),
+    prompt('prompts.ruleTags', { tags: tags.join(', ') }),
+    prompt('prompts.ruleAttributes', { attributes: attributes.join(', ') }),
+    prompt('prompts.ruleGlobals', { globals: globals.join(', ') }),
+    prompt('prompts.ruleUrls'),
+    prompt('prompts.ruleSemComponenteProprio'),
+    /*
+      A regra do PERFIL sai da mesma fonte que o aplica, como todas as outras
+      deste bloco. Dizer "pode usar estado e evento" num perfil declarativo
+      faria o modelo gastar tentativa escrevendo o que o portão recusa em
+      seguida; calar no interativo o faria escrever JSX parado para um pedido
+      que precisa reagir ao clique.
+    */
+    prompt(perfil === 'interativo' ? 'prompts.ruleInterativo' : 'prompts.ruleDeclarativo'),
+    /*
+      E, no interativo, a regra que nasceu de uma recusa medida: o primeiro
+      jogo que um modelo real escreveu aqui tinha nove botões, um `onClick` em
+      cada um e o corpo das funções vazio com um comentário dentro. Dizer isto
+      ao modelo custa uma linha; descobrir depois custa uma tentativa inteira.
+    */
+    ...(perfil === 'interativo' ? [prompt('prompts.ruleSemEsboco')] : []),
+  ]
+}

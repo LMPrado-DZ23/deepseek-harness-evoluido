@@ -1,0 +1,1 @@
+- [Bloqueio Repositório Evoluído](bloqueio-repositorio-evoluido.md) — projeto incompleto, auditoria movida para referência de arquitetura.

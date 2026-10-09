@@ -20,7 +20,7 @@ import {
   versaoVigente,
   versoesAnteriores,
   type RascunhoDaEmpresa,
-} from './empresa'
+} from './Empresa'
 
 const PRONTO: RascunhoDaEmpresa = {
   nome: 'Bolos da Ana',

@@ -1,0 +1,646 @@
+# DZ23 STUDIO production profile. Deterministic/fake providers live only in
+# poc-01b.patch.yml and are never mounted by the release command.
+
+# Telemetria comercial desligada NO PERFIL, e não só na imagem.
+#
+# O bundle upstream monta `session-telemetry-otel` em FEEDBACK_ONLY apontando
+# para harness-telemetry.deepseeksvc.com, e o próprio comentário upstream diz
+# que o export é a cópia crua da sessão, sem regra de redaction. Até aqui, a
+# única coisa que impedia isso era `DSH_TELEMETRY_DISABLED=1` no Dockerfile —
+# quem rodasse o perfil fora daquela imagem (desenvolvimento, prova, WSL)
+# mandava conversa de cliente para um endpoint de terceiro sem saber.
+#
+# Um patch substitui o `config` inteiro da linha, então isto também apaga a
+# URL do exportador. Em `DISABLED` o plugin não constrói pipeline nenhum e nem
+# lê o endpoint. O `DSH_TELEMETRY_DISABLED` da imagem continua, como segunda
+# tranca: aqui não se troca uma tranca por outra.
+- id: session-telemetry-otel
+  config:
+    mode: DISABLED
+
+# Skills empacotadas com o produto.
+#
+# A montagem NAO fica aqui. O bundle `dsh-web-app` desliga de proposito a linha
+# de host `skill-filesystem` (e `tool-skill`) porque, nesta composicao, quem faz
+# a descoberta local de skills e o PRESET do agente. Configurar a linha de host
+# aqui nao teria efeito nenhum e ainda pareceria que teve: a linha continua
+# `disabled` e a expressao nem chega a ser avaliada.
+#
+# A montagem real esta em dsh-home/.agent-presets/dz23-assistant/agent.cordis.yml.
+# A licenca de cada skill de terceiro fica junto da copia, e as obrigacoes estao
+# em dsh-home/skills/NOTICE. Marca nao e concedida por licenca de software: o
+# nome de quem escreveu continua sendo de quem escreveu.
+
+- id: agent-presets
+  config:
+    default: dz23-assistant
+    roots: !!js >-
+      process.env.DZ23_COORDINATOR_PRESET_ROOT
+        ? [{ path: process.env.DZ23_COORDINATOR_PRESET_ROOT, trust: 'system' }]
+        : []
+
+# O MODELO PADRÃO de toda conversa nova do agente.
+#
+# O Harness nasce apontando para a rota oficial da DeepSeek, que exige chave.
+# Medido em 19/09/2026 na instalação do titular (sem chave, com Ollama): a
+# conversa do FRIGG passava de "trabalhando" a "parada" em 116 ms, sem uma
+# palavra — o pedido nunca chegou a modelo nenhum. Com o Ollama configurado
+# (`DZ23_OLLAMA_BASE_URL`), o padrão é ele; `DZ23_AGENT_PROVIDER` e
+# `DZ23_AGENT_MODEL` escolhem outro, e a escolha salva na página de modelos do
+# Harness continua valendo por cima de tudo.
+- id: agent-default-model
+  config:
+    provider: !!js >-
+      process.env.DZ23_AGENT_PROVIDER
+        ?? (process.env.DZ23_OLLAMA_BASE_URL === undefined ? 'deepseek-official' : 'ollama')
+    model: !!js >-
+      process.env.DZ23_AGENT_MODEL
+        ?? (process.env.DZ23_OLLAMA_BASE_URL === undefined ? 'deepseek-v4-flash' : (process.env.DZ23_OLLAMA_MODEL ?? 'qwen3-coder'))
+
+# LEMBRETES AGENDADOS do agente (pedido do titular, 19/09/2026: o FRIGG deve
+# fazer o que o Manus faz). É o overlay oficial do Harness
+# (`apps/cli/config/examples/schedule/cordis.yml`): o agente agenda uma vez,
+# numa hora certa ou a cada N minutos (mínimo 5), e o lembrete chega como
+# mensagem NA MESMA conversa. Sobrevive a reinício; não manda e-mail nem push.
+# Cada ferramenta tem regra em `dz23-studio-policy` (T1).
+- insert:
+    - id: time-context
+      name: '@deepseek-ai/dsh-time-context'
+    - id: schedule
+      name: '@deepseek-ai/dsh-schedule'
+
+# The official DeepSeek route is already supplied by dsh-base under its
+# physical id `deepseek-official`. The routes below are declared
+# OpenAI-compatible routes: no second gateway, every credential by reference.
+#
+# ROTAS POR CHAVE (`chave-*`, pedido do titular em 19/09/2026: "usa as API").
+# Cada uma só é DECLARADA quando a variável da chave existe no ambiente — uma
+# rota sem chave falharia em toda criação e poluiria a lista de conexões com
+# uma linha que ninguém pode consertar pela tela. O nome da variável aparece
+# uma vez só, aqui; o valor nunca passa por este arquivo. O primeiro modelo de
+# cada rota é o que as criações pedem (`modelosPorRota`).
+#
+# O `compat` de cada uma é MEDIDO, não suposto (19/09/2026, pela ponte, com
+# a sonda que manda cada campo que o pi-ai envia): a Mistral recusa `store`
+# (422), o papel `developer` (422) e `reasoning_effort` (400); o Gemini recusa
+# `store` e `prompt_cache_key` (400); o Groq recusa `prompt_cache_key` (400).
+# A primeira criação real pela Mistral parou no 422 do `store`.
+- id: llm-pi-ai
+  config:
+    providers: !!js >-
+      Object.assign({
+        omniroute: {
+          displayName: 'OmniRoute (externo opcional)', api: 'openai-completions',
+          baseURL: process.env.DZ23_OMNIROUTE_BASE_URL ?? 'http://127.0.0.1:20128/v1',
+          apiKeyEnv: 'DZ23_OMNIROUTE_KEY', retryPolicy: { mode: 'normal', maxRetries: 0 },
+          models: [{ id: 'auto', name: 'OmniRoute Auto', contextWindow: 262144, maxTokens: 32768 }],
+        },
+        ollama: {
+          displayName: 'Ollama local', api: 'openai-completions',
+          baseURL: process.env.DZ23_OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'DZ23_OLLAMA_PLACEHOLDER', retryPolicy: { mode: 'normal', maxRetries: 0 },
+          models: [process.env.DZ23_OLLAMA_MODEL ?? 'qwen3-coder',
+              (process.env.DZ23_AGENT_PROVIDER ?? 'ollama') === 'ollama' ? process.env.DZ23_AGENT_MODEL : undefined]
+            .filter((id, i, all) => typeof id === 'string' && id !== '' && all.indexOf(id) === i)
+            .map((id, i) => ({ id, name: i === 0 ? 'Modelo local configurado' : 'Modelo local do agente', contextWindow: 131072, maxTokens: 32768 })),
+        },
+      }, Object.fromEntries([
+        ['chave-mistral', 'Mistral (chave)', 'https://api.mistral.ai/v1', 'MISTRAL_API_KEY',
+          [['codestral-latest', 'Codestral', 256000, 16384], ['mistral-small-latest', 'Mistral Small', 131072, 16384]],
+          { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, supportsLongCacheRetention: false }],
+        ['chave-groq', 'Groq (chave)', 'https://api.groq.com/openai/v1', 'GROQ_API_KEY',
+          [['openai/gpt-oss-120b', 'GPT-OSS 120B', 131072, 32768]],
+          { supportsLongCacheRetention: false }],
+        ['chave-gemini', 'Google Gemini (chave)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'GEMINI_API_KEY',
+          [['gemini-2.5-flash', 'Gemini 2.5 Flash', 1048576, 65536]],
+          { supportsStore: false, supportsLongCacheRetention: false }],
+      ].filter(([, , , chave]) => (process.env[chave] ?? '').trim() !== '')
+        .map(([id, displayName, baseURL, apiKeyEnv, modelos, compat]) => [id, {
+          displayName, api: 'openai-completions', baseURL, apiKeyEnv, compat, retryPolicy: { mode: 'normal', maxRetries: 0 },
+          models: modelos.map(([mid, name, contextWindow, maxTokens]) => ({ id: mid, name, contextWindow, maxTokens })),
+        }])))
+
+- insert:
+    # Providers are registered but never exposed through the generic
+    # tool-subagent. @dz23-studio/agents is the only approved entry point.
+    - id: dz23-subagent-codex
+      name: '@deepseek-ai/dsh-subagent-codex'
+      config:
+        providerName: codex
+        permissionMode: approve-for-me
+        env: {}
+    # O subagente `claude-code` NAO entra no perfil publicado.
+    #
+    # Ele arrasta `@anthropic-ai/claude-agent-sdk`, que e proprietario e nao
+    # redistribuivel: enquanto estivesse aqui, NENHUM artefato publico deste
+    # projeto poderia ser gerado, qualquer que fosse a licenca do codigo
+    # (`pnpm gate:licenses:release` reprova com essa mensagem).
+    #
+    # A capacidade nao foi apagada: o tipo `claude-code` continua no produto e
+    # `providerStates()` passa a devolver NOT_CONFIGURED em vez de OK. Quem tem
+    # licenca propria do SDK recoloca o subagente pelo acrescimo documentado em
+    # `dsh-home/profiles/studio/optional/claude-code.patch.yml`.
+    #
+    # Decisao registrada na ADR-042 (pergunta 2 do requisito C-05).
+    - id: dz23-subagent-spawn-in-process
+      name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+      config:
+        providerName: spawn-in-process
+
+- insert:
+    - id: dz23-studio-policy
+      name: '@dz23-studio/policy'
+      config:
+        requireAuthorizationDeclarations: true
+        rules:
+          bash:
+            source:
+              kind: harness
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          write:
+            source:
+              kind: harness
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          # ── o AGENTE GERAL (preset dz23-assistant, 19/09/2026) ──────────
+          # Leitura e consulta: T0. Coordenação reversível (lista, objetivos,
+          # delegação, web): T1, registrada. Mudar arquivo ou rodar comando: T2,
+          # com a confirmação da pessoa — as regras de `bash` e `write` acima.
+          read:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          read_image:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          glob:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          grep:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          skill:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          job_list:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          job_output:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          get_goal:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          list_agents:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          list_subagent_models:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          ask_user_question:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          todo_write:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          exit_plan_mode:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          web_search:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          web_fetch:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          job_kill:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          create_goal:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          update_goal:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          send_message:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          interrupt_agent:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          subagent:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          workflow:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          ralph:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          # Editar arquivo é escrever: o mesmo nível de `write`.
+          edit:
+            source:
+              kind: harness
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          schedule_create:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          schedule_delete:
+            source:
+              kind: harness
+            inferredTier: T1
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          schedule_list:
+            source:
+              kind: harness
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_agent_start:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_agent_start_sensitive:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T3
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          # CONECTORES na conversa (plugins/mcp-client/src/agent-tools.ts): toda
+          # chamada passa pelo Hub (assinatura, teto, parada, auditoria). Listar
+          # lê; perguntar as ferramentas sobe o servidor sem executar nada;
+          # chamar executa e a pessoa confirma.
+          studio_connector_list:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_connector_tools:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T1
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_connector_call:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_agent_list:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_agent_review:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_agent_cancel:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_agent_apply:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          # Encerrar uma execução parada em UNKNOWN. T3 porque nenhuma prova
+          # técnica sustenta a conclusão: quem decide é uma pessoa, com chave
+          # de acesso e um motivo escrito que fica gravado no registro.
+          studio_agent_resolve_unknown:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T3
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          # A-03: retomar um trabalho interrompido por reinicio. T2, o MESMO de
+          # comecar um trabalho novo, porque e isso que acontece: um assistente
+          # volta a escrever nos arquivos da pessoa. O que muda e de onde ele
+          # parte. Os caminhos vem da reserva do trabalho retomado, nunca de
+          # quem pede — retomar nao e a hora de ampliar o que ele pode escrever.
+          studio_agent_resume:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_team_start:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_team_start_sensitive:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T3
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_team_list:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_team_status:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T0
+            sandboxMode: read-only
+            requiredPermission: project.read
+            scope: project
+          studio_team_continue:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_team_continue_sensitive:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T3
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+          studio_team_cancel:
+            source: { kind: studio, external: false, stableChannel: true }
+            inferredTier: T2
+            sandboxMode: workspace-write
+            requiredPermission: project.write
+            scope: project
+    - id: dz23-studio-identity
+      name: '@dz23-studio/identity'
+    - id: dz23-studio-tenancy
+      name: '@dz23-studio/tenancy'
+    # Autoridade genérica de confirmação de ações sensíveis
+    # (ADR-039-generic-action-approval-authority). Precisa
+    # vir ANTES de quem depende dela: sem este plugin montado, toda operação T3
+    # do assistente recusa com NOT_CONFIGURED em vez de se autoconceder.
+    - id: dz23-studio-action-approval
+      name: '@dz23-studio/action-approval'
+      config:
+        # O Harness resolve `approval/request` SÓ com respondedores compostos no
+        # mesmo processo: sem este, a pergunta cai no 'unavailable' fechado e a
+        # pessoa nunca vê nada. Ligado aqui, a pergunta vira uma confirmação
+        # real na autoridade do Studio. O Harness continua com zero diff.
+        answerHarnessApprovals: true
+        # Um pedido do Harness é sempre escalada de permissão (caixa, rede,
+        # arquivo fora do escopo): exige chave de acesso recente na mesma sessão.
+        harnessTier: T3
+    - id: dz23-studio-agents
+      name: '@dz23-studio/agents'
+      config:
+        coordinatorPreset: dz23-coordinator
+        inProcessCoordinatorPreset: dz23-coordinator-in-process
+        worktreeRoot: !!js process.env.DZ23_AGENT_WORKTREE_ROOT
+    - id: dz23-studio-agent-team
+      name: '@dz23-studio/agent-team'
+    # Motor de missão. Vem DEPOIS de `agent-team` porque a dependência é
+    # invertida: é este plugin que se apresenta ao serviço de equipes e instala
+    # o teto da missão. Sem ele montado, uma equipe que declare missão é
+    # RECUSADA — o padrão seguro é recusar, e não correr sem teto.
+    - id: dz23-studio-mission
+      name: '@dz23-studio/mission'
+    # CONEXÃO PELA LINHA DE COMANDO (pedido do titular, 19/09/2026): as
+    # ferramentas de IA que a pessoa já instalou e em que já entrou com a conta
+    # dela (Claude Code, Gemini CLI, Qwen Code, Codex CLI) viram rotas de
+    # modelo. Monta ANTES de `route-health`, que lê as rotas registradas ao subir.
+    - id: dz23-studio-llm-cli
+      name: '@dz23-studio/llm-cli'
+    - id: dz23-studio-route-health
+      name: '@dz23-studio/route-health'
+    - id: dz23-studio-prompt-to-app
+      name: '@dz23-studio/prompt-to-app'
+      config:
+        runsRoot: /var/lib/dz23-studio/generated-runs
+        logoStoreRoot: /var/lib/dz23-studio/assets
+        # Havia aqui um bloco `builder:` com `imageDigestFile` e
+        # `templateStore`. Nenhuma das três chaves existe em
+        # `PromptToAppPluginConfig` — a configuração real do construtor é
+        # `builderLifecycle`, e digest e template store são lidos do arquivo
+        # próprio do supervisor, não daqui. Era configuração que PARECIA ter
+        # efeito e não tinha, que é a pior espécie: quem operasse este perfil
+        # leria três caminhos e acreditaria que mandou neles.
+        #
+        # Nada foi posto no lugar de propósito: inventar um `builderLifecycle`
+        # aqui mudaria o comportamento do construtor sem que ninguém tenha
+        # decidido isso.
+
+    # A PARADA DE EMERGÊNCIA, que até 16/09/2026 não era montada em lugar
+    # nenhum.
+    #
+    # O plugin existia inteiro — domínio, serviço, rotas, tela, testes — e era
+    # dependência declarada deste perfil. Só que ninguém o montava, e os três
+    # consumidores (`agents`, `integration-hub`, `prompt-to-app`) resolvem o
+    # serviço com `ctx.get('studioEmergencyStop')` e SEGUEM EM FRENTE quando ele
+    # é `undefined`. Isso é deliberado e está certo — um plugin opcional não
+    # pode derrubar o Studio inteiro —, mas o efeito combinado era o pior dos
+    # dois mundos: a tela mostrava o botão, as rotas não existiam e nenhuma
+    # execução era bloqueada.
+    #
+    # Vem DEPOIS de `prompt-to-app` porque registra a própria extensão HTTP no
+    # manipulador de workspace dele.
+    #
+    # `gate:profile-mounts` passa a reprovar qualquer dependência declarada e
+    # não montada, para que isto não volte em silêncio.
+    - id: dz23-studio-emergency-stop
+      name: '@dz23-studio/emergency-stop'
+    # O MODO EMPRESA — `BUS-01`, a porta do bloco inteiro.
+    #
+    # Vem DEPOIS de `prompt-to-app` pela mesma razão da parada de emergência:
+    # as rotas da empresa são registradas no manipulador de workspace dele, e
+    # montado antes ele não teria onde se pendurar.
+    #
+    # Ele NÃO abre inquilino novo: a empresa mora dentro do escopo que
+    # `tenancy` já isola, e toda leitura filtra por `org_id`/`tenant_id` do ator.
+    - id: dz23-studio-business
+      name: '@dz23-studio/business'
+    - id: dz23-studio-preview
+      name: '@dz23-studio/preview'
+      config:
+        publicPort: !!js Number(process.env.DZ23_PUBLIC_PORT ?? '8080')
+        runtimeTimeoutMs: 30000
+        supervisor:
+          enabled: !!js process.env.DZ23_PREVIEW_SUPERVISOR_ENABLED === '1'
+          socketPath: !!js process.env.DZ23_PREVIEW_SUPERVISOR_SOCKET ?? '/run/dz23-preview/supervisor.sock'
+          tokenFile: !!js process.env.DZ23_PREVIEW_SUPERVISOR_TOKEN_FILE ?? '/run/secrets/dz23_preview_supervisor_token'
+          artifactRoot: !!js process.env.DZ23_RUNS_ROOT ?? '/var/lib/dz23-studio/generated-runs'
+          proxySocketRoot: !!js process.env.DZ23_PREVIEW_PROXY_SOCKET_ROOT ?? '/run/dz23-preview-proxies'
+          studioOrigin: !!js process.env.DZ23_PUBLIC_ORIGIN ?? 'http://studio.dz23.localhost:8080'
+          edgeSecretRef: DZ23_EDGE_SECRET
+    # Staging: a pasta onde a versao de teste do aplicativo e publicada.
+    #
+    # O destino e LOCAL na v1.0, e isso e uma decisao: um destino em rede exige
+    # credencial, dominio e autorizacao que este produto nao tem, e um provedor
+    # que fingisse publicar seria pior que a ausencia dele. O que este publica e
+    # real e conferivel - os arquivos ficam la, imutaveis por geracao, com
+    # recibo, e cada arquivo e conferido contra o manifesto atestado ANTES de
+    # ser copiado.
+    #
+    # A raiz fica dentro de `$DSH_HOME`, que ja e onde o produto escreve tudo.
+    # Exigir configuracao aqui deixaria a jornada quebrada por padrao sem ganho
+    # de seguranca nenhum.
+    - id: dz23-studio-staging
+      name: '@dz23-studio/staging'
+      config:
+        root: !!js >-
+          process.env.DZ23_STUDIO_STAGING_ROOT ?? `${process.env.DSH_HOME ?? '.'}/staging`
+        targetRef: !!js process.env.DZ23_STUDIO_STAGING_TARGET ?? 'dz23-target:staging-local'
+    - id: dz23-studio-integration-hub
+      name: '@dz23-studio/integration-hub'
+      config:
+        # Public keys of trusted integration publishers (Ed25519 SPKI, base64). Empty = every manifest is unverified.
+        publisherKeys: !!js JSON.parse(process.env.DZ23_HUB_PUBLISHER_KEYS ?? '{}')
+        # Written here on purpose: an environment variable must not be able to lower the
+        # policy of a running Studio. To develop with unsigned integrations, change this
+        # line to `dev` in this file. A wrong signature is refused on either channel.
+        # `dev` is only accepted on a PERSONAL installation: the Studio bound to loopback
+        # and accepting only loopback hosts and origins. On anything reachable by somebody
+        # else the Studio REFUSES TO START with `dev` instead of serving other people with
+        # a lowered policy.
+        channel: stable
+        smtpTestEnabled: !!js process.env.DZ23_HUB_SMTP_TEST_ENABLED === '1'
+        # Where the generated runs live. Only a run inside this folder can be packaged, and it
+        # must match the runs root of the prompt-to-app plugin — both default to
+        # ~/.dz23-studio/generated-runs. Written here, never read from the environment: this is
+        # the export's only boundary, and a variable must not be able to move it.
+        runsRoot: /var/lib/dz23-studio/generated-runs
+        exportsRoot: /var/lib/dz23-studio/exports
+    # Cliente MCP (X-11). Monta DEPOIS do hub de integrações, que é de quem ele
+    # recebe a chamada — e sem quem ele nem sobe (`inject`).
+    #
+    # `servers` está vazio de propósito: cadastrar um servidor MCP é dizer que
+    # ESTE computador concorda em executar aquele programa, e essa decisão é de
+    # quem administra o Studio. Escrito aqui e nunca lido do ambiente, pelo
+    # mesmo motivo do `channel` acima: uma variável de ambiente não pode
+    # escolher qual programa o Studio executa. Vazio significa que toda chamada
+    # MCP é recusada — e a recusa é auditada, não silenciosa.
+    #
+    # A chave de cada entrada é o `id` do manifesto ASSINADO da integração. Sem
+    # manifesto com assinatura válida a conexão não acontece, cadastro ou não.
+    - id: dz23-studio-mcp-client
+      name: '@dz23-studio/mcp-client'
+      config:
+        servers: {}
+    - id: dz23-studio-web
+      name: '@dz23-studio/web'
+      config:
+        assistantRepositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')
+        # A pasta de trabalho pessoal do assistente, por espaço, quando não há
+        # repositório configurado. Fica dentro de `$DSH_HOME`, onde o produto já
+        # escreve tudo.
+        assistantWorkspaceRoot: !!js >-
+          process.env.DZ23_ASSISTANT_WORKSPACE_ROOT ?? `${process.env.DSH_HOME ?? '.'}/espacos`

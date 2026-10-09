@@ -1,0 +1,31 @@
+{
+  "errors": {
+    "forbidden": "Seu papel não permite esta ação.",
+    "businessNotFound": "Empresa não encontrada neste espaço de trabalho.",
+    "nameRequired": "A empresa precisa de um nome com pelo menos dois caracteres.",
+    "businessArchived": "Esta empresa está arquivada e não recebe plano novo.",
+    "planUnchanged": "Este plano é igual ao que já vale. Mude alguma coisa antes de gravar uma versão nova.",
+    "routeNotFound": "Rota não encontrada.",
+    "jsonRequired": "O pedido precisa ser JSON.",
+    "requestTooLarge": "O pedido é grande demais.",
+    "operationFailed": "Não deu para concluir esta operação agora.",
+    "tasksUnavailable": "Este FRIGG não tem o serviço de tarefas montado, então não dá para criar tarefa a partir da empresa.",
+    "planMissing": "Esta empresa ainda não tem um plano gravado.",
+    "requestRequired": "Escreva o que você quer que seja criado.",
+    "offerNotFound": "Oferta não encontrada nesta empresa.",
+    "offerUnchanged": "Esta oferta é igual à que já vale. Mude alguma coisa antes de gravar uma versão nova.",
+    "offerAlreadyApproved": "Esta versão da oferta já está aprovada.",
+    "offerPriceRequired": "Escreva o preço antes de aprovar: aprovar sem preço publicaria uma oferta que ninguém sabe quanto custa.",
+    "offerCapacityRequired": "Escreva quanto a empresa consegue entregar antes de aprovar: capacidade zero é prometer o que ninguém pode cumprir.",
+    "offerTermsRequired": "Escreva ao menos uma condição antes de aprovar — é ela que vira a condição aprovada."
+  },
+  "briefing": {
+    "empresa": "Esta tarefa é para a empresa {nome}.",
+    "objetivo": "O que a empresa faz: {objetivo}",
+    "publico": "Para quem: {publico}",
+    "oferta": "O que ela entrega: {oferta}",
+    "limitesTitulo": "O que a empresa NÃO faz, e o aplicativo não pode prometer:",
+    "limite": "- {limite}",
+    "nomeSemPedido": "Tarefa de {empresa}"
+  }
+}

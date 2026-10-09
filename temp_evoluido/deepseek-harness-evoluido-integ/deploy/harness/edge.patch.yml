@@ -1,0 +1,93 @@
+# Overlay loaded only when Caddy is the entry point. Values remain references
+# or deployment facts; no secret value is stored in this file.
+- insert:
+    - id: dz23-studio-storage-postgres
+      name: '@dz23-studio/storage-postgres'
+      config:
+        dsnRef: DZ23_POSTGRES_DSN
+        schema: dz23_storage
+        ssl: off
+        poolMax: 4
+        # Scheduled logical backup (P31-B). The directory is a dedicated volume in
+        # docker-compose.yml; empty disables the schedule (operators then run
+        # `pnpm storage:backup-postgres` themselves).
+        backupDirectory: !!js process.env.DZ23_POSTGRES_BACKUP_DIR ?? '/var/lib/dz23-studio-backups'
+        backupIntervalMinutes: !!js Number(process.env.DZ23_POSTGRES_BACKUP_INTERVAL_MINUTES ?? 60)
+        backupKeep: !!js Number(process.env.DZ23_POSTGRES_BACKUP_KEEP ?? 48)
+
+- id: storage-domain
+  config:
+    backend: json
+    routes:
+      studio_hello: postgres
+      studio_identity_users: postgres
+      studio_identity_credentials: postgres
+      studio_identity_sessions: postgres
+      studio_identity_audit: postgres
+      studio_orgs: postgres
+      studio_workspaces: postgres
+      studio_memberships: postgres
+      studio_policy_audit: postgres
+      studio_agent_runs: postgres
+      studio_agent_leases: postgres
+      studio_agent_teams: postgres
+      studio_missions: postgres
+      studio_route_health: postgres
+      studio_staging_releases: postgres
+      studio_action_approvals: postgres
+      studio_emergency_stop: postgres
+      studio_businesses: postgres
+      studio_business_plans: postgres
+      studio_business_tasks: postgres
+      studio_business_offers: postgres
+      studio_previews: postgres
+      studio_preview_admissions: postgres
+      studio_projects: postgres
+      studio_app_specs: postgres
+      studio_design_specs: postgres
+      studio_intake_turns: postgres
+      studio_plans: postgres
+      studio_runs: postgres
+      studio_evidence: postgres
+      studio_approvals: postgres
+      studio_creation_keys: postgres
+      studio_integrations: postgres
+      studio_integration_switches: postgres
+
+- id: connection
+  config:
+    trustedHosts:
+      - !!js process.env.DZ23_PUBLIC_HOST
+
+- id: dz23-studio-preview
+  inject:
+    - studioCapacity
+  config:
+    capacityMode: edge
+
+- id: dz23-studio-identity
+  config:
+    rpId: !!js process.env.DZ23_RP_ID
+    expectedOrigin: !!js process.env.DZ23_PUBLIC_ORIGIN
+    allowedHosts:
+      - !!js process.env.DZ23_PUBLIC_HOST
+    allowedOrigins:
+      - !!js process.env.DZ23_PUBLIC_ORIGIN
+    cookieSecurity: !!js process.env.DZ23_COOKIE_SECURITY ?? 'secure'
+    enrollment:
+      mode: bootstrap-email
+      email: !!js process.env.DZ23_BOOTSTRAP_OWNER_EMAIL
+    edge:
+      required: true
+      secretRef: DZ23_EDGE_SECRET
+    email:
+      kind: smtp
+      secretRef: DZ23_SMTP_SECRET
+
+- id: dz23-studio-web
+  config:
+    allowedHosts:
+      - !!js process.env.DZ23_PUBLIC_HOST
+    allowedOrigins:
+      - !!js process.env.DZ23_PUBLIC_ORIGIN
+    assistantRepositories: !!js JSON.parse(process.env.DZ23_ASSISTANT_REPOSITORIES ?? '[]')

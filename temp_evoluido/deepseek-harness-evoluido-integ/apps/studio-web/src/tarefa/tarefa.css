@@ -1,0 +1,849 @@
+/*
+  A tarefa como conversa — a estrutura principal do workspace aprovado.
+
+  As medidas seguem o contrato visual do pacote de correção: coluna central
+  legível, compositor inferior no mesmo alinhamento da conversa, superfícies
+  discretas com borda fina, grafite neutro. O contrato é explícito sobre o que
+  NÃO cabe aqui: "não use grandes painéis navy, glow, novo dashboard ou uma
+  interpretação genérica de premium". Por isso não há caixa colorida por
+  mensagem, nem sombra, nem gradiente: o que separa um lance do outro é espaço e
+  uma borda de 1px, como na referência.
+
+  Os tons vêm de `theme.css`. O contrato mede o fundo da referência perto de
+  #191919 e diz, na mesma frase, para NÃO tratar amostra comprimida como prova
+  do token original — então os tokens do produto continuam valendo e o que se
+  ajusta aqui é densidade e escala, que é o que dá para conferir renderizando.
+*/
+
+.dz-tarefa {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  height: calc(100vh - var(--dz-topbar));
+  min-height: 0;
+}
+
+/* Com painel aberto a conversa ENCOLHE, não é coberta: é o que F17 mostra. */
+.dz-tarefa-com-painel {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 40%);
+}
+
+.dz-tarefa-conversa {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /*
+    A conversa rola por dentro. Numa tela BAIXA (notebook com escala de 150%:
+    495px úteis) conversa + ações + compositor não cabem juntos; aí a coluna
+    inteira rola e o compositor fica preso embaixo — nada é cortado.
+  */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/*
+  O título da tarefa: presente no documento, discreto na tela.
+
+  A referência não põe um título grande sobre a conversa — o nome da tarefa
+  aparece no topo da casca. Mas a página precisa de um `<h1>`, e escondê-lo com
+  `display: none` o tiraria também do leitor de tela, que é justamente quem
+  precisa dele. Então ele fica: pequeno, na cor secundária, no lugar onde a
+  referência mostra o contexto da tarefa.
+*/
+.dz-tarefa-titulo {
+  width: 100%;
+  max-width: var(--dz-content-max);
+  margin: 0 auto;
+  padding: var(--dz-4) var(--dz-5) 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--dz-text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.dz-conversa {
+  flex: 1 1 auto;
+  /* A conversa nunca some: numa tela baixa (notebook com escala de 150%)
+     ela chegou a ficar com 32px, espremida pelas ações e pelo compositor. */
+  min-height: min(12rem, 38vh);
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: var(--dz-4) var(--dz-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-5);
+}
+
+/*
+  A coluna legível. A referência mantém o texto numa medida de leitura e o
+  compositor no MESMO alinhamento — por isso a largura máxima e a centragem
+  aparecem nos dois, e não só na conversa.
+*/
+.dz-lance,
+.dz-tarefa-acoes,
+.dz-compositor-inferior {
+  width: 100%;
+  max-width: var(--dz-content-max);
+  margin-inline: auto;
+}
+
+.dz-lance-autor {
+  margin: 0 0 var(--dz-2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--dz-text-secondary);
+  letter-spacing: 0.01em;
+}
+
+.dz-lance-texto {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* O pedido da pessoa tem um filete à esquerda; o do estúdio não tem nada. */
+.dz-lance-pessoa {
+  border-left: 2px solid var(--dz-border);
+  padding-left: var(--dz-4);
+}
+
+.dz-lance-nota {
+  margin: var(--dz-2) 0 0;
+  font-size: 0.8125rem;
+  color: var(--dz-text-secondary);
+}
+
+/*
+  Uma AÇÃO pequena dentro de um lance — corrigir uma resposta. É texto com
+  sublinhado, e não botão cheio: ela é secundária à conversa, e um botão
+  grande em cada resposta disputaria atenção com o compositor. A área de toque
+  continua de 44px de altura pelo preenchimento.
+*/
+.dz-lance-acao {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: var(--dz-1);
+  padding: 0 var(--dz-2);
+  border: 0;
+  background: transparent;
+  color: var(--dz-accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.dz-lance-acao:focus-visible { outline: 3px solid var(--dz-focus); outline-offset: 2px; }
+
+/* Os blocos: plano, trabalho e resultado. Discretos, com borda fina. */
+.dz-bloco {
+  margin-top: var(--dz-3);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+  padding: var(--dz-3) var(--dz-4);
+}
+
+.dz-bloco-plano > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style-position: outside;
+}
+
+.dz-plano-fatias {
+  margin: var(--dz-3) 0 0;
+  padding-left: var(--dz-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-4);
+}
+
+.dz-plano-fatias p { margin: var(--dz-1) 0; line-height: 1.55; }
+.dz-plano-fatias ul { margin: var(--dz-1) 0 0; padding-left: var(--dz-5); color: var(--dz-text-secondary); }
+
+/* O progresso é COMPACTO: uma linha, e os passos só quando existem. */
+.dz-trabalho-linha,
+.dz-artefato-linha,
+.dz-artefato-provas {
+  display: flex;
+  align-items: center;
+  gap: var(--dz-2);
+  margin: 0;
+}
+
+.dz-trabalho-linha svg,
+.dz-artefato-linha svg,
+.dz-artefato-provas svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.dz-trabalho-linha .dz-lance-nota { margin: 0; margin-left: auto; }
+
+.dz-passos {
+  margin: var(--dz-2) 0 0;
+  padding-left: var(--dz-5);
+  font-size: 0.875rem;
+  color: var(--dz-text-secondary);
+}
+
+.dz-girando { animation: dz-girar 1.4s linear infinite; }
+@keyframes dz-girar { to { transform: rotate(360deg); } }
+
+/*
+  A animação é a única do arquivo e existe porque "em andamento" precisa parecer
+  em andamento. Quem pede menos movimento não recebe nenhum.
+*/
+@media (prefers-reduced-motion: reduce) {
+  .dz-girando { animation: none; }
+}
+
+.dz-artefato-provas { margin-top: var(--dz-2); color: var(--dz-text-secondary); font-size: 0.875rem; }
+.dz-artefato-atencao { border-color: var(--dz-warning); }
+
+.dz-artefato-abrir {
+  margin-top: var(--dz-3);
+  background: var(--dz-surface-active);
+  color: var(--dz-text);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius-pill);
+  padding: var(--dz-2) var(--dz-4);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.dz-artefato-abrir:hover { background: var(--dz-border); }
+
+.dz-tarefa-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dz-3);
+  padding: 0 var(--dz-5) var(--dz-3);
+}
+
+/* O compositor inferior. Reserva espaço real; nunca cobre o último lance. */
+.dz-compositor-inferior {
+  flex: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 0 auto;
+  padding: var(--dz-3) var(--dz-5) var(--dz-5);
+}
+
+.dz-compositor-inferior textarea {
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+  background: var(--dz-surface);
+  color: var(--dz-text);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius-lg);
+  padding: var(--dz-3) var(--dz-4);
+  font: inherit;
+  line-height: 1.55;
+}
+
+.dz-compositor-inferior textarea::placeholder { color: var(--dz-text-secondary); }
+
+.dz-compositor-aviso {
+  margin: 0 0 var(--dz-2);
+  font-size: 0.875rem;
+  color: var(--dz-warning);
+}
+
+.dz-compositor-inferior .dz-compositor-rodape {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  margin-top: var(--dz-2);
+}
+
+.dz-enviar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dz-2);
+  background: var(--dz-action);
+  color: #fff;
+  border: none;
+  border-radius: var(--dz-radius-pill);
+  padding: var(--dz-2) var(--dz-4);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dz-enviar svg { width: 18px; height: 18px; }
+.dz-enviar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* O painel contextual: abre ao lado, fecha e devolve a conversa como estava. */
+.dz-painel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--dz-border);
+  background: var(--dz-sidebar);
+}
+
+.dz-painel-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  padding: var(--dz-3) var(--dz-4);
+  border-bottom: 1px solid var(--dz-border);
+}
+
+.dz-painel-topo h2 { margin: 0; font-size: 1rem; }
+
+.dz-painel-fechar {
+  background: none;
+  border: none;
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+  padding: var(--dz-1);
+  display: inline-flex;
+}
+
+.dz-painel-fechar:hover { color: var(--dz-text); }
+.dz-painel-fechar svg { width: 20px; height: 20px; }
+
+.dz-painel-corpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--dz-4);
+}
+
+/*
+  Abaixo de 1024px o painel deixa de ser COLUNA e passa a ser LINHA: ele entra
+  embaixo da conversa, cada um com a sua rolagem. Duas colunas de 300px não são
+  leitura, são duas tiras.
+
+  A primeira versão escondia a conversa com `display: none`, e isso era um
+  defeito de verdade, não uma escolha de layout: o `<main>` e o `<h1>` da
+  página moram dentro dela, e escondê-los deixava a página inteira sem marco
+  principal e sem título — o axe reprovou exatamente isso, no tamanho de
+  celular, com o painel aberto. Empilhar mantém as duas coisas no documento e
+  ainda deixa a pessoa ver de onde o painel veio.
+*/
+@media (max-width: 1024px) {
+  .dz-tarefa-com-painel {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .dz-painel {
+    border-left: none;
+    border-top: 1px solid var(--dz-border);
+  }
+}
+
+/*
+  As ações de estado, abaixo da conversa.
+
+  Elas eram telas: herói com estrela, título grande e caixa azul-marinho —
+  exatamente o que a decisão de produto listou como "não entregar de novo".
+  Aqui viram uma linha: o que vai acontecer, à esquerda, e o botão à direita,
+  no mesmo alinhamento da conversa e do compositor.
+
+  NENHUMA classe da folha antiga é usada por elas. `task-card`, `heading` e
+  `button-row` trazem junto a moldura e a tipografia da tela que saiu; reusá-las
+  seria repintar o assistente em vez de trocá-lo.
+*/
+.dz-acao {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--dz-3);
+  width: 100%;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+  padding: var(--dz-3) var(--dz-4);
+}
+
+.dz-acao-texto {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-1);
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.dz-acao-texto span { color: var(--dz-text-secondary); font-size: 0.875rem; }
+
+/* O botão é um botão: altura de linha, canto arredondado, sem virar círculo. */
+.dz-acao-botao,
+.dz-acao-botao-secundario,
+.dz-tarefa-acoes .dz-artefato-abrir {
+  flex: none;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  aspect-ratio: auto;
+  background: var(--dz-action);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: var(--dz-radius-pill);
+  padding: var(--dz-2) var(--dz-4);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: normal;
+}
+
+/*
+  O nome da variante é UMA palavra, sem espaço, e isso não é estilo: o portão de
+  idioma confere literais com espaço, e `"dz-acao-botao secundario"` casava com
+  a regra de texto em português. Um nome de classe não é texto de catálogo, e a
+  saída certa é não escrevê-lo com espaço — e não abrir dispensa no portão.
+*/
+.dz-tarefa-acoes .dz-artefato-abrir,
+.dz-acao-botao-secundario {
+  background: var(--dz-surface-active);
+  color: var(--dz-text);
+  border-color: var(--dz-border);
+}
+
+.dz-acao-botao:disabled,
+.dz-acao-botao-secundario:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* A área das ações empilha em coluna: uma ação por linha, largura da conversa. */
+.dz-tarefa-acoes {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Uma linha de botões soltos: largura do texto, quebrando quando não cabem. */
+.dz-acao-linha {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dz-3);
+  width: 100%;
+}
+
+.dz-acao-linha .dz-acao-botao,
+.dz-acao-linha .dz-acao-botao-secundario { flex: 0 0 auto; }
+
+/* A marca do fim da conversa não ocupa espaço nem é lida. */
+.dz-fim { height: 0; margin: 0; padding: 0; }
+
+
+/*
+  O LANCE com avatar, como a referência mostra: a marca à esquerda, o conteúdo
+  à direita, e a fala da pessoa numa bolha discreta. O que havia era um filete
+  vertical — legível, mas nada parecido com a referência.
+*/
+.dz-lance {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: var(--dz-3);
+  align-items: start;
+}
+
+.dz-lance-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  flex: none;
+}
+
+.dz-lance-pessoa .dz-lance-avatar { background: var(--dz-action); color: #fff; }
+.dz-lance-estudio .dz-lance-avatar { background: var(--dz-surface-active); color: var(--dz-accent); border: 1px solid var(--dz-border); }
+
+.dz-lance-corpo { min-width: 0; }
+
+/*
+  A fala da PESSOA ganha bolha; a do estúdio não. É a assimetria da referência,
+  e ela tem função: a resposta é longa e uma bolha em volta de texto longo vira
+  uma parede: o pedido é curto e a bolha o distingue do resto.
+*/
+.dz-lance-pessoa {
+  border-left: none;
+  padding-left: 0;
+}
+
+.dz-lance-pessoa .dz-lance-corpo {
+  background: var(--dz-surface);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  padding: var(--dz-3) var(--dz-4);
+}
+
+/* O PROJETO no compositor, como o vídeo mostra: um chip discreto. */
+.dz-compositor-projeto {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dz-2);
+  min-width: 0;
+  max-width: 45%;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius-pill);
+  padding: var(--dz-1) var(--dz-3);
+  color: var(--dz-text-secondary);
+  font-size: 0.8125rem;
+}
+
+.dz-compositor-projeto svg { width: 14px; height: 14px; flex: none; }
+.dz-compositor-projeto > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* O compositor da tarefa usa a MESMA pílula da home: um só compositor visual. */
+.dz-compositor-inferior {
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius-lg);
+  background: var(--dz-surface);
+  padding: var(--dz-3) var(--dz-4);
+  margin-bottom: var(--dz-5);
+}
+
+.dz-compositor-inferior textarea {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  resize: none;
+}
+
+.dz-compositor-inferior textarea:focus { outline: none; }
+.dz-compositor-inferior:focus-within { border-color: var(--dz-focus); }
+.dz-compositor-inferior .dz-contador { margin-left: auto; color: var(--dz-text-secondary); font-size: 0.8125rem; }
+
+/*
+  O aviso NEUTRO do compositor: ele diz o que o envio vai fazer, e isso não é
+  alerta. Amarelo aqui faria "vai virar um pedido de alteração" parecer erro.
+*/
+.dz-compositor-aviso-neutro { color: var(--dz-text-secondary); }
+
+/*
+  A ESCOLHA DO ENVIO — perguntar ou fazer o que o momento espera.
+
+  Dois rádios de verdade, desenhados como pílulas. O `<input>` continua no
+  documento e visível para o leitor de tela: escondê-lo com `display: none`
+  tiraria o grupo do teclado, que é o oposto do que um grupo de escolha
+  exclusiva precisa. Ele é encolhido e posicionado atrás do rótulo, que é
+  grande o bastante para ser o alvo do toque.
+*/
+.dz-compositor-intencao {
+  display: flex;
+  gap: var(--dz-2);
+  margin: 0 0 var(--dz-2);
+  padding: 0;
+  border: 0;
+}
+
+.dz-intencao-opcao {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dz-1);
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--dz-border);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+}
+
+.dz-intencao-opcao input {
+  /* Pequeno, e ainda assim focalizável: o anel de foco precisa aparecer. */
+  width: 0.75rem;
+  height: 0.75rem;
+  margin: 0;
+  accent-color: var(--dz-accent);
+}
+
+.dz-intencao-marcada {
+  border-color: var(--dz-accent);
+  color: var(--dz-text);
+  background: var(--dz-surface-active);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dz-intencao-opcao { transition: border-color 120ms ease, color 120ms ease; }
+}
+
+/*
+  OS MENUS DO COMPOSITOR (F08/F09).
+
+  Ancorados no rodapé do compositor e abertos para CIMA, porque o compositor
+  mora embaixo: abrir para baixo jogaria a lista para fora da janela.
+*/
+.dz-menu-compositor { position: relative; display: inline-flex; }
+
+.dz-menu-botao {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--dz-text-secondary);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.dz-menu-botao:hover { border-color: var(--dz-border); }
+.dz-menu-botao svg { width: 1rem; height: 1rem; }
+.dz-menu-conta { font-variant-numeric: tabular-nums; }
+
+.dz-menu-caixa {
+  position: absolute;
+  bottom: calc(100% + var(--dz-2));
+  left: 0;
+  z-index: 20;
+  min-width: 17rem;
+  padding: var(--dz-3);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface-active);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+
+.dz-menu-itens { margin: 0 0 var(--dz-2); padding: 0; list-style: none; }
+
+.dz-menu-itens li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  padding: 0.2rem 0;
+}
+
+.dz-menu-nome { color: var(--dz-text); }
+.dz-menu-estado { color: var(--dz-text-secondary); font-size: 0.75rem; }
+.dz-menu-ligada { color: var(--dz-accent); }
+.dz-menu-vazio, .dz-menu-restantes { margin: 0 0 var(--dz-2); color: var(--dz-text-secondary); font-size: 0.8125rem; }
+.dz-menu-gerenciar { color: var(--dz-accent); font-size: 0.8125rem; }
+
+/* USO E CUSTOS da tarefa, no painel contextual. */
+.dz-uso-linhas { margin: 0; }
+.dz-uso-linhas > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--dz-border);
+}
+.dz-uso-linhas dt { color: var(--dz-text-secondary); font-size: 0.875rem; }
+.dz-uso-linhas dd { margin: 0; font-variant-numeric: tabular-nums; }
+.dz-uso-aviso { margin: var(--dz-3) 0 0; color: var(--dz-warning); font-size: 0.875rem; }
+.dz-uso-limite { margin: var(--dz-3) 0 0; color: var(--dz-text-secondary); font-size: 0.8125rem; }
+
+/*
+  A PRÉVIA ao lado da conversa: grade de três colunas — conversa, divisor,
+  painel. A largura do painel vem de `--dz-previa-largura`, que o `App` calcula
+  a partir do arrasto e que `divisaoUtil` já manteve dentro dos limites úteis.
+
+  Expandido ZERA a coluna da conversa em vez de escondê-la. A diferença não é de
+  estilo: o `<main>` e o `<h1>` da página moram na conversa, e `display: none`
+  deixaria a página sem marco principal e sem título — foi o que o axe reprovou
+  quando o painel abria no tamanho de celular.
+*/
+.dz-tarefa-com-painel {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, var(--dz-previa-largura, 40%));
+}
+
+.dz-tarefa-expandida {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+/*
+  O divisor mora DENTRO do painel, encostado na borda esquerda dele. Ele era
+  irmão das duas colunas, e o axe reprovou `region`: um elemento com papel, fora
+  de qualquer marco, não é alcançável por navegação de região.
+*/
+.dz-painel { position: relative; }
+
+.dz-painel-divisor {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: -3px;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.dz-painel-divisor:hover { background: var(--dz-border); }
+
+.dz-painel-divisor:focus-visible {
+  outline: 2px solid var(--dz-accent, currentColor);
+  outline-offset: 0;
+}
+
+.dz-previa {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-3);
+  min-height: 0;
+}
+
+.dz-previa-topo { display: flex; flex-direction: column; gap: var(--dz-2); }
+.dz-previa-situacao { display: flex; flex-direction: column; gap: var(--dz-1); margin: 0; }
+.dz-previa-situacao span { color: var(--dz-text-secondary); font-size: 0.875rem; }
+
+.dz-previa-anterior {
+  margin: 0;
+  padding: var(--dz-2) var(--dz-3);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius, 8px);
+  font-size: 0.875rem;
+}
+
+.dz-previa-controles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dz-2);
+}
+
+.dz-previa-controles button,
+.dz-previa-separado {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dz-1);
+  background: none;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius, 8px);
+  color: var(--dz-text-secondary);
+  padding: var(--dz-1) var(--dz-2);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  text-decoration: none;
+}
+
+.dz-previa-controles button:hover,
+.dz-previa-separado:hover { color: var(--dz-text); }
+.dz-previa-controles svg { width: 16px; height: 16px; }
+.dz-previa-viewport button[aria-pressed='true'] { color: var(--dz-text); background: var(--dz-surface, transparent); }
+
+.dz-previa-rota { display: flex; align-items: center; gap: var(--dz-1); flex: 1 1 12rem; min-width: 8rem; }
+.dz-previa-rota label { font-size: 0.8125rem; color: var(--dz-text-secondary); }
+.dz-previa-rota input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--dz-bg, transparent);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius, 8px);
+  color: inherit;
+  padding: var(--dz-1) var(--dz-2);
+  font-size: 0.8125rem;
+}
+
+.dz-previa-ajuda { margin: 0; font-size: 0.8125rem; color: var(--dz-text-secondary); }
+.dz-previa-recusa { margin: 0; font-size: 0.8125rem; }
+
+.dz-previa-quadro {
+  flex: 1 1 auto;
+  min-height: 18rem;
+  width: 100%;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius, 8px);
+  overflow: hidden;
+  background: #fff;
+}
+
+.dz-previa-quadro iframe { width: 100%; height: 100%; border: none; display: block; }
+
+.dz-previa-erro { margin: 0; font-size: 0.8125rem; }
+.dz-previa-erro code { overflow-wrap: anywhere; }
+
+.dz-previa-rodape { display: flex; flex-direction: column; gap: var(--dz-2); }
+
+/*
+  No CELULAR não há divisão: há troca. O divisor some — arrastar 6 pixels com o
+  dedo não é uma operação — e a coluna do painel volta a ser uma linha, como já
+  valia para os outros painéis.
+*/
+@media (max-width: 1024px) {
+  .dz-tarefa-com-painel,
+  .dz-tarefa-expandida {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .dz-painel-divisor { display: none; }
+}
+
+/* As ABAS do painel de prévia. */
+.dz-previa-abas {
+  display: flex;
+  gap: var(--dz-1);
+  border-bottom: 1px solid var(--dz-border);
+}
+
+.dz-previa-abas button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--dz-text-secondary);
+  cursor: pointer;
+  padding: var(--dz-2) var(--dz-3);
+  font-size: 0.875rem;
+}
+
+.dz-previa-abas button[aria-selected='true'] {
+  color: var(--dz-text);
+  border-bottom-color: currentColor;
+}
+
+.dz-previa-conteudo { display: flex; flex-direction: column; gap: var(--dz-3); min-height: 0; flex: 1 1 auto; }
+
+.dz-previa-arquivos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--dz-2); }
+.dz-previa-arquivos > li > button {
+  display: flex;
+  align-items: baseline;
+  gap: var(--dz-2);
+  width: 100%;
+  background: none;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius, 8px);
+  color: inherit;
+  cursor: pointer;
+  padding: var(--dz-2) var(--dz-3);
+  text-align: start;
+}
+
+.dz-previa-arquivos small { color: var(--dz-text-secondary); font-size: 0.75rem; }
+
+.dz-previa-codigo {
+  margin: var(--dz-2) 0 0;
+  padding: var(--dz-3);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius, 8px);
+  overflow: auto;
+  max-height: 24rem;
+  font-size: 0.8125rem;
+}
+
+/* As ações ocupam o que precisam: com a parada em uma linha, elas cabem. */
+.dz-tarefa-acoes { flex: none; }
+
+/*
+  O compositor da TAREFA começa com duas linhas. O da home herdava 116px de
+  altura mínima (home.css), e numa tela baixa essa caixa vazia tomava o lugar
+  da conversa. Ele cresce com o texto até um terço da tela.
+*/
+.dz-compositor-inferior textarea {
+  /* Sabotar para 116px SOBREVIVE de propósito: com a coluna rolando, uma
+     caixa mais alta não esconde nada — só desperdiça espaço. É gosto, não
+     defeito que um teste deva prender. */
+  min-height: 3.2em;
+  max-height: 33vh;
+  field-sizing: content;
+}

@@ -1,0 +1,163 @@
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import {
+  authenticatedMutation,
+  assertRequestTrust,
+  singleHeader,
+  IdentityError,
+  type StudioIdentityService,
+} from '@dz23-studio/identity'
+import {
+  assertRouteContracts,
+  roleAllows,
+  studioRoleSchema,
+  type StudioPermission,
+  type StudioRouteContract,
+} from '@dz23-studio/policy'
+import { z } from 'zod'
+import { StudioTenancyService, TenancyError } from './service.js'
+import { t } from './i18n.js'
+
+const JSON_LIMIT = 64 * 1024
+const workspaceSchema = z.object({ name: z.string().min(1).max(120) }).strict()
+const invitationSchema = z.object({ workspace_id: z.string().min(1), email: z.email(), role: studioRoleSchema }).strict()
+const acceptSchema = z.object({ token: z.string().min(20) }).strict()
+const roleSchema = z.object({ role: studioRoleSchema }).strict()
+
+/**
+ * O que cada rota declara — e ONDE a permissão é de fato conferida.
+ *
+ * O campo `permission` é DOCUMENTO, e não porta. A porta é o serviço, em
+ * `#authorize(actor, workspaceId, permission)`, e tem de ser lá por uma razão
+ * de modelo: papel neste produto é POR ESPAÇO DE TRABALHO, não por pessoa.
+ * A mesma pessoa é dona de um espaço e leitora de outro, e a rota não sabe de
+ * qual espaço se trata antes de ler o corpo (`/invitations`) ou de resolver a
+ * matrícula (`/memberships/:membershipId`) — e em `/workspaces` não há espaço
+ * nenhum, porque a resposta é justamente a lista deles.
+ *
+ * Isto está escrito porque havia uma função `authorizeRoute(role, permission)`
+ * aqui, exportada, testada e NUNCA chamada em produção: uma revisão adversarial
+ * apontou, com razão, que ela era código de autorização morto. Ela foi
+ * REMOVIDA em vez de ligada — ligá-la exigiria um papel por pessoa, que este
+ * produto não tem, e produziria uma conferência contra o papel errado. Função
+ * de autorização que não roda é pior que nenhuma: ela faz quem lê o arquivo
+ * acreditar que a rota confere algo que só o serviço confere.
+ */
+export const TENANCY_ROUTE_CONTRACTS = [
+  { method: 'GET', path: '/workspaces', access: 'authorized', permission: 'workspace.read', scope: 'org' },
+  { method: 'POST', path: '/workspaces', access: 'authorized', permission: 'workspace.create', scope: 'org' },
+  { method: 'GET', path: '/workspaces/:workspaceId/members', access: 'authorized', permission: 'members.read', scope: 'workspace' },
+  { method: 'POST', path: '/invitations', access: 'authorized', permission: 'members.manage', scope: 'workspace' },
+  { method: 'POST', path: '/invitations/accept', access: 'authenticated', permission: null, scope: 'invitation' },
+  { method: 'PATCH', path: '/memberships/:membershipId', access: 'authorized', permission: 'members.manage', scope: 'workspace' },
+] as const satisfies readonly StudioRouteContract[]
+
+assertRouteContracts(TENANCY_ROUTE_CONTRACTS)
+
+export interface TenancyHttpConfig {
+  readonly service: StudioTenancyService
+  readonly identity: StudioIdentityService
+  readonly allowedHosts: readonly string[]
+  readonly allowedOrigins: readonly string[]
+}
+
+export function createTenancyHttpHandler(config: TenancyHttpConfig) {
+  return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    try {
+      assertRequestTrust(request, config)
+      const path = new URL(request.url ?? '/', 'http://local').pathname
+      const route = path.slice('/api/studio/tenancy'.length)
+      const match = matchRoute(request.method, route)
+      if (match === undefined) return json(response, 404, { error: t('http.rotaNaoEncontrada') })
+      const session = await authenticatedMutation(request, config.identity, response)
+      const actor = config.service.actorFromSession(session)
+
+      if (request.method === 'GET' && route === '/workspaces') {
+        return json(response, 200, { workspaces: config.service.listWorkspaces(actor) })
+      }
+      if (request.method === 'POST' && route === '/workspaces') {
+        const body = workspaceSchema.parse(await readJson(request))
+        return json(response, 201, { workspace: await config.service.createWorkspace(actor, body.name) })
+      }
+      if (request.method === 'GET' && match.template === '/workspaces/:workspaceId/members') {
+        return json(response, 200, { members: config.service.listMembers(actor, match.parameter) })
+      }
+      if (request.method === 'POST' && route === '/invitations') {
+        const body = invitationSchema.parse(await readJson(request))
+        const result = await config.service.invite(actor, body.workspace_id, body.email, body.role)
+        return json(response, 202, { invitation_id: result.invitation.invitation_id })
+      }
+      if (request.method === 'POST' && route === '/invitations/accept') {
+        const body = acceptSchema.parse(await readJson(request))
+        const user = config.identity.userForSession(session)
+        return json(response, 200, { membership: await config.service.acceptInvitation(user, body.token) })
+      }
+      const body = roleSchema.parse(await readJson(request))
+      return json(response, 200, { membership: await config.service.changeRole(actor, match.parameter, body.role) })
+    } catch (error) {
+      const status = error instanceof TenancyError
+        ? error.code === 'not-found' ? 404 : error.code === 'forbidden' || error.code === 'last-owner' ? 403 : 400
+        : error instanceof IdentityError ? error.code === 'locked' ? 429 : 401
+        : 400
+      // Só texto de CATÁLOGO chega ao cliente.
+      //
+      // Antes qualquer erro não previsto — `ZodError`, falha do armazenamento,
+      // `TypeError` interno — caía no `400` e tinha a mensagem repassada ao
+      // navegador. Uma falha de `putMembership` vinda do disco carrega caminho
+      // de arquivo do servidor; um `ZodError` carrega o JSON das issues. O
+      // plugin vizinho já defendia exatamente isso, e esta rota tinha ficado
+      // de fora.
+      //
+      // Os dois erros ABAIXO são nossos e já falam a língua da pessoa; o resto
+      // vira uma frase que não conta nada sobre o servidor.
+      const catalogued = error instanceof TenancyError || error instanceof IdentityError
+      return json(response, status, { error: catalogued ? error.message : t('http.solicitacaoInvalida') })
+    }
+  }
+}
+
+function matchRoute(method: string | undefined, path: string): { contract: StudioRouteContract; template: string; parameter: string } | undefined {
+  for (const contract of TENANCY_ROUTE_CONTRACTS) {
+    if (contract.method !== method) continue
+    if (!contract.path.includes(':')) {
+      if (contract.path === path) return { contract, template: contract.path, parameter: '' }
+      continue
+    }
+    const [before, after] = contract.path.split(/:[^/]+/u)
+    if (path.startsWith(before!) && path.endsWith(after!) && path.length > before!.length + after!.length) {
+      const parameter = path.slice(before!.length, after === '' ? undefined : -after!.length)
+      // Um parâmetro NÃO atravessa barra. Sem isto,
+      // `PATCH /memberships/a/b/c` casava com `/memberships/:membershipId` e
+      // entregava `a/b/c` como identificador, e `GET /workspaces/a/b/members`
+      // entregava `a/b`. Hoje as buscas são por igualdade exata e nada passa —
+      // mas a rota aceitava, calada, caminhos que o contrato não descreve, e
+      // essa folga vira problema no dia em que um identificador virar prefixo
+      // de busca, chave de arquivo ou parte de caminho.
+      if (parameter.includes('/')) continue
+      return { contract, template: contract.path, parameter }
+    }
+  }
+  return undefined
+}
+
+async function readJson(request: IncomingMessage): Promise<unknown> {
+  if (!singleHeader(request.headers['content-type'])?.toLowerCase().startsWith('application/json')) throw new Error(t('http.jsonBodyRequired'))
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += bytes.length
+    if (size > JSON_LIMIT) throw new Error(t('http.solicitacaoGrandeDemais'))
+    chunks.push(bytes)
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+}
+
+function json(response: ServerResponse, status: number, body: unknown): void {
+  if (response.writableEnded) return
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+  })
+  response.end(JSON.stringify(body))
+}

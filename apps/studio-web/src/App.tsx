@@ -5,7 +5,7 @@ import { PendingButton } from './PendingButton'
 import { STUDIO_CATEGORIES, type Category } from './categories'
 import t from './i18n/pt-BR.json'
 import { categoryGuess, type CategoryGuess } from './categorySuggestion'
-import type { RunStepRecord } from './buildSteps'
+import type { RunStepRecord } from './buildSteps-utils'
 import { projectNameFromBrief } from './projectName'
 import { impressaoDoEnvioLocal, intencaoDeEnvio, intencaoPorImpressao, type IntencaoDeCriacao } from './creationIntent'
 

@@ -1,0 +1,300 @@
+/*
+  A home da referência: título centrado, compositor amplo, atalhos em pílula.
+
+  O espaço em volta é conteúdo. A especificação (seção 2) diz que ele é
+  DELIBERADO e manda não preenchê-lo com gráficos, estatísticas, banners nem
+  dezenas de cartões — por isso esta folha não tem nada além destes três blocos.
+*/
+
+/* A home ocupa a área de trabalho inteira e centra o conteúdo nela. */
+.dz-canvas-home { flex: 1; display: flex; min-width: 0; }
+/*
+  Coluna, e não linha. Em linha, o botão de emergência — que é irmão da home no
+  mesmo `section` — virava um painel vermelho gigante ocupando a metade direita
+  da tela. Ele continua VISÍVEL o tempo todo, como deve: quem precisa dele está
+  com pressa. Só que embaixo, na largura da coluna, e não competindo com o
+  título.
+*/
+.dz-home-conteudo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dz-home-conteudo > .emergency-stop {
+  width: 100%;
+  max-width: var(--dz-content-max);
+  margin: 0 auto var(--dz-8);
+}
+
+.dz-home {
+  width: 100%;
+  align-self: flex-start;
+  max-width: var(--dz-content-max);
+  margin: 0 auto;
+  padding: var(--dz-7) var(--dz-5) var(--dz-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dz-5);
+}
+
+/*
+  O título é centrado no espaço QUE SOBRA, e não no viewport inteiro: a
+  especificação avisa disso, e centrar no viewport o empurraria para debaixo do
+  trilho. Como ele vive dentro da área de trabalho, que já começa depois do
+  trilho, centrar aqui é centrar no lugar certo.
+*/
+.dz-home-titulo {
+  margin: var(--dz-6) 0 var(--dz-2);
+  text-align: center;
+  /* Serifada SÓ no título da home — a especificação é explícita. */
+  font-family: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  font-weight: 400;
+  /*
+    O teto caiu de 56px para 48px depois da captura: a 56px o título quebrava em
+    duas linhas dentro da coluna de 1040px, e a referência o mostra numa linha
+    só. `balance` reparte as linhas quando a quebra for inevitável, em vez de
+    deixar uma palavra órfã embaixo.
+  */
+  font-size: clamp(28px, 3.4vw, 48px);
+  text-wrap: balance;
+  line-height: 1.15;
+  color: var(--dz-text);
+}
+
+/* O acento azul cai na última palavra, como na referência. */
+.dz-home-titulo span { color: var(--dz-accent); }
+
+/* ---- compositor ------------------------------------------------------ */
+
+.dz-compositor {
+  background: var(--dz-surface);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius-lg);
+  padding: var(--dz-4);
+  display: grid;
+  gap: var(--dz-3);
+}
+
+/*
+  A caixa CRESCE com o texto até um teto e então rola. Sem teto, um pedido
+  longo empurra os atalhos para fora da tela; sem crescimento, quem escreve
+  cinco linhas lê duas.
+*/
+.dz-compositor textarea {
+  width: 100%;
+  min-height: 116px;
+  max-height: 40vh;
+  resize: vertical;
+  border: none;
+  background: transparent;
+  color: var(--dz-text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  padding: var(--dz-2);
+}
+
+.dz-compositor textarea::placeholder { color: var(--dz-text-secondary); }
+
+/* O foco vai na CAIXA, e não no `textarea` sem borda: um contorno colado no
+   texto some contra a superfície. */
+.dz-compositor:focus-within {
+  border-color: var(--dz-focus);
+  box-shadow: 0 0 0 3px rgb(145 190 255 / 22%);
+}
+
+.dz-compositor textarea:focus-visible { outline: none; }
+
+.dz-compositor-rodape {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dz-3);
+  flex-wrap: wrap;
+}
+
+.dz-contador { color: var(--dz-text-secondary); font-size: 13px; }
+
+.dz-compositor-rodape .primary {
+  background: var(--dz-action);
+  color: #fff;
+  border: none;
+  border-radius: var(--dz-radius-pill);
+  min-height: 44px;
+  padding: 0 var(--dz-5);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dz-compositor-rodape .primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---- atalhos --------------------------------------------------------- */
+
+.dz-atalhos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dz-2);
+  justify-content: center;
+}
+
+.dz-atalho {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dz-2);
+  min-height: 44px;
+  padding: 0 var(--dz-4);
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius-pill);
+  background: transparent;
+  color: var(--dz-text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.dz-atalho:hover { background: var(--dz-surface-active); }
+
+.dz-home-aviso {
+  text-align: center;
+  color: var(--dz-text-secondary);
+  font-size: 13px;
+  margin: 0;
+  max-width: 68ch;
+  align-self: center;
+}
+
+/* ---- ajustes --------------------------------------------------------- */
+
+.dz-ajustes {
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface);
+  padding: var(--dz-3) var(--dz-4);
+}
+
+.dz-ajustes > summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: var(--dz-text);
+}
+
+.dz-ajustes h2 { font-size: 16px; margin: var(--dz-5) 0 var(--dz-1); color: var(--dz-text); }
+
+@media (max-width: 1024px) {
+  /* A home ocupa a área de trabalho inteira e centra o conteúdo nela. */
+.dz-canvas-home { flex: 1; display: flex; min-width: 0; }
+/*
+  Coluna, e não linha. Em linha, o botão de emergência — que é irmão da home no
+  mesmo `section` — virava um painel vermelho gigante ocupando a metade direita
+  da tela. Ele continua VISÍVEL o tempo todo, como deve: quem precisa dele está
+  com pressa. Só que embaixo, na largura da coluna, e não competindo com o
+  título.
+*/
+.dz-home-conteudo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dz-home-conteudo > .emergency-stop {
+  width: 100%;
+  max-width: var(--dz-content-max);
+  margin: 0 auto var(--dz-8);
+}
+
+.dz-home { padding: var(--dz-5) var(--dz-4) var(--dz-7); }
+  .dz-home-titulo { margin-top: var(--dz-3); }
+}
+
+
+/*
+  O COMPOSITOR da referência: pílula alta, borda fina, e a linha de ações
+  embaixo — rota à esquerda, contador, e o envio como botão redondo à direita.
+
+  O que estava aqui era uma caixa retangular com um botão largo atravessado, e
+  era a diferença mais visível entre a captura e o vídeo.
+*/
+.dz-compositor {
+  width: 100%;
+  border: 1px solid var(--dz-border);
+  border-radius: var(--dz-radius-lg);
+  background: var(--dz-surface);
+  padding: var(--dz-4) var(--dz-4) var(--dz-3);
+}
+
+.dz-compositor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: none;
+  border: none;
+  color: var(--dz-text);
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.6;
+  resize: none;
+  padding: 0;
+}
+
+.dz-compositor textarea:focus { outline: none; }
+.dz-compositor:focus-within { border-color: var(--dz-focus); }
+.dz-compositor textarea::placeholder { color: var(--dz-text-secondary); }
+
+.dz-compositor .dz-compositor-rodape {
+  display: flex;
+  align-items: center;
+  gap: var(--dz-3);
+  margin-top: var(--dz-3);
+}
+
+/*
+  A ROTA é a única coisa desta linha que existe de verdade neste produto. O
+  vídeo mostra anexo, microfone e seletor de computador; nenhum dos três existe
+  aqui, e desenhá-los apagados seria o botão mudo que a decisão proíbe.
+*/
+.dz-compositor-rota {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dz-2);
+  color: var(--dz-text-secondary);
+  font-size: 0.8125rem;
+  min-width: 0;
+}
+
+.dz-compositor-rota svg { width: 16px; height: 16px; flex: none; }
+.dz-compositor-rota > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dz-compositor .dz-contador { margin-left: auto; color: var(--dz-text-secondary); font-size: 0.8125rem; }
+
+/* O envio: círculo, como no vídeo. O nome acessível continua sendo o texto. */
+.dz-enviar-redondo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border: none;
+  border-radius: 50%;
+  background: var(--dz-action);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+}
+
+.dz-enviar-redondo svg { width: 20px; height: 20px; }
+.dz-enviar-redondo:disabled { opacity: 0.45; cursor: not-allowed; }
+.dz-enviar-redondo[aria-busy="true"] { opacity: 0.7; }
+
+.dz-compositor-aviso {
+  margin: var(--dz-2) 0 0;
+  color: var(--dz-text-secondary);
+  font-size: 0.8125rem;
+}

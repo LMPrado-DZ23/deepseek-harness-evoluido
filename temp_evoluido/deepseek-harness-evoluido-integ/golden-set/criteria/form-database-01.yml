@@ -1,0 +1,1 @@
+{"id": "form-database-01", "category": "form-database", "sensitive": false, "acceptance": ["preencher o cadastro e encontrá-lo na lista", "recusar CNPJ ausente ou malformado", "nenhum dado de fornecedor exposto sem sessão"]}

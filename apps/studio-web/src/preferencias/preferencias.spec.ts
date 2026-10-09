@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { podeOperar, secaoInicial, secoesDePreferencias } from './preferencias'
+import { podeOperar, secaoInicial, secoesDePreferencias } from './Preferencias'
 import preferencias from '../i18n/preferencias.pt-BR.json'
 
 const TUDO = { autenticado: true, notificacoesSuportadas: true }

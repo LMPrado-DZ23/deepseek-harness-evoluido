@@ -1,35 +1,78 @@
-import { buildStepLabel, buildStepRows, buildStepStateLabel, type RunStepRecord } from './buildSteps'
 import t from './i18n/pt-BR.json'
+
+/** Os quatro passos do construtor, na ordem em que ele os executa. */
+export const BUILD_STEP_ORDER = ['install', 'build', 'test', 'e2e'] as const
+export type BuildStepName = typeof BUILD_STEP_ORDER[number]
+
+/** Um passo como o servidor o grava. */
+export interface RunStepRecord {
+  readonly step: string
+  readonly state: 'RUNNING' | 'PASSED' | 'FAILED'
+  readonly started_at: string
+  readonly finished_at: string | null
+}
+
+/** Como um passo aparece na tela. */
+export type BuildStepUiState = 'running' | 'passed' | 'failed' | 'waiting' | 'never'
+
+export interface BuildStepRow {
+  readonly step: BuildStepName
+  readonly state: BuildStepUiState
+  /** Segundos que o passo levou, quando dá para saber. */
+  readonly seconds: number | null
+}
+
+const STEP_LABEL: Readonly<Record<BuildStepName, string>> = {
+  install: t.creation.steps.labels.install,
+  build: t.creation.steps.labels.build,
+  test: t.creation.steps.labels.test,
+  e2e: t.creation.steps.labels.e2e,
+}
+
+const STATE_LABEL: Readonly<Record<BuildStepUiState, string>> = {
+  running: t.creation.steps.running,
+  passed: t.creation.steps.done,
+  failed: t.creation.steps.failed,
+  waiting: t.creation.steps.waiting,
+  never: t.creation.steps.never,
+}
+
+export function buildStepLabel(step: BuildStepName): string { return STEP_LABEL[step] }
+export function buildStepStateLabel(state: BuildStepUiState): string { return STATE_LABEL[state] }
+
+export function buildStepRows(steps: readonly RunStepRecord[] | undefined, finished: boolean): readonly BuildStepRow[] {
+  const known = new Map<BuildStepName, RunStepRecord>()
+  for (const entry of steps ?? []) {
+    if ((BUILD_STEP_ORDER as readonly string[]).includes(entry.step)) known.set(entry.step as BuildStepName, entry)
+  }
+  return BUILD_STEP_ORDER.map(step => {
+    const record = known.get(step)
+    if (record === undefined) return { step, state: finished ? 'never' : 'waiting', seconds: null } as const
+    const state: BuildStepUiState = record.state === 'RUNNING' ? 'running' : record.state === 'PASSED' ? 'passed' : 'failed'
+    return { step, state, seconds: elapsedSeconds(record) }
+  })
+}
+
+function elapsedSeconds(record: RunStepRecord): number | null {
+  if (record.finished_at === null) return null
+  const started = Date.parse(record.started_at); const finished = Date.parse(record.finished_at)
+  if (!Number.isFinite(started) || !Number.isFinite(finished) || finished < started) return null
+  return Math.round((finished - started) / 1_000)
+}
+
+export function hasBuildSteps(steps: readonly RunStepRecord[] | undefined): boolean {
+  return buildStepRows(steps, false).some(row => row.state !== 'waiting')
+}
 
 /**
  * A linha do tempo da construção, enquanto ela acontece.
- *
- * O Prado descreveu o que faltava assim: "a ideia desse projeto é ver a
- * construção em tempo real". Até aqui a tela dizia uma frase por ETAPA —
- * `build` ou `test` — e o construtor roda quatro passos dentro dessas duas.
- * Durante os minutos mais longos do produto a pessoa via um texto imóvel: nada
- * na tela separava "instalando as dependências" de "compilando" de "travado".
- *
- * O `aria-live="polite"` fica na lista inteira, e não em cada linha: um leitor
- * de tela anunciando quatro mudanças separadas viraria tagarelice justamente no
- * momento em que a pessoa está tensa esperando.
  */
 export function BuildSteps({ steps, finished }: { readonly steps: readonly RunStepRecord[] | undefined; readonly finished: boolean }) {
   const rows = buildStepRows(steps, finished)
   return <section className="build-steps">
-    {/* `h2`, e nao `h3`. A tela da criacao tem um `h1` no topo, e pular de 1
-        para 3 quebra a ordem dos titulos - quem navega por titulos com leitor
-        de tela perde o degrau. Foi o axe que apanhou, e so apanhou porque este
-        pedaco da tela ganhou varredura propria: a varredura do fluxo principal
-        nao passa por aqui, porque a linha do tempo so existe com uma execucao
-        congelada no meio. */}
     <h2>{t.creation.steps.title}</h2>
     <ol aria-live="polite">
       {rows.map(row => <li key={row.step} className={`build-step build-step-${row.state}`}>
-        {/* O ponto é decorativo: quem usa leitor de tela recebe a MESMA
-            informação em palavras logo ao lado. Cor sozinha nunca carrega o
-            estado — no escuro, e para quem não distingue verde de vermelho,
-            ela desaparece. */}
         <span className="build-step-dot" aria-hidden="true" />
         <span className="build-step-label">{buildStepLabel(row.step)}</span>
         <span className="build-step-state">{buildStepStateLabel(row.state)}</span>
@@ -38,3 +81,4 @@ export function BuildSteps({ steps, finished }: { readonly steps: readonly RunSt
     </ol>
   </section>
 }
+

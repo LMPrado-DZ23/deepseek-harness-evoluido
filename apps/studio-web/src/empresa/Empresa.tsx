@@ -12,27 +12,144 @@ import { STUDIO_CATEGORIES } from '../categories'
 import { createHubApi, HUB_API_PREFIX } from '../hub/hubApi'
 import { formatBytes, formatDate } from '../hub/presentation'
 import copyGeral from '../i18n/pt-BR.json'
-import {
-  RASCUNHO_VAZIO,
-  TAREFA_VAZIA,
-  planoDoRascunho,
-  rascunhoDoPlano,
-  recusaDaEmpresa,
-  recusaDaRevisao,
-  chaveDoTotal,
-  evidenciaDasTarefas,
-  nomesDasTarefas,
-  totalDePacotes,
-  type PacoteDaTarefa,
-  recusaDaTarefa,
-  textoNormalizado,
-  versaoVigente,
-  versoesAnteriores,
-  type RascunhoDaEmpresa,
-  type RascunhoDaTarefa,
-  type RascunhoDoPlano,
-} from './empresa'
 import './empresa.css'
+const ESPACOS = /\s+/gu
+export function textoNormalizado(valor: string): string {
+  return valor.replace(ESPACOS, ' ').trim()
+}
+export interface RascunhoDoPlano {
+  readonly objetivo: string
+  readonly publico: string
+  readonly oferta: string
+  readonly limites: string
+}
+export interface RascunhoDaEmpresa extends RascunhoDoPlano {
+  readonly nome: string
+  readonly origem: 'criada' | 'vinculada'
+  readonly identidade: string
+}
+export const RASCUNHO_VAZIO: RascunhoDaEmpresa = {
+  nome: '', origem: 'criada', identidade: '', objetivo: '', publico: '', oferta: '', limites: '',
+}
+export interface PlanoEnviado {
+  readonly objetivo: string
+  readonly publico: string
+  readonly oferta: string
+  readonly limites: readonly string[]
+}
+export function limitesDoTexto(texto: string): readonly string[] {
+  const vistos = new Set<string>()
+  const limites: string[] = []
+  for (const linha of texto.split('\n')) {
+    const limpo = textoNormalizado(linha)
+    if (limpo === '' || vistos.has(limpo)) continue
+    vistos.add(limpo)
+    limites.push(limpo)
+  }
+  return limites
+}
+export function textoDosLimites(limites: readonly string[]): string {
+  return limites.join('\n')
+}
+export function planoDoRascunho(rascunho: RascunhoDoPlano): PlanoEnviado {
+  return {
+    objetivo: textoNormalizado(rascunho.objetivo),
+    publico: textoNormalizado(rascunho.publico),
+    oferta: textoNormalizado(rascunho.oferta),
+    limites: limitesDoTexto(rascunho.limites),
+  }
+}
+export type RecusaDoPlano = 'erroObjetivo' | 'erroPublico' | 'erroLimiteCurto' | 'erroLimitesDemais'
+export function recusaDoPlano(rascunho: RascunhoDoPlano): RecusaDoPlano | null {
+  const plano = planoDoRascunho(rascunho)
+  if (plano.objetivo.length < 10) return 'erroObjetivo'
+  if (plano.publico.length < 3) return 'erroPublico'
+  if (plano.limites.some(limite => limite.length < 3)) return 'erroLimiteCurto'
+  if (plano.limites.length > 20) return 'erroLimitesDemais'
+  return null
+}
+export function recusaDaEmpresa(rascunho: RascunhoDaEmpresa): 'erroNome' | RecusaDoPlano | null {
+  if (textoNormalizado(rascunho.nome).length < 2) return 'erroNome'
+  return recusaDoPlano(rascunho)
+}
+export function planosIguais(esquerdo: PlanoEnviado, direito: PlanoEnviado): boolean {
+  return esquerdo.objetivo === direito.objetivo
+    && esquerdo.publico === direito.publico
+    && esquerdo.oferta === direito.oferta
+    && JSON.stringify([...esquerdo.limites].sort()) === JSON.stringify([...direito.limites].sort())
+}
+export function recusaDaRevisao(
+  rascunho: RascunhoDoPlano,
+  vigente: PlanoEnviado,
+): 'erroSemMudanca' | RecusaDoPlano | null {
+  const recusa = recusaDoPlano(rascunho)
+  if (recusa !== null) return recusa
+  return planosIguais(planoDoRascunho(rascunho), vigente) ? 'erroSemMudanca' : null
+}
+export function rascunhoDoPlano(plano: PlanoEnviado): RascunhoDoPlano {
+  return {
+    objetivo: plano.objetivo,
+    publico: plano.publico,
+    oferta: plano.oferta,
+    limites: textoDosLimites(plano.limites),
+  }
+}
+export function versaoVigente<T extends { readonly version: number }>(versoes: readonly T[]): T | undefined {
+  return versoes.reduce<T | undefined>(
+    (maior, atual) => (maior === undefined || atual.version > maior.version ? atual : maior),
+    undefined,
+  )
+}
+export function versoesAnteriores<T extends { readonly version: number }>(versoes: readonly T[]): readonly T[] {
+  const vigente = versaoVigente(versoes)
+  if (vigente === undefined) return []
+  return versoes.filter(versao => versao.version !== vigente.version)
+    .sort((esquerda, direita) => direita.version - esquerda.version)
+}
+export interface RascunhoDaTarefa {
+  readonly pedido: string
+  readonly category: string
+}
+export const TAREFA_VAZIA: RascunhoDaTarefa = { pedido: '', category: 'landing-page' }
+export function recusaDaTarefa(rascunho: RascunhoDaTarefa): 'erroPedido' | null {
+  return textoNormalizado(rascunho.pedido).length < 3 ? 'erroPedido' : null
+}
+export interface PacoteDaTarefa {
+  readonly export_id: string
+  readonly project_id: string
+  readonly file_name: string
+  readonly size_bytes: number
+  readonly created_at: string
+}
+export interface EvidenciaDaTarefa {
+  readonly projectId: string
+  readonly pacotes: readonly PacoteDaTarefa[]
+}
+export function evidenciaDasTarefas<V extends { readonly project_id: string }>(
+  vinculos: readonly V[],
+  pacotes: readonly PacoteDaTarefa[],
+): readonly EvidenciaDaTarefa[] {
+  return vinculos.map(vinculo => ({
+    projectId: vinculo.project_id,
+    pacotes: pacotes
+      .filter(pacote => pacote.project_id === vinculo.project_id)
+      .sort((esquerda, direita) => direita.created_at.localeCompare(esquerda.created_at)),
+  }))
+}
+export function totalDePacotes(evidencias: readonly EvidenciaDaTarefa[]): number {
+  return new Set(evidencias.flatMap(evidencia => evidencia.pacotes.map(pacote => pacote.export_id))).size
+}
+export function chaveDoTotal(total: number): 'evidenciaTotalUm' | 'evidenciaTotal' | null {
+  if (total === 0) return null
+  return total === 1 ? 'evidenciaTotalUm' : 'evidenciaTotal'
+}
+export function nomesDasTarefas<V extends { readonly project_id: string }>(
+  vinculos: readonly V[],
+  projetos: readonly { readonly project_id: string; readonly name: string }[],
+): readonly (string | null)[] {
+  const porId = new Map(projetos.map(projeto => [projeto.project_id, projeto.name]))
+  return vinculos.map(vinculo => porId.get(vinculo.project_id) ?? null)
+}
 
 /*
   O cliente, criado UMA VEZ.

@@ -1,0 +1,16 @@
+{
+  "errors.unknownApproval": "Esta confirmação não existe ou não é sua.",
+  "errors.notPending": "Esta confirmação já foi resolvida.",
+  "errors.expired": "O tempo para confirmar esta ação terminou. Peça de novo com calma.",
+  "errors.denied": "Esta ação foi recusada e não pode ser retomada.",
+  "errors.consumed": "Esta confirmação já foi usada uma vez e não vale de novo.",
+  "errors.strongIdentity": "Confirme com sua chave de acesso antes desta ação sensível.",
+  "errors.descriptorConflict": "Já existe um pedido diferente com esse mesmo identificador.",
+  "errors.claimMismatch": "Esta confirmação não corresponde à ação que está sendo executada.",
+  "errors.invalidRequest": "Pedido de confirmação inválido.",
+  "errors.forbidden": "Você não tem acesso a esta ação.",
+  "errors.routeNotFound": "Rota não encontrada.",
+  "errors.methodNotAllowed": "Esta ação não é permitida neste endereço.",
+  "summary.harnessTool": "O assistente quer usar a ferramenta {tool}. Código deste pedido: {code}.",
+  "summary.harnessToolWithReason": "O assistente quer usar a ferramenta {tool}. Motivo que ele deu: \"{reason}\". Código deste pedido: {code}."
+}

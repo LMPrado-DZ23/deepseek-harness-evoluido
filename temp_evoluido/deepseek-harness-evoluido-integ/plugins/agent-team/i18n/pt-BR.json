@@ -1,0 +1,48 @@
+{
+  "errors": {
+    "approval": "Confirme antes de iniciar ou continuar esta equipe de assistentes.",
+    "taskCount": "A equipe precisa ter entre 1 e 8 tarefas.",
+    "teamName": "O nome da equipe precisa ter entre 3 e 100 caracteres.",
+    "taskId": "Cada tarefa precisa de um identificador simples e único.",
+    "provider": "Somente o agente local previamente comprovado pode participar desta equipe.",
+    "taskRole": "O papel da tarefa não pertence ao catálogo fechado.",
+    "taskTitle": "Cada tarefa precisa de um título entre 3 e 120 caracteres.",
+    "taskPrompt": "Cada tarefa precisa de uma instrução entre 3 e 20.000 caracteres.",
+    "taskPaths": "Cada tarefa precisa declarar entre 1 e 20 caminhos.",
+    "dependency": "A tarefa {task} depende de uma tarefa inexistente ou de si mesma.",
+    "cycle": "O plano da equipe contém um ciclo de dependências.",
+    "parallelConflict": "As tarefas {left} e {right} podem executar juntas e disputam os mesmos arquivos.",
+    "notFound": "A equipe não foi encontrada.",
+    "state": "Esta equipe não pode avançar no estado atual.",
+    "tier": "Use a confirmação correspondente ao nível de segurança da equipe.",
+    "nothingReady": "Nenhuma tarefa pode começar agora. Revise e aplique as propostas anteriores antes de continuar.",
+    "owner": "Somente a pessoa que iniciou a equipe pode continuá-la ou cancelá-la.",
+    "persistence": "Não foi possível registrar a execução da tarefa; ela foi cancelada com segurança.",
+    "reconciliationIncomplete": "A equipe ainda tem trabalho em andamento; espere ele terminar ou pare a equipe antes de reorganizar.",
+    "teamBudgetExceeded": "A equipe já usou {spent} do limite de {limit} combinado para ela. As tarefas restantes não foram iniciadas.",
+    "teamBudgetUnmeasured": "Não dá para provar que a equipe está dentro do limite combinado: o trabalho {run} terminou sem informar quanto consumiu. As tarefas restantes não foram iniciadas.",
+    "missionBudgetExceeded": "O conjunto de trabalhos a que esta equipe pertence já usou {spent} do limite de {limit} combinado para ele. As tarefas restantes não foram iniciadas.",
+    "missionBudgetUnmeasured": "Não dá para provar que o conjunto de trabalhos a que esta equipe pertence está dentro do limite combinado: o trabalho {run} terminou sem informar quanto consumiu. As tarefas restantes não foram iniciadas.",
+    "missionMissing": "O conjunto de trabalhos a que esta equipe pertence não foi encontrado, então o limite combinado para ele não pode ser conferido. As tarefas restantes não foram iniciadas.",
+    "missionUnavailable": "Esta equipe foi aprovada dentro de um conjunto de trabalhos, e esta instalação não consegue conferir o limite desse conjunto. As tarefas restantes não foram iniciadas."
+  },
+  "status": {
+    "running": "Há assistentes trabalhando em cópias isoladas.",
+    "waiting": "Há propostas para revisar ou tarefas aguardando a aplicação das dependências.",
+    "attention": "Uma ou mais tarefas precisam de atenção antes de continuar.",
+    "completed": "Todas as tarefas foram revisadas e aplicadas pela pessoa.",
+    "cancelled": "A equipe foi cancelada; propostas já concluídas continuam disponíveis para revisão.",
+    "cancelReason": "Equipe cancelada pela pessoa no FRIGG.",
+    "processLost": "A tarefa foi interrompida pelo reinício do FRIGG; a cópia isolada foi preservada para revisão."
+  },
+  "roles": {
+    "analyst": "Entenda o que está sendo pedido e o que já existe no projeto. Você NÃO escreve arquivos: o seu produto é o entendimento escrito, com o que ficou claro e o que ficou em aberto.",
+    "architect": "Decida a forma da solução a partir do que já existe. Você NÃO escreve arquivos: o seu produto é a decisão escrita, com a alternativa descartada e o motivo.",
+    "designer": "Cuide do que a pessoa vê e do caminho que ela percorre. Altere somente os caminhos aprovados.",
+    "implementer": "Implemente somente a tarefa descrita e respeite os caminhos aprovados.",
+    "tester": "Verifique o estado atual do projeto com testes objetivos. Você NÃO edita arquivos: quando um teste reprova, relate o que reprovou e como reproduzir.",
+    "security": "Procure o que pode dar errado de propósito: permissão, escopo, segredo, caminho de arquivo, entrada hostil. Você NÃO escreve arquivos e NÃO fala com a rede — nem quando o resto da equipe pode. Relate o achado com a reprodução.",
+    "reviewer": "Revise o estado atual do projeto e registre achados verificáveis. Você NÃO edita arquivos: um revisor que conserta deixa de revisar.",
+    "synthesizer": "Sintetize o estado já aprovado do projeto e só altere os caminhos aprovados quando necessário."
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-03T21:12:36.755Z",
+  "route": "deterministic-fixture",
+  "real_llm": "NOT_EXECUTED",
+  "promotion_eligible": false,
+  "counts": {
+    "total": 18,
+    "pass_deterministic": 12,
+    "not_implemented": 6,
+    "not_automated_criteria": 36
+  },
+  "results": [
+    {
+      "id": "catalog-01",
+      "category": "catalog",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "catalog-02",
+      "category": "catalog",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "catalog-03",
+      "category": "catalog",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "SENSITIVE_QUESTION_REQUIRED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "crud-panel-01",
+      "category": "crud-panel",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "crud-panel-02",
+      "category": "crud-panel",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "crud-panel-03",
+      "category": "crud-panel",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "SENSITIVE_QUESTION_REQUIRED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "dashboard-01",
+      "category": "dashboard",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "not_automated": null,
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "dashboard-02",
+      "category": "dashboard",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "not_automated": null,
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "dashboard-03",
+      "category": "dashboard",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "not_automated": null,
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "form-database-01",
+      "category": "form-database",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "form-database-02",
+      "category": "form-database",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "SENSITIVE_QUESTION_REQUIRED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "form-database-03",
+      "category": "form-database",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "landing-01",
+      "category": "landing-page",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "landing-02",
+      "category": "landing-page",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "NO_SENSITIVE_DATA_DETECTED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "landing-03",
+      "category": "landing-page",
+      "state": "PASS_DETERMINISTIC",
+      "critical": "SENSITIVE_QUESTION_REQUIRED",
+      "not_automated": 3,
+      "detail": "Build, teste unitário, Playwright, axe e scan passaram em contêiner sem rede; 3 critérios declarados não foram automatizados."
+    },
+    {
+      "id": "saas-authenticated-01",
+      "category": "saas-authenticated",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "not_automated": null,
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "saas-authenticated-02",
+      "category": "saas-authenticated",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "not_automated": null,
+      "detail": "Categoria declarada, ainda sem executor."
+    },
+    {
+      "id": "saas-authenticated-03",
+      "category": "saas-authenticated",
+      "state": "NOT_IMPLEMENTED",
+      "critical": "NOT_EXECUTED",
+      "not_automated": null,
+      "detail": "Categoria declarada, ainda sem executor."
+    }
+  ]
+}

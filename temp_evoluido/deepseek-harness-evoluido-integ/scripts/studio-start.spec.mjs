@@ -1,0 +1,297 @@
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, resolve } from 'node:path'
+
+/** A raiz do repositório, a partir deste arquivo em `scripts/`. */
+const RAIZ_DO_REPOSITORIO = resolve(dirname(new URL(import.meta.url).pathname), '..')
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+import { PERFIL, SONDA_PADRAO, ambienteDaPartida, argumentosDaPartida, binDoHarness, docker, enderecoComPrevia, observar, previaLocalPresente, sobreposicaoLocalPresente } from './studio-start.mjs'
+import { bloqueios, conferencias } from './studio-doctor.mjs'
+
+/**
+ * O que `pnpm studio` vê do disco.
+ *
+ * `observar` parece montagem, e não é: ela decide QUAL arquivo conta como prova
+ * de cada pré-requisito. Se ela olhar para o lugar errado, o doctor responde com
+ * confiança total a pergunta errada — e a pessoa vai consertar algo que já
+ * estava certo. Por isso cada caminho é conferido contra uma pasta de verdade.
+ */
+
+let base
+/*
+  A SONDA do Docker, que responde na hora.
+
+  Sem ela, cada chamada a `observar` paga um `docker info` — até dez segundos de
+  espera por um daemon externo, dentro de um teste que tem cinco. A CI reprovou
+  por isso em 18/09/2026, neste arquivo, num caso que só olha caminhos no disco.
+
+  O que estes testes medem é QUAL arquivo conta como prova de cada pré-requisito.
+  Se o Docker atende ou não é outra pergunta, e ela não pertence aqui.
+*/
+const sondaParada = { docker: () => false }
+const criar = caminho => {
+  const alvo = resolve(base, caminho)
+  mkdirSync(dirname(alvo), { recursive: true })
+  writeFileSync(alvo, '{}')
+  return alvo
+}
+
+beforeEach(() => { base = mkdtempSync(resolve(tmpdir(), 'dz23-studio-')) })
+afterEach(() => { rmSync(base, { recursive: true, force: true }) })
+
+describe('a sonda padrão', () => {
+  it('a constante aponta para a sonda de verdade', () => {
+    expect(SONDA_PADRAO.docker).toBe(docker)
+  })
+
+  /*
+    O caso abaixo existe porque o de cima NÃO BASTA, e uma revisão externa
+    apontou exatamente isso: a igualdade prova a CONSTANTE, e não que `observar`
+    a consome quando o terceiro argumento é omitido. Uma regressão que troque só
+    o valor padrão do parâmetro — `sonda = { docker: () => true }` — passa pela
+    igualdade sem piscar.
+
+    A propriedade certa é comportamental: com o argumento omitido, `observar`
+    tem de CHAMAR o programa externo. Quem controla isso aqui é a fronteira —
+    o `PATH` —, e não um dublê injetado: um `docker` de mentira que sai com 0
+    faz a resposta ser `true`, e um que sai com 1 faz ser `false`. Se o padrão
+    for trocado por uma constante, os dois casos devolvem o mesmo valor e o
+    teste cai.
+
+    Sem daemon nenhum, e em milissegundos.
+  */
+  const comDockerFalso = (saida) => {
+    const pasta = mkdtempSync(resolve(tmpdir(), 'dz23-docker-'))
+    const alvo = resolve(pasta, 'docker')
+    writeFileSync(alvo, `#!/bin/sh\nexit ${saida}\n`)
+    chmodSync(alvo, 0o755)
+    const anterior = process.env.PATH
+    process.env.PATH = pasta
+    try { return observar(base).docker } finally {
+      process.env.PATH = anterior
+      rmSync(pasta, { recursive: true, force: true })
+    }
+  }
+
+  it.runIf(process.platform !== 'win32')('com o argumento OMITIDO, a sonda padrão é executada de verdade', () => {
+    expect(comDockerFalso(0)).toBe(true)
+    expect(comDockerFalso(1)).toBe(false)
+  })
+
+  /*
+    LIMITE DECLARADO: o caso acima não roda no Windows, onde um `docker` sem
+    extensão não é executável. O que ele prova — que o padrão é consumido — vale
+    para o código, que é o mesmo nos dois sistemas; o que ele NÃO prova é a
+    resolução de executável no Windows. E o comportamento da sonda contra um
+    daemon de verdade continua fora daqui, de propósito: era esse custo externo
+    que tirou este arquivo do orçamento de cinco segundos e derrubou a CI.
+  */
+})
+
+describe('observar — a pasta vazia', () => {
+  it('não afirma que nada existe: afirma que não encontrou', () => {
+    const visto = observar(base, process, sondaParada)
+    expect(visto.submoduloPresente).toBe(false)
+    expect(visto.harnessInstalado).toBe(false)
+    expect(visto.harnessCompilado).toBe(false)
+    expect(visto.studioInstalado).toBe(false)
+    expect(visto.studioCompilado).toBe(false)
+    expect(visto.perfilPresente).toBe(false)
+  })
+
+  it('a versão do Node vem do processo, e a esperada do .nvmrc da pasta', () => {
+    expect(observar(base, process, sondaParada).nodeVersion).toBe(process.versions.node)
+    // Sem `.nvmrc` na pasta de teste, não há contra o que comparar.
+    expect(observar(base, process, sondaParada).nodeEsperado).toBeUndefined()
+    writeFileSync(resolve(base, '.nvmrc'), 'v22.23.1\n')
+    expect(observar(base, process, sondaParada).nodeEsperado).toBe('22.23.1')
+  })
+
+  it('as rotas vêm do AMBIENTE, e uma lista vazia é uma resposta', () => {
+    // Perguntar ao Studio quais rotas ele tem exigiria que ele já estivesse no
+    // ar — e esta conferência existe exatamente para o caso em que ele não
+    // está. O ambiente responde sem abrir conexão nenhuma.
+    expect(observar(base, { versions: process.versions, env: {} }, sondaParada).rotasConfiguradas).toEqual([])
+    expect(observar(base, { versions: process.versions, env: { DZ23_OMNIROUTE_KEY: "k" } }, sondaParada).rotasConfiguradas).toEqual(['omniroute'])
+  })
+})
+
+describe('ambienteDaPartida', () => {
+  it('preenche o nome de chave do Ollama local, que não é segredo, e respeita o que já estiver posto', () => {
+    const padrao = ambienteDaPartida('/dados/frigg', { PATH: '/bin' })
+    expect(padrao).toMatchObject({ PATH: '/bin', DSH_HOME: '/dados/frigg/dsh-home' })
+    expect(padrao.DZ23_OLLAMA_PLACEHOLDER).toMatch(/not-a-secret/u)
+    expect(ambienteDaPartida('/dados/frigg', { DZ23_OLLAMA_PLACEHOLDER: 'meu' }).DZ23_OLLAMA_PLACEHOLDER).toBe('meu')
+  })
+})
+
+describe('observar — a partida é a do Harness FIXADO', () => {
+  it('só resolve quando o bin.js do Harness existe E o dsh-app-boot se resolve a partir dele', () => {
+    expect(observar(base, process, sondaParada).arranqueResolvivel).toBe(false)
+    criar('third_party/deepseek-harness/apps/cli/lib/bin.js')
+    // O bin sozinho não basta: sem as dependências, o Node cai na primeira importação.
+    expect(observar(base, process, sondaParada).arranqueResolvivel).toBe(false)
+    writeFileSync(criar('third_party/deepseek-harness/node_modules/@deepseek-ai/dsh-app-boot/package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-app-boot', main: 'index.js' }))
+    criar('third_party/deepseek-harness/node_modules/@deepseek-ai/dsh-app-boot/index.js')
+    expect(observar(base, process, sondaParada).arranqueResolvivel).toBe(true)
+    expect(binDoHarness(base)).toBe(resolve(base, 'third_party/deepseek-harness/apps/cli/lib/bin.js'))
+  })
+
+  it('a cópia injetada na raiz NÃO conta: foi ela que fez o laço sem saída no clone limpo', () => {
+    writeFileSync(criar('node_modules/@deepseek-ai/dsh/package.json'), '{"name":"@deepseek-ai/dsh"}')
+    criar('node_modules/@deepseek-ai/dsh/lib/bin.js')
+    expect(observar(base, process, sondaParada).arranqueResolvivel).toBe(false)
+  })
+})
+
+describe('observar — cada pré-requisito tem o SEU arquivo', () => {
+  it('o submódulo é o package.json do Harness, e não a pasta vazia que o git deixa', () => {
+    // `git clone` sem `--recursive` deixa a pasta CRIADA e vazia. Conferir a
+    // existência da pasta responderia "está no lugar" para o caso exato que
+    // esta conferência existe para pegar.
+    mkdirSync(resolve(base, 'third_party', 'deepseek-harness'), { recursive: true })
+    expect(observar(base, process, sondaParada).submoduloPresente).toBe(false)
+    criar('third_party/deepseek-harness/package.json')
+    expect(observar(base, process, sondaParada).submoduloPresente).toBe(true)
+  })
+
+  it('o Harness compilado é um pacote com lib, e não o node_modules dele', () => {
+    criar('third_party/deepseek-harness/node_modules/marca')
+    expect(observar(base, process, sondaParada).harnessInstalado).toBe(true)
+    // Instalado e compilado são duas coisas, e o comando que resolve cada uma é
+    // diferente.
+    expect(observar(base, process, sondaParada).harnessCompilado).toBe(false)
+    // O checkout do submódulo já traz a PASTA de cada pacote. Conferir a pasta
+    // responderia "compilado" para um Harness que nunca foi construído — que é
+    // o estado em que a pessoa está logo depois de baixar o repositório.
+    criar('third_party/deepseek-harness/packages/core/agent-default-model/package.json')
+    expect(observar(base, process, sondaParada).harnessCompilado).toBe(false)
+    criar('third_party/deepseek-harness/packages/core/agent-default-model/lib/index.js')
+    expect(observar(base, process, sondaParada).harnessCompilado).toBe(true)
+  })
+
+  it('o Studio instalado é o escopo @dz23-studio dentro de node_modules', () => {
+    criar('node_modules/outra-coisa/package.json')
+    expect(observar(base, process, sondaParada).studioInstalado).toBe(false)
+    criar('node_modules/@dz23-studio/prompt-to-app/package.json')
+    expect(observar(base, process, sondaParada).studioInstalado).toBe(true)
+  })
+
+  it('o Studio compilado é a lib de um plugin, e não o código-fonte dele', () => {
+    criar('plugins/prompt-to-app/src/index.ts')
+    expect(observar(base, process, sondaParada).studioCompilado).toBe(false)
+    criar('plugins/prompt-to-app/lib/index.js')
+    expect(observar(base, process, sondaParada).studioCompilado).toBe(true)
+  })
+
+  it('o perfil é o package.json do perfil studio, e não a pasta dsh-home', () => {
+    mkdirSync(resolve(base, 'dsh-home', 'profiles', 'studio'), { recursive: true })
+    expect(observar(base, process, sondaParada).perfilPresente).toBe(false)
+    criar('dsh-home/profiles/studio/package.json')
+    expect(observar(base, process, sondaParada).perfilPresente).toBe(true)
+  })
+})
+
+describe('observar + conferencias — o clone recém-baixado', () => {
+  it('manda fazer UMA coisa: iniciar o submódulo', () => {
+    // Este é o estado exato em que alguém abre o produto pela primeira vez.
+    writeFileSync(resolve(base, '.nvmrc'), `${process.versions.node}\n`)
+    const lista = conferencias(observar(base, process, sondaParada))
+    expect(bloqueios(lista)[0].id).toBe('submodulo')
+    expect(bloqueios(lista)[0].faca).toContain('git submodule update --init')
+  })
+})
+
+describe('o comando existe de verdade', () => {
+  it('`pnpm studio` e `pnpm studio:doctor` estão no package.json e apontam para este arquivo', async () => {
+    // O buraco que este bloco fecha era exatamente este: quarenta scripts
+    // `prove:*` e nenhum que iniciasse o produto.
+    const pacote = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile(new URL('../package.json', import.meta.url), 'utf8')))
+    expect(pacote.scripts.studio).toBe('node scripts/studio-start.mjs')
+    expect(pacote.scripts['studio:doctor']).toBe('node scripts/studio-start.mjs --conferir')
+  })
+})
+
+describe('a partida chama o `dsh` com o perfil', () => {
+  /*
+    O DEFEITO QUE ISTO FECHA: o `dsh` era chamado sem argumento nenhum, e ele
+    RECUSA subir sem `--profile`. O conferidor dizia dez linhas `ok`, o texto
+    dizia "Abrindo o FRIGG", e o produto não abria — `error: --profile <name>
+    is required`. A decisão morava dentro da montagem, e por isso atravessou a
+    missão inteira sem um teste.
+  */
+  it('o perfil vai na linha de comando, e e o que existe em dsh-home/profiles', () => {
+    const argumentos = argumentosDaPartida('/caminho/bin.js')
+    expect(argumentos[0]).toBe('/caminho/bin.js')
+    expect(argumentos).toContain('--profile')
+    expect(argumentos[argumentos.indexOf('--profile') + 1]).toBe(PERFIL)
+    // O nome não é escolhido aqui: ele é o diretório do perfil no disco.
+    expect(existsSync(resolve(RAIZ_DO_REPOSITORIO, 'dsh-home', 'profiles', PERFIL, 'cordis.patch.yml'))).toBe(true)
+  })
+
+  it('o binario vem primeiro — node <bin> <flags>, e nao o contrario', () => {
+    // Trocar a ordem faz o Node tratar `--profile` como flag DELE.
+    expect(argumentosDaPartida('/b.js').indexOf('/b.js')).toBe(0)
+  })
+})
+
+describe('a sobreposicao local do perfil', () => {
+  it('sem o arquivo, a partida e a de sempre — nada de --patch', () => {
+    expect(argumentosDaPartida('/b.js')).toEqual(['/b.js', '--profile', PERFIL])
+  })
+
+  it('com o arquivo, ela entra DEPOIS do perfil, como sobreposicao', () => {
+    // A ordem importa: `--patch` aplica por cima do perfil, e é por isso que os
+    // caminhos desta máquina vencem os de produção sem que o perfil mude.
+    expect(argumentosDaPartida('/b.js', '/r/local.patch.yml')).toEqual(['/b.js', '--profile', PERFIL, '--patch', '/r/local.patch.yml'])
+  })
+
+  it('so e encontrada no lugar em que o instalador a grava', () => {
+    const base = mkdtempSync(resolve(tmpdir(), 'sobreposicao-'))
+    expect(sobreposicaoLocalPresente(base)).toBeUndefined()
+    mkdirSync(resolve(base, 'dsh-home', 'profiles', PERFIL), { recursive: true })
+    writeFileSync(resolve(base, 'dsh-home', 'profiles', PERFIL, 'local.patch.yml'), '# x\n')
+    expect(sobreposicaoLocalPresente(base)).toBe(resolve(base, 'dsh-home', 'profiles', PERFIL, 'local.patch.yml'))
+    rmSync(base, { recursive: true, force: true })
+  })
+})
+
+describe('a prévia local (pnpm preview:install)', () => {
+  it('a sobreposição da prévia vem DEPOIS da do construtor', () => {
+    expect(argumentosDaPartida('/b.js', '/r/local.patch.yml', '/r/preview.patch.yml'))
+      .toEqual(['/b.js', '--profile', PERFIL, '--patch', '/r/local.patch.yml', '--patch', '/r/preview.patch.yml'])
+    expect(argumentosDaPartida('/b.js', undefined, '/r/preview.patch.yml')).toEqual(['/b.js', '--profile', PERFIL, '--patch', '/r/preview.patch.yml'])
+  })
+
+  it('o segredo da borda só entra no ambiente do filho quando existe', () => {
+    expect(ambienteDaPartida('/d', {}).DZ23_EDGE_SECRET).toBeUndefined()
+    expect(ambienteDaPartida('/d', {}, 'x'.repeat(40)).DZ23_EDGE_SECRET).toBe('x'.repeat(40))
+  })
+
+  it('o convite do dsh vira o endereço no host da borda, com o mesmo caminho', () => {
+    expect(enderecoComPrevia('dsh web: http://127.0.0.1:3080/?token=abc', 8088)).toBe('http://studio.dz23.localhost:8088/?token=abc')
+    expect(enderecoComPrevia('outra linha', 8088)).toBeUndefined()
+  })
+
+  it('só liga com os DOIS arquivos, e recusa configuração incompleta', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const base = await mkdtemp(join(tmpdir(), 'frigg-previa-'))
+    try {
+      const pasta = join(base, 'dsh-home', 'profiles', PERFIL)
+      await mkdir(pasta, { recursive: true })
+      expect(previaLocalPresente(base)).toBeUndefined()
+      await writeFile(join(pasta, 'preview.local.json'), '{"porta":8088,"portaDoHarness":3080,"segredoDaBorda":"/s"}')
+      expect(previaLocalPresente(base)).toBeUndefined()
+      await rm(join(pasta, 'preview.local.json'))
+      await writeFile(join(pasta, 'preview.patch.yml'), '[]')
+      expect(previaLocalPresente(base)).toBeUndefined()
+      await writeFile(join(pasta, 'preview.local.json'), '{"porta":8088}')
+      expect(() => previaLocalPresente(base)).toThrow('incompleto')
+      await writeFile(join(pasta, 'preview.local.json'), '{"porta":8088,"portaDoHarness":3080,"segredoDaBorda":"/s"}')
+      expect(previaLocalPresente(base)).toEqual({ patch: join(pasta, 'preview.patch.yml'), porta: 8088, portaDoHarness: 3080, segredoDaBorda: '/s' })
+    } finally { await rm(base, { recursive: true, force: true }) }
+  })
+})

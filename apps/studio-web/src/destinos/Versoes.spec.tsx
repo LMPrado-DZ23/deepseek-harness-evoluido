@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { ContagemDeConteudos, textoDaMudanca } from './Destinos'
+import { ContagemDeConteudos, textoDaMudanca } from './destinos'
 import type { VersaoDoPacote } from './versoes'
 
 /** O que as versões DESENHAM na Biblioteca. */
