@@ -264,10 +264,12 @@ jobs:
           if-no-files-found: error
 
       - name: Web interface suite
-        # Use the threads pool: the forked runner grows to the V8 heap ceiling
-        # on Linux even when each spec gets its own process.
+        # Some rendered mission-screen contract tests retain a very large HTML
+        # snapshot in Vitest's fork worker. Split this file into its own process.
         working-directory: apps/studio-web
-        run: pnpm exec vitest run --pool=threads --maxWorkers=1 --no-file-parallelism
+        run: |
+          pnpm exec vitest run --pool=forks --maxWorkers=1 --minWorkers=1 --exclude='src/mission/MissionScreen.spec.tsx'
+          pnpm exec vitest run --pool=forks --maxWorkers=1 --minWorkers=1 src/mission/MissionScreen.spec.tsx
 
       - name: Browser suite
         # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
