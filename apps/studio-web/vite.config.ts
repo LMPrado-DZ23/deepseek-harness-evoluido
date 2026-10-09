@@ -6,5 +6,13 @@ export default defineConfig({
   base: '/studio/', plugins: [react()],
   define: { __DZ23_SW_VERSION__: JSON.stringify(swVersion()) },
   build: { outDir: 'dist', emptyOutDir: true },
-  test: { include: ['src/**/*.spec.ts', 'src/**/*.spec.tsx'], environment: 'node' },
+  test: {
+    include: ['src/**/*.spec.ts', 'src/**/*.spec.tsx'],
+    environment: 'node',
+    poolOptions: {
+      threads: {
+        singleThread: true
+      }
+    }
+  },
 })
