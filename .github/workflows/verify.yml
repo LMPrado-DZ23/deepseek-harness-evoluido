@@ -264,12 +264,10 @@ jobs:
           if-no-files-found: error
 
       - name: Web interface suite
-        # Some rendered mission-screen contract tests retain a very large HTML
-        # snapshot in Vitest's fork worker. Split this file into its own process.
+        # Vitest retains the worker when singleFork is enabled. Recycle it once
+        # it reaches 512 MiB so long suites stay below the runner's heap limit.
         working-directory: apps/studio-web
-        run: |
-          pnpm exec vitest run --pool=forks --maxWorkers=1 --minWorkers=1 --exclude='src/mission/MissionScreen.spec.tsx'
-          pnpm exec vitest run --pool=forks --maxWorkers=1 --minWorkers=1 src/mission/MissionScreen.spec.tsx
+        run: pnpm exec vitest run --pool=forks --maxWorkers=1 --minWorkers=1 --poolOptions.forks.memoryLimit=512
 
       - name: Browser suite
         # O Playwright NUNCA rodou aqui, e por isso duas provas de navegador
