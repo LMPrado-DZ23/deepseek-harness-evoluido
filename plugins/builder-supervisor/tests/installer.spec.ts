@@ -7,10 +7,26 @@ import { DEFAULT_SLOT_STARTUP_TIMEOUT_MS } from '../src/manager-timeouts.js'
 import { provisionAndActivateBuilderRuntime } from '../src/runtime-activation.js'
 import { builderPolicySha256 } from '../src/docker-adapter.js'
 import type { BuilderSupervisorRootPolicy } from '../src/supervisor-config.js'
+import { execFileSync } from 'node:child_process'
 
 const linux = process.platform === 'linux' ? describe : describe.skip
 const limpar: string[] = []
-afterEach(async () => { await Promise.all(limpar.splice(0).map(caminho => rm(caminho, { recursive: true, force: true }))) })
+
+/**
+ * Remove um diretório temporário de teste, mesmo que contenha arquivos com
+ * permissões restritivas (0o444, 0o555) criados pelo template-store-volume.
+ * `rm({ recursive: true, force: true })` do Node.js não faz chmod antes de
+ * remover: em Linux, `unlink` falha com EACCES em arquivo 0o444 dentro de
+ * diretório 0o555. Garantir 0o700 recursivamente antes de remover evita isso.
+ */
+async function removerComPermissao(caminho: string): Promise<void> {
+  if (process.platform === 'linux') {
+    try { execFileSync('chmod', ['-R', '700', caminho]) } catch { /* já sumiu */ }
+  }
+  await rm(caminho, { recursive: true, force: true })
+}
+
+afterEach(async () => { await Promise.all(limpar.splice(0).map(removerComPermissao)) })
 
 const DIGEST = `sha256:${'a'.repeat(64)}`
 
