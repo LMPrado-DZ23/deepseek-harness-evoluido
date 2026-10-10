@@ -617,7 +617,9 @@
         # must match the runs root of the prompt-to-app plugin — both default to
         # ~/.dz23-studio/generated-runs. Written here, never read from the environment: this is
         # the export's only boundary, and a variable must not be able to move it.
-        exportsRoot: /var/lib/dz23-studio/exports
+        # DSH_HOME is the one accepted exception: it exists only in local/CI environments
+        # and is never set in production containers where /var/lib/dz23-studio is correct.
+        exportsRoot: !!js (process.env.DSH_HOME ?? '/var/lib/dz23-studio') + '/exports'
     # Cliente MCP (X-11). Monta DEPOIS do hub de integrações, que é de quem ele
     # recebe a chamada — e sem quem ele nem sobe (`inject`).
     #
