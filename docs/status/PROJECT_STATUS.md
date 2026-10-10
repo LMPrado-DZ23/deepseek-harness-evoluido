@@ -18,6 +18,20 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-21
 
+## CURRENT VERIFIED STATE — 10/10/2026
+
+**Missão EXECUTING. CI totalmente verde após 3 correções, 10/10/2026.**
+
+SHA inicial desta sessão: `d272f28c` (commit que consolidou buildSteps e tentou corrigir /var/lib).
+SHA final: `a9d10a32` (CI run 38069707365 — ✓ Windows + ✓ Linux).
+
+Três defeitos corrigidos nesta sessão:
+1. `be849020` — `cordis.patch.yml`: ternário `? :` com `?` era caractere YAML especial; trocado por `??` para `runsRoot`/`logoStoreRoot` do `prompt-to-app`.
+2. `950edf88` — `cordis.patch.yml`: `exportsRoot` do `integration-hub` estava hardcoded `/var/lib/dz23-studio/exports` sem `!!js`; usuário CI runner não tem permissão em `/var/lib/`.
+3. `a9d10a32` — `installer.spec.ts`: `afterEach` falhava com EACCES ao remover diretórios com arquivos `0o444`/`0o555` criados pelo `template-store-volume`; corrigido com `chmod -R 700` antes do `rm`.
+
+CI run 38069707365 confirmado verde: todos os portões, boot proof, container hardening, unit suite, PostgreSQL.
+
 ## CURRENT VERIFIED STATE — 09/10/2026,,**Missão EXECUTING. Integração da branch de auditoria em integ, 09/10/2026.**,,A branch fix/audit-synthesis-replay (PR #1, 2be67b5) foi integrada à integ.,Os 22 requisitos novos (AUDIT-*, ABRIR-03/R, BENCHMARK-JOURNEYS-01) e os,registros da auditoria de 20/09/2026 estão agora em integ.,,- plugins/prompt-to-app: árvore completa da auditoria (1.431 testes, 7 sabotagens),- docs/ledger: 377 requisitos, 0 achados, BETA=265, FAILED=3,- AUDIT-SYNTHESIS-REPLAY-01: integrado; 3 riscos adversariais ainda abertos,  (replay de recusa sensível, replay por recibo, commit parcial),- 42 testes da raiz falham em Windows por causa Unix/perm/fifo/0700; CI Linux,  (GitHub Actions) não reproduz essas falhas,,Sem merge commit, sem publicação, sem deploy. O commit desta integração,ainda não foi feito (em andamento).
 ## CURRENT VERIFIED STATE — 21/09/2026
 
