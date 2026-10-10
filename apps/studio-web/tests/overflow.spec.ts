@@ -2,6 +2,40 @@ import { expect, test } from '@playwright/test'
 
 const origin = 'http://studio.dz23.localhost:4179'
 
+for (const largura of [320, 390]) {
+  test(`o compositor e o envio cabem na tela móvel de ${largura}px`, async ({ context, page }) => {
+    await page.setViewportSize({ width: largura, height: 844 })
+    await context.addCookies([
+      { name: 'dz23_studio_session', value: 'e2e', url: origin },
+      { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+    ])
+    await context.addInitScript(() => window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e'))
+    await page.goto('/studio/')
+    await page.getByRole('button', { name: 'Página de apresentação' }).click()
+    await page.getByRole('button', { name: 'Continuar' }).click()
+    const campo = page.locator('#dz-continuar')
+    await expect(campo).toBeVisible()
+    await campo.fill('Para os clientes da minha loja')
+    for (const seletor of ['.dz-compositor-inferior', '#dz-continuar', '.dz-compositor-rodape', '.dz-compositor-inferior .dz-enviar-redondo']) {
+      const rect = await page.locator(seletor).first().evaluate(el => {
+        const r = el.getBoundingClientRect()
+        return { left: r.left, right: r.right, width: window.innerWidth }
+      })
+      expect(rect.left, seletor).toBeGreaterThanOrEqual(0)
+      expect(rect.right, `${seletor}: ${JSON.stringify(rect)}`).toBeLessThanOrEqual(rect.width)
+    }
+    const enviar = page.locator('.dz-compositor-inferior .dz-enviar-redondo')
+    await expect(enviar).toBeEnabled()
+    await expect.poll(() => enviar.evaluate(el => {
+      const r = el.getBoundingClientRect()
+      const ponto = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      return ponto !== null && el.contains(ponto)
+    })).toBe(true)
+    await enviar.click()
+    await expect(page.getByLabel('Conversa desta tarefa').getByText('Para os clientes da minha loja', { exact: true })).toBeVisible()
+  })
+}
+
 /**
  * A tela não pode rolar para os LADOS.
  *

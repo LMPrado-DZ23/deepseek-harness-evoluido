@@ -1,0 +1,57 @@
+{
+  "date": "2026-09-20",
+  "requirement": "AUDIT-COMPOSER-RETRY-01",
+  "browser_source_snapshot": "7323416b07e2cfee38a16f027aaa5c50dfce9c16",
+  "source_sha256": {
+    "apps/studio-web/src/App.tsx": "52ff728cedbe5eff837c91267ab1f950afe4c9c674b44fa058d7ea04ca01b54c",
+    "apps/studio-web/src/tarefa/TaskScreen.tsx": "06ab25c8639a7f4c342fb3f35a420bfd77e6a7fff2bc910b53e85c8216737760",
+    "apps/studio-web/tests/composer-retry.spec.ts": "cac0194c68093ce655f3bd5703fd49f550dc929b171a7eaaf617486c1c33cc9c"
+  },
+  "focused_browser_passed": 3,
+  "frontend_passed": 1100,
+  "gates_passed": 32,
+  "root": {
+    "node": "22.23.1",
+    "passed": 4487,
+    "failed": 174,
+    "skipped": 68,
+    "new_failure_names": []
+  },
+  "postgres": "NOT_EXECUTED: no server; Docker ENOENT",
+  "mutations": [
+    {
+      "mutation": "ignore_failure",
+      "buildPassed": true,
+      "detected": true
+    },
+    {
+      "mutation": "ignore_read_failure",
+      "buildPassed": true,
+      "detected": true
+    },
+    {
+      "mutation": "forget_key_before_read",
+      "buildPassed": true,
+      "detected": true
+    },
+    {
+      "mutation": "erase_new_draft",
+      "buildPassed": true,
+      "detected": true
+    }
+  ],
+  "limits": [
+    "Draft remains in memory; closing tab loses text",
+    "Focused failure cases cover intake; all five composer actions use explicit success contract",
+    "Does not solve stale responses after project navigation",
+    "Other intention persistence and native installation remain pending"
+  ],
+  "browser_final": {
+    "startTime": "2026-09-20T17:35:44.795Z",
+    "duration": 415544.043,
+    "expected": 178,
+    "skipped": 3,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

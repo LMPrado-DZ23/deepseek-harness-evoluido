@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, request as apiRequest, test } from '@playwright/test'
 import { INTAKE_ANSWERS, answerIntake } from './answering'
 import { esperarResultado } from './resultado'
+import { PLAN_INTENT_DATABASE } from '../src/plan/pendingIntent'
 
 test('recusa interface e API sem sessão', async () => {
   /*
@@ -1072,4 +1073,255 @@ test('troca o idioma da interface, e a escolha sobrevive ao recarregamento sem m
   await expect(page.getByRole('link', { name: 'FRIGG: ir a la pantalla de inicio' })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 })
+})
+
+test.describe('reenvio de edição após perda da resposta', () => {
+  test.use({ serviceWorkers: 'block' })
+
+  test('preserva a edição e reusa o recibo quando a resposta gravada se perde', async ({ context, page }) => {
+    const pendingRecords = () => page.evaluate(databaseName => new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+      const opening = indexedDB.open(databaseName, 1)
+      opening.onerror = () => reject(opening.error)
+      opening.onsuccess = () => {
+        const database = opening.result
+        const transaction = database.transaction('pending', 'readonly')
+        const read = transaction.objectStore('pending').getAll()
+        transaction.oncomplete = () => { database.close(); resolve(read.result as Array<Record<string, unknown>>) }
+        transaction.onabort = () => { database.close(); reject(transaction.error) }
+      }
+    }), PLAN_INTENT_DATABASE)
+    const replaceRecords = (records: Array<Record<string, unknown>>) => page.evaluate(({ databaseName, records }) => new Promise<void>((resolve, reject) => {
+      const opening = indexedDB.open(databaseName, 1)
+      opening.onerror = () => reject(opening.error)
+      opening.onsuccess = () => {
+        const database = opening.result
+        const transaction = database.transaction('pending', 'readwrite')
+        const store = transaction.objectStore('pending')
+        store.clear()
+        for (const record of records) store.put(record)
+        transaction.oncomplete = () => { database.close(); resolve() }
+        transaction.onabort = () => { database.close(); reject(transaction.error) }
+      }
+    }), { databaseName: PLAN_INTENT_DATABASE, records })
+    const origin = 'http://studio.dz23.localhost:4179'
+    await context.addCookies([
+      { name: 'dz23_studio_session', value: 'e2e', url: origin },
+      { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+    ])
+    await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+    await page.goto('/studio/')
+    await page.getByRole('button', { name: 'Página de apresentação' }).click()
+    await page.getByRole('button', { name: 'Continuar' }).click()
+    await answerIntake(page, INTAKE_ANSWERS)
+    await page.getByRole('button', { name: 'Montar meu plano' }).click()
+    const card = page.locator('.plan-list .task-card').first()
+    await card.getByRole('button', { name: 'Editar esta parte' }).click()
+    await page.getByLabel('Nome desta parte').fill('Minha edição preservada')
+    const bodies: Array<{ request_key: string; base_revision: number }> = []
+    const results: Array<{ plan: { plan_id: string; revision: number } }> = []
+    await page.route('**/plan/edit', async route => {
+      bodies.push(route.request().postDataJSON())
+      const target = new URL(route.request().url())
+      const host = target.host
+      target.hostname = '127.0.0.1'
+      const response = await route.fetch({ url: target.href, headers: { ...route.request().headers(), host } })
+      expect(response.status()).toBe(200)
+      results.push(await response.json())
+      if (bodies.length === 1) await route.abort('failed')
+      else await route.fulfill({ response })
+    })
+    await page.getByRole('button', { name: 'Guardar minha alteração' }).click()
+    await expect.poll(() => bodies.length).toBe(1)
+    await expect(page.getByRole('button', { name: 'Guardar minha alteração' })).toBeEnabled()
+    await expect(page.getByLabel('Nome desta parte')).toHaveValue('Minha edição preservada')
+    await page.screenshot({ path: test.info().outputPath('plan-retry.png'), fullPage: true })
+    const projectId = new URL(page.url()).searchParams.get('projeto')!
+    const detailsRoute = `**/projects/${projectId}`
+    await page.route(detailsRoute, route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Não foi possível atualizar os detalhes da tarefa.' }) }))
+    await page.getByRole('button', { name: 'Guardar minha alteração' }).click()
+    await expect(card.locator('h2')).toHaveText('Minha edição preservada')
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]!.request_key).toMatch(/^[a-zA-Z0-9_-]{16,128}$/u)
+    expect(bodies[1]).toEqual(bodies[0])
+    expect(results[1]!.plan.plan_id).toBe(results[0]!.plan.plan_id)
+    expect(results[1]!.plan.revision).toBe(results[0]!.plan.revision)
+    await expect(page.getByText('Não foi possível atualizar os detalhes da tarefa.', { exact: true })).toBeVisible()
+    await expect(page.getByLabel('Nome desta parte')).toHaveCount(0)
+    await page.unroute(detailsRoute)
+    await page.reload()
+    await expect(page.locator('.plan-list .task-card h2').first()).toHaveText('Minha edição preservada')
+    const additions: Array<{ request_key: string }> = []
+    const additionResults: Array<{ plan: { plan_id: string; revision: number } }> = []
+    let releaseSecondResponse: () => void = () => {}
+    const secondResponseGate = new Promise<void>(resolve => { releaseSecondResponse = resolve })
+    let releaseThirdResponse: () => void = () => {}
+    const thirdResponseGate = new Promise<void>(resolve => { releaseThirdResponse = resolve })
+    await context.route('**/plan/slice', async route => {
+      additions.push(route.request().postDataJSON())
+      const attempt = additions.length
+      if (attempt === 3) {
+        // Simula outra intencao reservada enquanto duas respostas antigas estao em voo.
+        await replaceRecords([{ ...pendingAtFailure[0]!, key: 'f'.repeat(32) }])
+        releaseSecondResponse()
+      }
+      const target = new URL(route.request().url()); const host = target.host
+      target.hostname = '127.0.0.1'
+      const headers: Record<string, string> = { ...route.request().headers(), host }
+      // Aguarda a rota concluir antes de descartar sua resposta, sem o polling do cliente.
+      delete headers['x-dz23-espera']
+      const response = await route.fetch({ url: target.href, headers })
+      expect(response.status()).toBe(200)
+      additionResults.push(await response.json())
+      if (attempt === 1) await route.abort('failed')
+      else {
+        if (attempt === 2) await secondResponseGate
+        if (attempt === 3) await thirdResponseGate
+        await route.fulfill({ response })
+      }
+    })
+    let addition = page.getByLabel('Escreva o que falta, com suas palavras')
+    await addition.fill('Falta o endereço de atendimento')
+    await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    await expect.poll(() => additions.length).toBe(1)
+    await expect(page.getByRole('button', { name: 'Acrescentar esta etapa' })).toBeEnabled()
+    await expect(addition).toHaveValue('Falta o endereço de atendimento')
+    const pendingAtFailure = await pendingRecords()
+    expect(pendingAtFailure).toHaveLength(1)
+    expect(Object.keys(pendingAtFailure[0]!).sort()).toEqual(['baseRevision', 'digest', 'key', 'slot'])
+    expect(JSON.stringify(pendingAtFailure)).not.toContain('Falta o endereço')
+    expect(JSON.stringify(pendingAtFailure)).not.toContain('org-e2e')
+    const reopenedUrl = page.url()
+    const principal = await page.evaluate(async () => (await (await fetch('/api/studio/identity/session')).json()).principal as Record<string, string>)
+    for (const field of ['userId', 'orgId', 'tenantId', 'material']) {
+      const scopedTab = await context.newPage()
+      await scopedTab.route('**/api/studio/identity/session', route => route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify({ mode: 'authenticated', principal: field === 'material' ? principal : { ...principal, [field]: 'other-scope' } }),
+      }))
+      let scopedBody: { request_key: string } | undefined
+      await scopedTab.route('**/plan/slice', async route => { scopedBody = route.request().postDataJSON(); await route.abort('failed') })
+      await scopedTab.goto(reopenedUrl)
+      await scopedTab.getByLabel('Escreva o que falta, com suas palavras').fill(field === 'material' ? 'Agora quero outra etapa diferente' : 'Falta o endereço de atendimento')
+      await scopedTab.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+      await expect.poll(() => scopedBody?.request_key).toBeTruthy()
+      expect(scopedBody!.request_key).not.toBe(additions[0]!.request_key)
+      expect(await pendingRecords()).toHaveLength(field === 'material' ? 1 : 2)
+      await scopedTab.close()
+      await replaceRecords(pendingAtFailure)
+    }
+    await page.close()
+    page = await context.newPage()
+    await page.goto(reopenedUrl)
+    await expect(page.locator('.plan-list .task-card')).toHaveCount(3)
+    addition = page.getByLabel('Escreva o que falta, com suas palavras')
+    await addition.fill('Falta o endereço de atendimento')
+    await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    await expect.poll(() => additions.length).toBe(2)
+    const duplicateTab = await context.newPage()
+    await duplicateTab.goto(reopenedUrl)
+    await duplicateTab.getByLabel('Escreva o que falta, com suas palavras').fill('Falta o endereço de atendimento')
+    await duplicateTab.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    await expect(addition).toHaveValue('')
+    expect(await pendingRecords()).toEqual([{ ...pendingAtFailure[0]!, key: 'f'.repeat(32) }])
+    await replaceRecords([{ ...pendingAtFailure[0]!, digest: 'e'.repeat(64) }])
+    releaseThirdResponse()
+    await expect(duplicateTab.getByLabel('Escreva o que falta, com suas palavras')).toHaveValue('')
+    expect(await pendingRecords()).toEqual([{ ...pendingAtFailure[0]!, digest: 'e'.repeat(64) }])
+    await duplicateTab.close()
+    await expect(addition).toHaveValue('')
+    await expect(page.locator('.plan-list .task-card')).toHaveCount(3)
+    expect(additions).toHaveLength(3)
+    expect(additions[0]!.request_key).toMatch(/^[a-zA-Z0-9_-]{16,128}$/u)
+    expect(additions[1]).toEqual(additions[0])
+    expect(additions[2]).toEqual(additions[0])
+    expect(additionResults[1]).toEqual(additionResults[0])
+    await replaceRecords([])
+    await page.reload()
+    await expect(page.locator('.plan-list .task-card')).toHaveCount(3)
+    // Corrupcao nao vira uma nova chave e uma segunda chamada com custo.
+    const sent = additions.length
+    for (const corruption of [{ digest: 'invalid' }, { key: 'short' }, { baseRevision: 0 }, { text: 'unexpected payload' }]) {
+      await replaceRecords([{ ...pendingAtFailure[0]!, ...corruption }])
+      await page.getByLabel('Escreva o que falta, com suas palavras').fill('Outra etapa para conferir os recibos')
+      await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+      await expect(page.getByText(/Não consegui preservar este envio no aparelho/u)).toBeVisible()
+      expect(additions).toHaveLength(sent)
+    }
+    await replaceRecords([])
+    await page.evaluate(() => { Object.defineProperty(window, 'indexedDB', { configurable: true, get() { throw new DOMException('site storage denied', 'SecurityError') } }) })
+    await page.getByLabel('Escreva o que falta, com suas palavras').fill('Mais uma etapa sem permissão de armazenamento')
+    await page.getByRole('button', { name: 'Acrescentar esta etapa' }).click()
+    await expect(page.getByText(/Não consegui preservar este envio no aparelho/u)).toBeVisible()
+    expect(additions).toHaveLength(sent)
+  })
+
+})
+
+test.describe('criacao recuperavel depois de fechar a aba', () => {
+  test.use({ serviceWorkers: 'block' })
+  test('reenvia a criacao com a mesma chave e recupera uma unica tarefa', async ({ context, page }) => {
+    const origin = 'http://studio.dz23.localhost:4179'
+    await context.addCookies([
+      { name: 'dz23_studio_session', value: 'e2e', url: origin },
+      { name: 'dz23_studio_csrf', value: 'csrf-e2e', url: origin },
+    ])
+    await context.addInitScript(() => { window.sessionStorage.setItem('dz23.studio.csrf.v1', 'csrf-e2e') })
+    const keys: string[] = []
+    const ids: string[] = []
+    await context.route('**/api/studio/apps/projects', async route => {
+      if (route.request().method() !== 'POST') { await route.continue(); return }
+      const body = route.request().postDataJSON() as { request_key: string }
+      keys.push(body.request_key)
+      const url = new URL(route.request().url()); url.hostname = '127.0.0.1'
+      const response = await route.fetch({ url: url.href, headers: { ...route.request().headers(), host: 'studio.dz23.localhost:4179' } })
+      expect(response.status()).toBeLessThan(300)
+      const saved = await response.json() as { project: { project_id: string } }
+      ids.push(saved.project.project_id)
+      if (ids.length === 1) await route.abort('failed')
+      else await route.fulfill({ response })
+    })
+    await page.goto('/studio/')
+    await page.getByRole('button', { name: 'Página de apresentação' }).click()
+    await page.getByRole('button', { name: 'Continuar' }).click()
+    await expect.poll(() => ids.length).toBe(1)
+    await expect(page.getByRole('button', { name: 'Continuar' })).toBeEnabled()
+    const records = (target: typeof page) => target.evaluate(databaseName => new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+      const opening = indexedDB.open(databaseName, 1)
+      opening.onerror = () => reject(opening.error)
+      opening.onsuccess = () => {
+        const db = opening.result
+        const tx = db.transaction('pending', 'readonly')
+        const read = tx.objectStore('pending').getAll()
+        tx.oncomplete = () => { db.close(); resolve(read.result as Array<Record<string, unknown>>) }
+        tx.onabort = () => { db.close(); reject(tx.error) }
+      }
+    }), PLAN_INTENT_DATABASE)
+    const pending = await records(page)
+    expect(pending).toHaveLength(1)
+    expect(Object.keys(pending[0]!).sort()).toEqual(['baseRevision', 'digest', 'key', 'slot'])
+    expect(pending[0]).toMatchObject({ baseRevision: null, key: keys[0] })
+    const denied = await context.newPage()
+    await denied.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { get: () => { throw new Error('storage denied') } }) })
+    await denied.goto('/studio/')
+    await denied.getByRole('button', { name: 'Página de apresentação' }).click()
+    await denied.getByRole('button', { name: 'Continuar' }).click()
+    await expect(denied.getByText(/Não consegui preservar este envio/u)).toBeVisible()
+    expect(keys).toHaveLength(1)
+    await denied.close()
+    await page.close()
+    const reopened = await context.newPage()
+    await reopened.goto('/studio/')
+    await reopened.getByRole('button', { name: 'Página de apresentação' }).click()
+    await reopened.getByRole('button', { name: 'Continuar' }).click()
+    await expect.poll(() => ids.length).toBe(2)
+    expect(keys[1]).toBe(keys[0])
+    expect(ids[1]).toBe(ids[0])
+    await expect(reopened.getByLabel('Conversa desta tarefa')).toBeVisible()
+    await expect.poll(() => records(reopened)).toEqual([])
+    await reopened.goto('/studio/')
+    await reopened.getByRole('button', { name: 'Página de apresentação' }).click()
+    await reopened.getByRole('button', { name: 'Continuar' }).click()
+    await expect.poll(() => ids.length).toBe(3)
+    expect(keys[2]).not.toBe(keys[0])
+    expect(ids[2]).not.toBe(ids[0])
+  })
 })

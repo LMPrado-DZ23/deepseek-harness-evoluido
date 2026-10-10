@@ -71,3 +71,220 @@ divergências, zero mais frouxas. E compilou o código gerado de verdade, com
 **Próximo passo.** T-06 (`trace_id`) só começa com um produtor real: metade dele
 — schema e resolver sem quem preencha — seria exatamente a API morta que
 removi hoje de manhã.
+
+
+## 2026-09-20 — auditoria independente Codex, base GitHub 997fa20
+
+**Ação.** Confirmado o HEAD de `integ` pela API; ZIP conferido por SHA-256 e
+6.167 blobs comparados com a árvore remota. Checkout shallow reconstruído com
+OID exato; pin upstream preservado. Corrigidos digest não comparado no CLI,
+perda em uploads concorrentes, caminhos de arquivos sujeitos a links e
+compositor cortado em telas de 320/390 px. Launcher de gates/E2E passa pelo
+loader Node, mantendo os mesmos scripts.
+
+**Evidência.** Relatório `audit/FRIGG-AUDIT-20260920.md`, capturas antes/depois,
+regressões reais de filesystem e CLI, quatro mutações detectadas. 32 gates,
+build e testes focados aprovados; 173 falhas na suíte da raiz e PostgreSQL
+não executado impedem declaração de aprovação global. O relatório concentra
+os resultados finais e as limitações, inclusive navegador e Node diferente
+do fixado para entrega.
+
+**Decisão e próximo passo.** Entregar correções candidatas para revisão em PR
+com destino `integ`; repetir CI e dependências reais antes de promover. O
+protocolo `docs/plans/FRIGG-JOURNEY-BENCHMARKS.md` separa doze jornadas e onze
+dimensões; comparação externa permanece `NOT_EXECUTED`. Não declarar vantagem
+sobre Manus, paridade nativa nem auditoria de segurança exaustiva.
+
+
+## 2026-09-20 — retomada: a meta é usuário final, não PR
+
+Prado reafirmou que o objetivo ainda não foi cumprido. Corrigidos comandos
+silenciosos em caminhos com espaços/acentos e o launcher que abria a interface
+técnica. O runtime real com Node 22.23.1 abriu o FRIGG e nove destinos; E2E
+completo 173 PASS/3 SKIP. Dois testes de restauração agora usam destinos
+privados isolados, sem alterar as guardas. Raiz continua com falhas; Docker,
+PostgreSQL real, modelo e computador do titular seguem bloqueando provas.
+Estado e limites: `audit/FRIGG-USER-READINESS-20260920.md`. Missão permanece
+EXECUTING; nenhum merge, release nem prontidão universal declarada.
+
+## 2026-09-20 — AUDIT-PLAN-01, preservar decisões durante planejamento
+
+**Ação.** Reproduzir sete cenários antes de corrigir: resposta tardia após
+edição, aprovação ou pedido de mudança; duas edições; duas etapas concorrentes;
+modelo chamado após aprovação; nova proposta após várias edições.
+
+**Resultado.** Sete falhas na base e nenhuma após serializar gravações por
+escopo/projeto, conferir o plano depois do modelo e incrementar a maior revisão.
+179 testes integrados aprovados. Cinco retiradas intencionais das proteções
+fizeram os testes falharem; fontes restaurados. Typecheck e build passaram.
+
+**Limite.** Uma instância de serviço, sem transação/CAS distribuído. O modelo
+é controlado nos testes. Reenvio durável das duas rotas não foi declarado pronto.
+CI do commit anterior f554fb3 falhou sem etapas e sem runner atribuído
+(run 35515702641); causa específica segue sem confirmação.
+
+## 2026-09-20 — AUDIT-REPLAY-01, reenvios duráveis do plano
+
+**Ação.** Cinco regressões iniciais reproduziram os reenvios sem recibo.
+As revisões passaram a ter identificadores próprios e a reserva existente
+passou a apontar para o resultado preservado. As rotas e a tela enviam a chave.
+
+**Resultado.** A prova `scripts/prove-plan-replay.mjs` escreve e reabre os
+mesmos domínios JSON do Harness em processos separados, usando o repositório
+do produto. Recupera versões antigas sem alterar a atual, sem nova chamada de
+modelo e sem duplicar a trilha. O modelo desta prova é controlado.
+O navegador reproduziu descarte do rascunho após resposta perdida e silêncio
+sobre leitura mal sucedida; ambos foram corrigidos. A auditoria também ganhou
+prova de preservação da data da edição após aprovação posterior.
+
+**Limites.** Uma instância escritora; sem garantia entre vários processos
+concorrentes. Uma chamada externa cujo resultado não foi persistido fica
+incerta e não é repetida automaticamente. Nova tentativa exige nova intenção.
+Novos valores do enum de recibos são compatíveis com leitura dos registros
+antigos, mas um binário anterior não os entende: rollback exige restaurar o
+backup consistente anterior de todo o armazenamento, não apagar recibos.
+
+## 2026-09-20 — primeiro cadastro preserva trabalho pessoal (ABRIR-03)
+
+Prova inicial no JSON real reproduziu troca de usuario, org e tenant. O primeiro
+cadastro local agora conserva os tres; convite mantem seu proprio escopo.
+Codigo emitido antes de mudar o modo nao transfere autoridade. 188 testes
+passaram; seis mutacoes foram detectadas. Projeto e arquivo continuaram
+acessiveis apos cadastro e reabertura em outro processo, sem acesso ao tenant
+alheio. SMTP capturado, sem entrega externa. Vinculos das conversas sinteticas
+continuam em memoria; esta parte da continuidade segue aberta.
+
+## 2026-09-20 — recuperacao do cadastro interrompido
+
+A proxima falha foi reproduzida antes de corrigir: usuario persistia, espaco
+falhava, novo login emitia sessao sem repetir a etapa que faltava. Marcador de
+provisionamento pendente agora acompanha o usuario ate concluir. Falha ao gravar
+a conclusao tambem impede sessao prematura. Matriculas completas nao repetem
+a etapa. 190 testes PASS, quatro mutacoes detectadas, prova JSON real em tres
+processos preservando trabalho e isolamento depois de falha de escrita.
+
+## 2026-09-20 — intencao de envio sobrevive a fechar a aba
+
+O teste novo reproduziu chave e revisao diferentes ao reabrir a aba depois de
+perder a resposta. IndexedDB agora conserva apenas hashes, chave e revisao para
+edicao/etapa. Transacao confirma antes do POST; nao ha texto nem fila automatica.
+Navegador prova reabertura, duas abas, escopos, outra intencao, ACK antigo,
+recibo corrompido, bloqueio do armazenamento e limpeza seletiva no logout.
+Nove mutacoes foram detectadas depois de compilar cada candidata. As fontes
+foram restauradas; 32 portoes PASS, interface 1.095 PASS, navegador 174 PASS/3 SKIP.
+Raiz: 4.461 PASS/174 FAIL/68 SKIP, sem falhas novas. Outros envios ainda usam memoria.
+
+
+## 2026-09-20 — pedido antigo nao deve alterar proposta nova
+
+Duas regressoes demonstraram reaplicacao indevida apos reiniciar o servico ou
+perder o resultado. O recibo agora identifica outra versao preservada. Uma
+reserva sem resultado nao escolhe o plano corrente por suposicao. Recibos
+legados sem vinculo falham com orientacao para conferir o plano. 1.409 testes
+do plugin e prova JSON real em processos separados passaram; 32 portoes PASS; quatro mutacoes detectadas.
+
+
+## 2026-09-20 — consumo incerto no questionario
+
+Quatro regressoes demonstraram nova chamada de modelo apos falha externa ou
+falha de escrita, com recomendacao e com resposta digitada. Reserva sem turno
+agora recusa repeticao; resposta completa e relida, nova intencao explicita
+continua possivel. 1.418 testes passaram. Sintese e inferencias posteriores
+ao fazem parte desta garantia. 32 portoes PASS; raiz Node 22: 4.476 PASS/174 FAIL/68 SKIP, sem falhas novas.
+
+Tres regressoes adicionais provaram que reserva legada sem result_id ignorava
+a politica de incerteza no questionario, mudanca e etapa. A correcao cobre
+tambem esse formato; cinco mutacoes validas foram detectadas. A tentativa
+inicial da quinta mutacao atingiu outra funcao e foi excluida, depois refeita
+no alvo correto. A prova JSON inclui recibo legado sem identificador.
+
+
+## 2026-09-20 — criacao recuperavel no cliente
+
+O navegador demonstrou nova chave depois de fechar a aba com resposta perdida.
+A criacao passa a usar a mesma transacao de metadados, antes do POST. Recibo
+de criacao usa revisao null e nao pode ser confundido com recibo de plano.
+Um teste que lia strings do antigo useRef foi substituido pela jornada real
+de envio, reabertura, recuperacao e nova tarefa depois da confirmacao.
+Interface 1.100 PASS; navegador 175 PASS/3 SKIP/0 FAIL em copia nova; quatro
+mutacoes e 32 portoes PASS. Design/logo continuam como passos separados.
+Primeira rodada acusou teto fixo de leituras na Biblioteca; passou a exigir
+uma leitura por endereco. Reintroduzir o laco fez a nova guarda reprovar.
+Segunda rodada acusou dois bundles no diretorio reutilizado apos mutacao.
+Copia nova compilada uma vez passou na guarda PWA sem altera-la.
+
+
+## 2026-09-20 — revisao interrompida
+
+Reproduzidos estado antigo apos salvar especificacao, trilha ausente apos
+transicao e numero de versao menor que o atual em historico parcial. Marcador
+no projeto antecede a especificacao; estado, trilha deterministica e limpeza
+sao retomados na ordem. Outra mutacao nao ultrapassa a escrita pendente.
+Oito mutacoes detectadas: remover mutex sobreviveu ao teste inicial; uma
+barreira na primeira escrita tornou a corrida deterministica e detectou a
+mutacao. 1.429 testes, 32 portoes e JSON real com tres pontos de falha passaram.
+Raiz: 4.487 PASS/174 FAIL/68 SKIP, sem falhas novas. Cliente ainda em memoria.
+
+
+## 2026-09-20 — AUDIT-COMPOSER-RETRY-01
+
+**Acao.** Reproduzidas tres perdas do rascunho: POST falho, POST gravado com
+GET posterior falho e texto novo digitado enquanto o envio anterior chega.
+O compositor agora exige sucesso explicito e conserva texto alterado durante
+a espera; cinco callbacks retornam confirmacao e conservam chave ate releitura.
+
+**Prova.** Tres casos focados passaram; quatro mutacoes falharam nas assercoes
+de texto/chave, com builds validos. Interface: 1.100 PASS; 32 portoes PASS.
+Raiz Node 22: 4.487 PASS/174 FAIL/68 SKIP, mesmos nomes de falha da base anterior.
+PostgreSQL: NOT_EXECUTED, sem servidor e Docker ENOENT. Navegador completo
+registrado em audit/evidence/20260920/composer-retry-verification.json.
+
+**Limite e proximo passo.** Rascunho em memoria, sem prova de navegacao
+concorrente ou instalacao nativa. Regressao da chave de revisao apos fechar
+a aba ja escrita; AUDIT-REVISION-CLIENT-01 iniciada, nao entregue neste checkpoint.
+CI 35525657270 falhou sem etapas/logs; DESKTOP-PRADO offline em 17:41 UTC.
+
+
+## 2026-09-20 — revisao duravel, transicao final e relogio do teste
+
+**Acao.** AUDIT-REVISION-CLIENT-01: fechamento da aba gerava outra chave e
+409; revisao interrompida nao tinha orientacao. IndexedDB conserva metadados,
+recusa texto diferente enquanto ha intencao pendente e libera recusa 400/409
+somente depois de ler ausencia de marcador no servidor. A tela oferece retomada.
+Quatro cenarios de navegador incluem resposta perdida/nula, erro 500/409,
+armazenamento negado e texto invalido corrigido; dez mutacoes detectadas.
+
+**Achado real.** Um caso parou com Enviar desabilitado. O trace mostrou
+projeto GENERATING e execucao PASSED no mesmo GET. AUDIT-GENERATION-SETTLE-01
+reproduziu a leitura parcial de forma controlada; a tela agora continua lendo
+ate os dois registros concluirem. Navegador e duas mutacoes passaram.
+
+**Validacao adicional.** A raiz apresentou uma falha extra no teste de capacidade
+de empacotamento: exportacao saudavel excedeu 300 ms sob carga. Passou isolado.
+AUDIT-PACKAGING-CLOCK-01 controla o relogio depois que os trabalhos entram no
+empacotador e mantem filesystem real; nao aumentou timeout de producao. Mutacao
+que vaza vaga apos timeout continuou reprovando. Resultado global final e limites
+em audit/evidence/20260920/revision-client-verification.json.
+
+**Continuidade.** Perguntas ainda perdem chave ao fechar aba; regressao escrita
+em question-retry.spec.ts, ainda fora deste checkpoint. CI nao executa etapas,
+computador alvo offline, PostgreSQL/instalacao real e demais funcionalidades
+continuam pendentes. Missao EXECUTING, sem merge ou release.
+
+
+## 2026-09-20 — pergunta duravel e falhas da sintese
+
+**Acao.** AUDIT-QUESTION-CLIENT-01 reproduziu outra chave/turno apos fechar a
+aba. Perguntas agora usam metadados persistentes por pessoa/organizacao/tenant/
+projeto; confirmacao vem depois da releitura. Navegador focado recuperou o turno,
+permitiu pergunta nova apos confirmar e impediu POST sem armazenamento.
+Duas mutacoes detectadas. Validacao final em question-client-verification.json.
+
+**Proxima frente iniciada.** AUDIT-SYNTHESIS-REPLAY-01 tem quatro regressoes
+confirmadas em copia isolada: ultima resposta salva recebe 409 no reenvio;
+falha na sintese seguida da mesma chave chama modelo novamente (3 -> 4);
+correcao reenviada tambem repete (4 -> 5); resposta antiga apos correcao recebe 409.
+Ainda nao corrigido. Casos preservados como texto fora da suite normal, para
+nao apresentar teste nao executado ou suite vermelha como entrega aprovada.
+Modelo controlado; nenhum custo de provedor real foi medido. A correcao deve
+cobrir recibo, especificacao, estado, auditoria e progresso posterior.

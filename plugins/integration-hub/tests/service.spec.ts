@@ -940,23 +940,43 @@ describe('integration hub service', () => {
     // that stopped answering: whatever it is, it does not return and cannot be cancelled.
     let release: () => void = () => undefined
     packaging.hold = new Promise<void>(resolve => { release = resolve })
-    const stuck = Array.from({ length: MAX_CONCURRENT_PACKAGING }, (_unused, index) => service.createExport(builder, `p${index}`))
-    for (const attempt of stuck) await expect(attempt).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('parou de esperar') })
-    // The refusal is in the history, with the project it happened on.
-    expect(repository.eventRows.filter(event => event.detail === 'packaging-timeout')).toHaveLength(MAX_CONCURRENT_PACKAGING)
-    expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure' })
-    // And the Studio still exports while those calls are STILL running: the slots came back, which
-    // is the whole point of the ceiling — one wedged build is never everybody's outage.
-    packaging.hold = undefined
-    await expect(service.createExport(builder, 'p9')).resolves.toMatchObject({ project_id: 'p9' })
-    // The abandoned calls now finish. They add nothing: the person was told the Studio stopped
-    // waiting, and that stays the only thing this attempt ever said.
-    release()
-    await packagingSettled()
-    expect(repository.exportRows.map(row => row.project_id)).toEqual(['p9'])
-    expect(repository.eventRows.filter(event => event.outcome === 'success').map(event => event.action)).toEqual(['export.created'])
-    // Only when the abandoned build has really finished does the project it was holding build again.
-    await expect(eventually(() => service.createExport(builder, 'p0'))).resolves.toMatchObject({ project_id: 'p0' })
+    // Advance the timeout only after every call reached packaging. Real filesystem
+    // latency must not make the healthy export exceed this test's 300 ms clock.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const enteredBefore = packaging.calls.length
+      const stuck = Array.from({ length: MAX_CONCURRENT_PACKAGING }, (_unused, index) => service.createExport(builder, `p${index}`))
+      const refusals = Promise.all(stuck.map(attempt => expect(attempt).rejects.toMatchObject({ code: 'TIMEOUT', message: expect.stringContaining('parou de esperar') })))
+      while (packaging.calls.length < enteredBefore + MAX_CONCURRENT_PACKAGING) await new Promise<void>(resolve => setImmediate(resolve))
+      await vi.advanceTimersByTimeAsync(300)
+      await refusals
+      // The refusal is in the history, with the project it happened on.
+      expect(repository.eventRows.filter(event => event.detail === 'packaging-timeout')).toHaveLength(MAX_CONCURRENT_PACKAGING)
+      expect(repository.eventRows.at(-1)).toMatchObject({ action: 'export.created', outcome: 'failure' })
+      // And the Studio still exports while those calls are STILL running: the slots came back, which
+      // is the whole point of the ceiling — one wedged build is never everybody's outage.
+      packaging.hold = undefined
+      await expect(service.createExport(builder, 'p9')).resolves.toMatchObject({ project_id: 'p9' })
+      // The abandoned calls now finish. They add nothing: the person was told the Studio stopped
+      // waiting, and that stays the only thing this attempt ever said.
+      release()
+      await Promise.allSettled(packaging.calls)
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(repository.exportRows.map(row => row.project_id)).toEqual(['p9'])
+      expect(repository.eventRows.filter(event => event.outcome === 'success').map(event => event.action)).toEqual(['export.created'])
+      // Only when the abandoned build has really finished does the project it was holding build again.
+      // FileHandle.close may still be finishing; yield real I/O without advancing
+      // the deliberately frozen packaging deadline of the next healthy call.
+      let resumed: StudioExport | undefined
+      for (let attempt = 0; attempt < 400 && resumed === undefined; attempt++) {
+        try { resumed = await service.createExport(builder, 'p0') }
+        catch (error) {
+          if (!(error instanceof HubError) || error.code !== 'TIMEOUT') throw error
+          await new Promise<void>(resolve => setImmediate(resolve))
+        }
+      }
+      expect(resumed).toMatchObject({ project_id: 'p0' })
+    } finally { release(); vi.useRealTimers() }
   }, 20_000)
 
   /**

@@ -34,7 +34,7 @@ import { useEffect, useRef, useState } from 'react'
  * não caberia.
  */
 export function PendingButton({ label, busyLabel, action, className = 'primary', disabled = false, testId, ariaLabel, icone }: {
-  label: string; busyLabel: string; action: () => Promise<void>
+  label: string; busyLabel: string; action: () => Promise<unknown>
   className?: string; disabled?: boolean; testId?: string; ariaLabel?: string; icone?: ReactNode
 }) {
   const [pending, setPending] = useState(false)

@@ -525,8 +525,8 @@
     - id: dz23-studio-prompt-to-app
       name: '@dz23-studio/prompt-to-app'
       config:
-        runsRoot: /var/lib/dz23-studio/generated-runs
-        logoStoreRoot: /var/lib/dz23-studio/assets
+        runsRoot: !!js process.env.DSH_HOME ? `${process.env.DSH_HOME}/generated-runs` : '/var/lib/dz23-studio/generated-runs'
+        logoStoreRoot: !!js process.env.DSH_HOME ? `${process.env.DSH_HOME}/assets` : '/var/lib/dz23-studio/assets'
         # Havia aqui um bloco `builder:` com `imageDigestFile` e
         # `templateStore`. Nenhuma das três chaves existe em
         # `PromptToAppPluginConfig` — a configuração real do construtor é
@@ -617,7 +617,6 @@
         # must match the runs root of the prompt-to-app plugin — both default to
         # ~/.dz23-studio/generated-runs. Written here, never read from the environment: this is
         # the export's only boundary, and a variable must not be able to move it.
-        runsRoot: /var/lib/dz23-studio/generated-runs
         exportsRoot: /var/lib/dz23-studio/exports
     # Cliente MCP (X-11). Monta DEPOIS do hub de integrações, que é de quem ele
     # recebe a chamada — e sem quem ele nem sobe (`inject`).

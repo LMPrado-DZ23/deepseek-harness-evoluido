@@ -1,0 +1,61 @@
+{
+  "date": "2026-09-20",
+  "requirement": "AUDIT-PLAN-01",
+  "canonical_head": "997fa20d897a95061db6da17981c0713dce5f8a3",
+  "pre_fix_commit": "f554fb3c81ab9b2863d4db819c4ffc062823d539",
+  "regressions": {
+    "failed_before": 7,
+    "passed_after": 7
+  },
+  "focused_suite": {
+    "files": 6,
+    "passed": 179,
+    "failed": 0,
+    "node_versions": [
+      "22.23.1",
+      "24.19.0"
+    ]
+  },
+  "browser": {
+    "file": "apps/studio-web/tests/journey.spec.ts",
+    "project": "mesa",
+    "passed": 13,
+    "failed": 0,
+    "fixture_server": true
+  },
+  "mutations": [
+    {
+      "mutation": "sem_serializacao",
+      "detected": true
+    },
+    {
+      "mutation": "sem_revisao_atual",
+      "detected": true
+    },
+    {
+      "mutation": "sem_estado_atual",
+      "detected": true
+    },
+    {
+      "mutation": "sem_guarda_antes_modelo",
+      "detected": true
+    },
+    {
+      "mutation": "revisao_por_quantidade",
+      "detected": true
+    }
+  ],
+  "typecheck": "PASS",
+  "package_build": "PASS",
+  "limits": [
+    "Mutex per service instance, not distributed CAS",
+    "plan/edit and plan/slice durable idempotency remains pending",
+    "No real model or clean end-user installation verified",
+    "Not a product completion certificate"
+  ],
+  "gates": {
+    "passed": 32,
+    "failed": 0,
+    "constitution": "PASS"
+  }
+}

@@ -19,7 +19,7 @@ import {
   type StudioIdentityService,
 } from '@dz23-studio/identity'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { createReadStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
 import { lstat, readFile, realpath } from 'node:fs/promises'
 import { extname, relative, resolve, sep } from 'node:path'
 import { t } from './i18n.js'
@@ -412,15 +412,17 @@ async function atenderArquivos(
       return sendJson(response, 201, { caminho }, frameSources)
     }
     if (pathname === ASSISTANT_FILES_PATH) return sendJson(response, 200, await listarArquivos(pasta), frameSources)
-    const real = await arquivoParaBaixar(pasta, url.searchParams.get('caminho') ?? '')
-    const nome = real.slice(real.lastIndexOf('/') + 1)
-    response.writeHead(200, {
-      ...securityHeaders('application/octet-stream', frameSources),
-      'content-disposition': `attachment; filename="${nome.replace(/[^\x20-\x7e]|"/gu, '_')}"; filename*=UTF-8''${encodeURIComponent(nome)}`,
-      'content-security-policy': "sandbox; default-src 'none'",
-    })
-    createReadStream(real).pipe(response)
+    const { arquivo, nome } = await arquivoParaBaixar(pasta, url.searchParams.get('caminho') ?? '')
+    try {
+      response.writeHead(200, {
+        ...securityHeaders('application/octet-stream', frameSources),
+        'content-disposition': `attachment; filename="${nome.replace(/[^\x20-\x7e]|"/gu, '_')}"; filename*=UTF-8''${encodeURIComponent(nome)}`,
+        'content-security-policy': "sandbox; default-src 'none'",
+      })
+      await pipeline(arquivo.createReadStream({ autoClose: false }), response)
+    } finally { await arquivo.close() }
   } catch (erro) {
+    if (response.headersSent) { response.destroy(erro instanceof Error ? erro : undefined); return }
     if (erro instanceof ArquivoRecusado) {
       const status = erro.code === 'GRANDE' ? 413 : erro.code === 'NOME' ? 400 : 404
       const chave = erro.code === 'GRANDE' ? 'assistant.fileTooLarge' : erro.code === 'NOME' ? 'assistant.fileNameInvalid' : 'assistant.fileMissing'

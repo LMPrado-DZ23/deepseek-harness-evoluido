@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -17,6 +17,36 @@ describe('nomeSeguro', () => {
 })
 
 describe('gravarEnviado', () => {
+  it('envios concorrentes preservam todos os arquivos e seus conteúdos', async () => {
+    const p = await pasta()
+    const caminhos = await Promise.all(Array.from({ length: 20 }, (_, i) => gravarEnviado(p, 'mesmo.txt', Readable.from([String(i)]))))
+    expect(new Set(caminhos).size).toBe(20)
+    for (const [i, caminho] of caminhos.entries()) expect(await readFile(join(p, caminho), 'utf8')).toBe(String(i))
+    expect((await readdir(join(p, 'enviados'))).length).toBe(20)
+  })
+
+  it('não grava fora da pasta quando enviados é um link', async () => {
+    const p = await pasta(); const fora = await pasta()
+    await symlink(fora, join(p, 'enviados'), 'dir')
+    await expect(gravarEnviado(p, 'escape.txt', Readable.from(['dados']))).rejects.toMatchObject({ code: 'FORA' })
+    expect(await readdir(fora)).toEqual([])
+  })
+
+  it('trocar a pasta por um link durante o envio não redireciona a gravação', async () => {
+    const p = await pasta(); const fora = await pasta()
+    async function* corpo() {
+      yield Buffer.from('primeiro')
+      await rename(join(p, 'enviados'), join(p, 'preservada'))
+      await symlink(fora, join(p, 'enviados'), 'dir')
+      yield Buffer.from('segundo')
+    }
+    // No Linux/WSL a escrita permanece no descritor aberto. Em plataformas
+    // sem /proc a identidade precisa ser recusada antes da publicação.
+    await expect(gravarEnviado(p, 'escape.txt', Readable.from(corpo()))).rejects.toMatchObject({ code: 'FORA' })
+    expect(await readdir(fora)).toEqual([])
+    expect((await readdir(join(p, 'preservada'))).filter(n => n.startsWith('.parcial-'))).toEqual([])
+  })
+
   it('qualquer tipo entra em enviados/, sem sobrescrever', async () => {
     const p = await pasta()
     const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff])
@@ -50,7 +80,23 @@ describe('arquivoParaBaixar', () => {
   it('entrega o que está dentro da pasta', async () => {
     const p = await pasta()
     await writeFile(join(p, 'a.txt'), 'a')
-    expect(await arquivoParaBaixar(p, 'a.txt')).toMatch(/a\.txt$/u)
+    const download = await arquivoParaBaixar(p, 'a.txt')
+    try {
+      expect(download.nome).toBe('a.txt')
+      expect(await download.arquivo.readFile('utf8')).toBe('a')
+    } finally { await download.arquivo.close() }
+  })
+
+  it('trocar o caminho depois da autorização não troca os bytes baixados', async () => {
+    const p = await pasta(); const fora = await pasta()
+    await writeFile(join(p, 'a.txt'), 'autorizado')
+    await writeFile(join(fora, 'segredo'), 'fora')
+    const download = await arquivoParaBaixar(p, 'a.txt')
+    try {
+      await rename(join(p, 'a.txt'), join(p, 'anterior.txt'))
+      await symlink(join(fora, 'segredo'), join(p, 'a.txt'))
+      expect(await download.arquivo.readFile('utf8')).toBe('autorizado')
+    } finally { await download.arquivo.close() }
   })
 
   it('recusa sair da pasta, por caminho ou por link', async () => {

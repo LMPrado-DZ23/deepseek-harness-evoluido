@@ -1,0 +1,48 @@
+{
+  "date": "2026-09-20",
+  "requirement": "AUDIT-QUESTION-CLIENT-01",
+  "source_snapshot": "824fc1e2e1d75ef290a4c1ff77efa0e057ea170c",
+  "source_sha256": {
+    "apps/studio-web/src/App.tsx": "7368e37c58ca86b5fe05e7faeb093f1355d42f74aa51dfcaaf4f32876dfaf394",
+    "apps/studio-web/src/plan/pendingIntent.ts": "5f467f393106bde9dba436929f5124344c347511336ecc1ce66c17eb0f5e0694",
+    "apps/studio-web/tests/question-retry.spec.ts": "f0b829743f6ea2b21bd5ea72622b0b1ca497d9a81031742b8f388a9685e1dae8"
+  },
+  "frontend_passed": 1111,
+  "focused_browser_passed": 1,
+  "mutations": [
+    {
+      "mutation": "new_key_on_retry",
+      "buildPassed": true,
+      "detected": true
+    },
+    {
+      "mutation": "retain_confirmed_question",
+      "buildPassed": true,
+      "detected": true
+    }
+  ],
+  "gates_passed": 32,
+  "root": {
+    "node": "22.23.1",
+    "passed": 4487,
+    "failed": 174,
+    "skipped": 68,
+    "new_failure_names": []
+  },
+  "postgres": "NOT_EXECUTED: environment still lacks server and Docker",
+  "limits": [
+    "Same browser profile and account; retype original question; no raw text stored",
+    "Current answer describes recorded project facts without calling a model",
+    "Intake, correction and plan-change intentions remain in memory",
+    "Synthesis replay defects reproduced separately and remain open",
+    "No native installation or power-loss proof"
+  ],
+  "browser_final": {
+    "startTime": "2026-09-20T18:12:08.694Z",
+    "duration": 460610.647,
+    "expected": 184,
+    "skipped": 3,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

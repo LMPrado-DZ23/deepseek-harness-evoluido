@@ -38,6 +38,8 @@ import {
   type PreviewSourcePort,
 } from '../../../plugins/preview/src/service.js'
 
+let failRevisionApprovalFor: string | null = null
+
 class MemoryRepository implements PromptToAppRepository {
   projectRows: StudioProject[] = []; specRows: StudioAppSpecRecord[] = []; designRows: StudioDesignSpecRecord[] = []; turnRows: StudioIntakeTurn[] = []
   planRows: StudioPlan[] = []; runRows: StudioRun[] = []; evidenceRows: StudioEvidence[] = []; approvalRows: StudioApproval[] = []
@@ -50,7 +52,9 @@ class MemoryRepository implements PromptToAppRepository {
   putPlan = async (value: StudioPlan) => { this.planRows = upsert(this.planRows, value, 'plan_id') }
   putRun = async (value: StudioRun) => { this.runRows = upsert(this.runRows, value, 'run_id') }
   putEvidence = async (value: StudioEvidence) => { this.evidenceRows = upsert(this.evidenceRows, value, 'evidence_id') }
-  putApproval = async (value: StudioApproval) => { this.approvalRows = upsert(this.approvalRows, value, 'approval_id') }
+  putApproval = async (value: StudioApproval) => {
+    if (failRevisionApprovalFor === value.project_id && value.subject_id.startsWith('revise:')) { failRevisionApprovalFor = null; throw new Error('E2E_REVISION_APPROVAL_FAILURE') }
+    this.approvalRows = upsert(this.approvalRows, value, 'approval_id') }
   // A reserva de criacao tambem existe no duble: sem ela o e2e exercitaria um
   // servidor que NAO tem o guarda que a tela passou a usar, e o teste de
   // interface aprovaria um caminho que a producao nao tem.
@@ -194,6 +198,9 @@ const model: PromptModelPort = {
       pages: [{ name: 'Início', sections: ['Serviços', 'Contato'] }], entities: [],
       sensitive_data: { detected: [], confirmed_by_user: false }, accessibility: { wcag_level: 'AA', keyboard_required: true, reduced_motion: true },
       language: 'pt-BR', acceptance_criteria: ['Mostrar o texto “Fale conosco”.', 'A navegação deve ser simples.'],
+    } }
+    if (purpose === 'plan' && prompt.includes('"slice":')) return { route: 'ollama-local', model: 'fixture', value: {
+      slice: { slice_id: 'extra-contact', title: 'Endereço de atendimento', description: 'Mostrar endereço', acceptance_criteria: ['Endereço visível'], planned_files: ['src/Endereco.tsx'] },
     } }
     if (purpose === 'plan') return { route: 'ollama-local', model: 'fixture', value: { slices: [
       { slice_id: 'layout', title: 'Estrutura da página', description: 'Criar a apresentação principal.', acceptance_criteria: ['A página mostra o serviço.'], planned_files: ['content/app.json'] },
@@ -578,6 +585,10 @@ const server = createServer((request, response) => {
   // prova: sem ele, o teste que para o trabalho deixaria a equipe interrompida
   // para os tamanhos de tela seguintes, e eles reprovariam por causa da ordem
   // em que rodaram - não por um defeito.
+  if (request.url?.startsWith('/e2e/fail-revision-approval?project=') === true) {
+    failRevisionApprovalFor = new URL(request.url, 'http://localhost').searchParams.get('project')
+    return plain(response, 200, 'ok')
+  }
   if (request.url === '/e2e/reset-team') { e2eTeamCancelled = false; return plain(response, 200, 'ok') }
   // Mesmo motivo do reinicio da equipe: o teste que marca o objetivo como
   // terminado deixaria os tamanhos de tela seguintes sem o botao, e eles

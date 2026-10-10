@@ -41,7 +41,7 @@ const DETALHES: DetalhesDaTarefa = {
 function montar(extra: Partial<TaskScreenProps> = {}): string {
   const props: TaskScreenProps = {
     detalhes: DETALHES, rascunho: '', setRascunho: () => {},
-    responder: async () => {}, mudarPlano: async () => {}, ajustar: async () => {}, perguntar: async () => {},
+    responder: async () => true, mudarPlano: async () => true, ajustar: async () => true, perguntar: async () => true,
     painel: null, abrirPainel: () => {}, fecharPainel: () => {},
     ...extra,
   }
@@ -250,7 +250,7 @@ describe('PLAN-01: corrigir pela conversa', () => {
   const pronta: DetalhesDaTarefa = { ...DETALHES, project: { ...DETALHES.project, state: 'SPEC_READY' }, plan: null, runs: [], evidence: [] }
 
   it('com a ação de corrigir ligada, a resposta vigente ganha o botão, com a pergunta no nome acessível', () => {
-    const html = montar({ detalhes: pronta, corrigir: async () => {} })
+    const html = montar({ detalhes: pronta, corrigir: async () => true })
     expect(html).toContain(`aria-label="${tarefa.corrigirRotulo.replace('{pergunta}', 'Quem vai usar?')}"`)
   })
 
@@ -259,6 +259,6 @@ describe('PLAN-01: corrigir pela conversa', () => {
   })
 
   it('depois de um resultado, não há correção pelo questionário', () => {
-    expect(montar({ corrigir: async () => {} })).not.toContain(tarefa.corrigir)
+    expect(montar({ corrigir: async () => true })).not.toContain(tarefa.corrigir)
   })
 })

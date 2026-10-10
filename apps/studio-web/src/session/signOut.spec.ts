@@ -13,6 +13,7 @@ function fixture(response: Response = Response.json({ signed_out: true })) {
     }),
     getCsrf: vi.fn(async () => 'csrf-1'),
     forgetShell: vi.fn(async () => { calls.push('forget-shell') }),
+    clearPlanIntents: vi.fn(async () => { calls.push('forget-plan-intents') }),
     sessionStorage: { removeItem: key => { removed.push(`session:${key}`) } },
     localStorage: { removeItem: key => { removed.push(`local:${key}`) } },
     notifyRevoked: vi.fn(() => { calls.push('notify-revoked') }),
@@ -31,6 +32,7 @@ describe('secure sign out', () => {
       `POST:${SIGN_OUT_ENDPOINT}:csrf-1:same-origin`,
       'notify-revoked',
       'forget-shell',
+      'forget-plan-intents',
       'redirect:/login',
     ])
     expect(f.removed).toEqual([
@@ -45,6 +47,7 @@ describe('secure sign out', () => {
     await expect(signOutCurrentSession(f.port)).rejects.toThrow('Sessão não revogada.')
 
     expect(f.port.forgetShell).not.toHaveBeenCalled()
+    expect(f.port.clearPlanIntents).not.toHaveBeenCalled()
     expect(f.port.notifyRevoked).not.toHaveBeenCalled()
     expect(f.removed).toEqual([])
     expect(f.port.redirect).not.toHaveBeenCalled()
@@ -61,6 +64,7 @@ describe('secure sign out', () => {
   it('redirects after server revocation even if browser cleanup is unavailable', async () => {
     const f = fixture()
     vi.mocked(f.port.forgetShell).mockRejectedValueOnce(new Error('cache unavailable'))
+    vi.mocked(f.port.clearPlanIntents).mockRejectedValueOnce(new Error('intent storage unavailable'))
     f.port.sessionStorage.removeItem = () => { throw new Error('storage unavailable') }
 
     await signOutCurrentSession(f.port)

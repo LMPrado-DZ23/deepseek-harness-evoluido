@@ -40,6 +40,7 @@ export interface DetalhesDaTarefa {
     readonly state: string
     readonly original_brief: string
     readonly created_at?: string
+    readonly pending_revision?: { readonly spec_id: string; readonly requested_by: string }
   }
   readonly turns?: readonly {
     readonly turn_id: string

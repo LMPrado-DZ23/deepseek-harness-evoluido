@@ -18,6 +18,7 @@
 - `harness_upstream_pin`: `6c705be1ce6774a000d061da41d1823b03a3d42c` (zero diff, `gate:upstream-pin` prova)
 - `atualizado_em`: 2026-09-21
 
+## CURRENT VERIFIED STATE — 09/10/2026,,**Missão EXECUTING. Integração da branch de auditoria em integ, 09/10/2026.**,,A branch fix/audit-synthesis-replay (PR #1, 2be67b5) foi integrada à integ.,Os 22 requisitos novos (AUDIT-*, ABRIR-03/R, BENCHMARK-JOURNEYS-01) e os,registros da auditoria de 20/09/2026 estão agora em integ.,,- plugins/prompt-to-app: árvore completa da auditoria (1.431 testes, 7 sabotagens),- docs/ledger: 377 requisitos, 0 achados, BETA=265, FAILED=3,- AUDIT-SYNTHESIS-REPLAY-01: integrado; 3 riscos adversariais ainda abertos,  (replay de recusa sensível, replay por recibo, commit parcial),- 42 testes da raiz falham em Windows por causa Unix/perm/fifo/0700; CI Linux,  (GitHub Actions) não reproduz essas falhas,,Sem merge commit, sem publicação, sem deploy. O commit desta integração,ainda não foi feito (em andamento).
 ## CURRENT VERIFIED STATE — 21/09/2026
 
 **Missão EXECUTING. Reconciliação documental, não produto concluído.**

@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-09",
+  "requirement": "AUDIT-SYNTHESIS-REPLAY-01",
+  "status": "CANDIDATE_COMPLETED",
+  "branch": "fix/audit-synthesis-replay",
+  "base_branch_required": "integ",
+  "source_state": "staged working tree; no commit",
+  "historical_finding": "../20260920/synthesis-replay-findings.json",
+  "behavior": [
+    "The final keyed answer reserves one identifier used by both its intake turn and resulting specification.",
+    "A keyed answer whose safe reading infers the remaining answers can synthesize and replay without another model call.",
+    "A final sensitive-data confirmation uses the same receipt and replays the original specification.",
+    "A correction has one distinct intent kind and fingerprint whether it records only an intermediate turn or also synthesizes; each replay returns the original outcome without duplicating it.",
+    "An old final-answer receipt returns its historical specification without replacing later corrected progress.",
+    "A missing specification after uncertain synthesis fails closed for the same key instead of calling the model again."
+  ],
+  "tests": {
+    "root_typecheck": {
+      "command": "npx tsc --noEmit",
+      "result": "PASS"
+    },
+    "focused": {
+      "command": "npx vitest run plugins/prompt-to-app/tests/http.spec.ts plugins/prompt-to-app/tests/identidade-do-envio.spec.ts",
+      "result": "PASS",
+      "files_passed": 2,
+      "tests_passed": 126
+    },
+    "plugin": {
+      "command": "npx vitest run plugins/prompt-to-app/tests",
+      "result": "PASS",
+      "files_passed": 70,
+      "files_skipped": 1,
+      "tests_passed": 1431,
+      "tests_skipped": 7
+    },
+    "gates": {
+      "command": "pnpm gates",
+      "result": "FAIL",
+      "failed": [
+        "comprehension",
+        "typecheck",
+        "lib-freshness"
+      ],
+      "passed_count": 29,
+      "constitution": "PASS"
+    },
+    "root_suite": {
+      "command": "npx vitest run",
+      "result": "FAIL",
+      "note": "Multiple pre-existing/platform-sensitive Windows failures; full output was truncated, so no invented aggregate count."
+    },
+    "studio_web_suite": {
+      "command": "cd apps/studio-web && npx vitest run",
+      "result": "FAIL",
+      "note": "Invalid React component imports caused by case-colliding source files and missing exports."
+    },
+    "root_build": {
+      "command": "pnpm build",
+      "result": "FAIL",
+      "note": "studio-web TypeScript case-collision and missing-export errors."
+    },
+    "studio_web_build": {
+      "command": "cd apps/studio-web && npm run build",
+      "result": "FAIL",
+      "note": "Same studio-web TypeScript case-collision and missing-export errors."
+    },
+    "e2e": {
+      "result": "NOT_EXECUTED",
+      "reason": "Required studio-web build failed before e2e."
+    },
+    "postgres": {
+      "command": "pnpm test:postgres",
+      "result": "NOT_EXECUTED",
+      "reason": "no-server; Docker Desktop Linux engine unavailable and no DZ23_POSTGRES_TEST_DSN configured."
+    }
+  },
+  "sabotage": [
+    {
+      "mutation": "Remove historical sensitive-confirmation marker lookup",
+      "detected_by": "AUDIT-SYNTHESIS sensitive confirmation replay",
+      "observed": "409 instead of 201"
+    },
+    {
+      "mutation": "Force inferred-answer path never to synthesize",
+      "detected_by": "AUDIT-SYNTHESIS inferred completion replay",
+      "observed": "200 instead of 201"
+    },
+    {
+      "mutation": "Stop sharing the reserved identifier with the intake turn",
+      "detected_by": "AUDIT-SYNTHESIS inferred completion replay",
+      "observed": "409 instead of 201"
+    },
+    {
+      "mutation": "Allow retry when synthesis result is missing",
+      "detected_by": "direct service uncertain-synthesis regression",
+      "observed": "test failure; recorded during this task"
+    },
+    {
+      "mutation": "Use resposta instead of correcao-intake for a correction that synthesizes",
+      "detected_by": "completed correction replay regression",
+      "observed": "409 conflict; recorded during this task"
+    },
+    {
+      "mutation": "Use resposta instead of correcao-intake for an intermediate correction",
+      "detected_by": "intermediate correction replay regression",
+      "observed": "409 instead of 200; recorded on 2026-10-09"
+    },
+    {
+      "mutation": "Remove early historical receipt recovery",
+      "detected_by": "historical answer replay regression",
+      "observed": "409 instead of 201; recorded during this task"
+    }
+  ],
+  "limits": [
+    "Model calls are controlled test doubles; actual provider billing was not measured.",
+    "Receipt serialization uses an in-process mutex and durable reservation, not distributed compare-and-swap across processes.",
+    "The combined turn/spec operation is not a distributed transaction; uncertain partial writes intentionally fail closed for the same key.",
+    "No PostgreSQL integration proof, browser e2e, successful studio-web build, CI, installation, release, or deployment was obtained on 2026-10-09.",
+    "The environment used Node 24.19.0 and pnpm 11.7.0; the project reference is Node 22.23.1.",
+    "The working branch differs from the canonical integ branch; no merge, commit, push, or publication was performed."
+  ]
+}

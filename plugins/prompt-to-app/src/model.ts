@@ -47,6 +47,11 @@ export const studioProjectSchema = z.object({
    * recente", que é exatamente o que valia antes.
    */
   current_run_id: z.string().min(1).nullable().optional(),
+  /** Intencao de transicao conservada ate estado e trilha estarem confirmados. */
+  pending_revision: z.object({
+    spec_id: z.string().min(1), from_state: projectStateSchema,
+    requested_by: z.string().min(1), requested_at: timestamp,
+  }).strict().optional(),
   created_at: timestamp,
   updated_at: timestamp,
   archived_at: timestamp.nullable(),
@@ -251,7 +256,7 @@ export const studioCreationKeySchema = z.object({
     motivo de sempre neste esquema: `open()` falha com `version-mismatch` em
     instalação que já rodou, e não existe passo de migração neste seam.
   */
-  kind: z.enum(['criacao', 'pergunta', 'revisao', 'resposta', 'mudanca']).optional(),
+  kind: z.enum(['criacao', 'pergunta', 'revisao', 'resposta', 'mudanca', 'edicao-plano', 'etapa-plano']).optional(),
   /*
     O que o envio PRODUZIU — o turno da pergunta, a especificação da revisão.
 

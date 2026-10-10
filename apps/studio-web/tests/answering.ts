@@ -14,9 +14,9 @@ import { expect, type Page } from '@playwright/test'
  * e o teste esperava sessenta segundos por um clique que nunca poderia
  * acontecer.
  *
- * O sintoma parecia defeito do produto e não era: era o teste digitando cedo
- * demais. Um teste que falha por pressa ensina a equipe a reexecutar a suíte
- * até passar, que é como uma falha de verdade aprende a se esconder.
+ * A espera mantém a jornada sequencial. A perda de texto digitado durante o
+ * envio também era um defeito do produto: composer-retry.spec.ts agora a
+ * reproduz sem esta espera e exige preservar o novo rascunho.
  *
  * A espera é `desabilitado E aria-busy="false"`, que é exatamente o estado
  * "pronto para receber a próxima resposta":

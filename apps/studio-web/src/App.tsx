@@ -1,3 +1,4 @@
+import { generationSettled } from './creationProgress'
 import { LogOut, Settings, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, apiResponse, csrfToken, type HealthState } from './api'
@@ -5,9 +6,9 @@ import { PendingButton } from './PendingButton'
 import { STUDIO_CATEGORIES, type Category } from './categories'
 import t from './i18n/pt-BR.json'
 import { categoryGuess, type CategoryGuess } from './categorySuggestion'
-import type { RunStepRecord } from './buildSteps-utils'
+import type { RunStepRecord } from './BuildSteps'
 import { projectNameFromBrief } from './projectName'
-import { impressaoDoEnvioLocal, intencaoDeEnvio, intencaoPorImpressao, type IntencaoDeCriacao } from './creationIntent'
+import { impressaoDoEnvioLocal, intencaoPorImpressao, type IntencaoDeCriacao } from './creationIntent'
 
 import { sinteseParada } from './sinteseParada'
 import { HEADLINE_CAPABILITY, capabilityLines, capabilityName, creationBlocked, currentStepIndex, permanentTruthKind, privacyNotice, resultSentence, routeReasonNotice, type PipelineResultState, type PrivacyProfile, type ProjectUiState } from './presentation'
@@ -19,7 +20,8 @@ import { browserEmergencyStopPort, EmergencyStop } from './EmergencyStop'
 import { Checkpoints, RunReport, isCheckpointList, isRunReport, type CheckpointListValue, type RunReportValue } from './RunReport'
 import { dispatchGenerationFinished } from './pwa/notifications'
 import { signOutInBrowser } from './session/signOut'
-import { currentSessionMode, currentSessionPrincipal } from './session/currentSession'
+import { currentSessionMode, currentSessionPrincipal, currentSessionScope } from './session/currentSession'
+import { confirmPlanIntent, preparePlanIntent, prepareCreationIntent, prepareRevisionIntent, prepareQuestionIntent, type PendingIntent, type PendingPlanIntent } from './plan/pendingIntent'
 import { PlanEditor, type ConsultedView } from './plan/PlanEditor'
 import { TAREFAS_MUDARAM, WorkspaceShell } from './shell/WorkspaceShell'
 import { HomeScreen } from './home/HomeScreen'
@@ -60,7 +62,7 @@ type RunDetails = { run_id: string; operation_id: string; state: 'PENDING' | 'RU
   conversa parecer impossível sem um diário à parte.
 */
 type ProjectDetails = {
-  project: { project_id: string; name: string; state: ProjectUiState; original_brief: string; created_at?: string }
+  project: { project_id: string; name: string; state: ProjectUiState; original_brief: string; created_at?: string; pending_revision?: { spec_id: string; requested_by: string } }
   turns?: Array<{ turn_id: string; question_id: string; question: string; answer: string; recommended: boolean; created_at: string }>
   plan?: Plan | null
   runs?: RunDetails[]
@@ -84,6 +86,7 @@ const steps = [
 
 export function App() {
   const { preferencias: preferenciasTexto } = useCatalogos()
+  const enviosTexto = preferenciasTexto.envios
   const [brief, setBrief] = useState('')
   const [category, setCategory] = useState<Category>('landing-page')
   const [privacy, setPrivacy] = useState<PrivacyProfile>('privado-local')
@@ -284,40 +287,19 @@ export function App() {
   // que ninguém pediu — e a pessoa só descobriria no fim.
   const ready = useMemo(() => brief.trim().length >= 10 && categoryBasis !== 'none', [brief, categoryBasis])
   async function safely(action: () => Promise<void>, call: ApiCallKind = 'mutation') {
-    setError('')
-    try { await action() } catch (cause) { setError(apiFailureText(cause, navigator.onLine, call, t.health.attention)) }
+    await safelyWithResult(action, call)
   }
-  /**
-   * A intenção do envio em curso.
-   *
-   * Vive num `ref` e não no estado: ela não desenha nada, e guardá-la no estado
-   * redesenharia a tela a cada tentativa sem nenhum ganho. Ela SOBREVIVE à
-   * falha de propósito — é isso que faz o reenvio depois de um tempo esgotado
-   * chegar com a mesma chave e receber a mesma tarefa, em vez de criar a
-   * segunda.
-   */
-  const intencao = useRef<IntencaoDeCriacao | null>(null)
+  async function safelyWithResult(action: () => Promise<void | boolean>, call: ApiCallKind = 'mutation'): Promise<boolean> {
+    setError('')
+    try { return (await action()) !== false } catch (cause) {
+      setError(apiFailureText(cause, navigator.onLine, call, t.health.attention))
+      return false
+    }
+  }
   /*
-    A intenção dos envios DENTRO da tarefa — perguntar e pedir alteração.
-
-    Um `ref` por tipo, e não um só: a pessoa pode ter uma pergunta que falhou e
-    depois pedir uma alteração, e uma chave compartilhada faria a segunda ser
-    recusada por conflito com a primeira.
-
-    Pelo mesmo motivo da criação, eles SOBREVIVEM à falha: é isso que faz o
-    reenvio depois de um tempo esgotado chegar com a mesma chave e receber a
-    mesma mensagem, em vez da segunda.
-  */
-  const intencaoDaPergunta = useRef<IntencaoDeCriacao | null>(null)
-  const intencaoDaRevisao = useRef<IntencaoDeCriacao | null>(null)
-  /*
-    Os dois últimos envios que faltavam ter identidade de intenção.
-
-    A RESPOSTA do questionário é o caso que mais custava: com "recomendar", ela
-    CHAMA modelo, e o reenvio depois de a resposta se perder chamava de novo e
-    cobrava de novo. A MUDANÇA no plano não duplicava efeito — a guarda de
-    estado barrava a segunda —, mas devolvia um erro de repetição para quem só
-    tinha reenviado a mesma intenção.
+    Respostas do questionario e pedidos de mudanca ainda conservam a chave
+    apenas nesta montagem. Criacao, pergunta, revisao e edicao/etapa de plano
+    usam IndexedDB; estes dois envios continuam pendentes de migracao.
   */
   const intencaoDaResposta = useRef<IntencaoDeCriacao | null>(null)
   const intencaoDaMudanca = useRef<IntencaoDeCriacao | null>(null)
@@ -325,15 +307,17 @@ export function App() {
     if (!ready) { setError(t.idea.empty); return }
     await safely(async () => {
       const pedido = { name: projectNameFromBrief(brief), original_brief: brief.trim(), category, privacy }
-      const envio = intencaoDeEnvio(intencao.current, pedido)
-      intencao.current = envio
+      const scope = await currentSessionScope()
+      if (scope === null) throw new Error(enviosTexto.identidade)
+      let envio: PendingIntent
+      try { envio = await prepareCreationIntent(scope, JSON.stringify(pedido)) }
+      catch { throw new Error(enviosTexto.indisponivel) }
       const created = await api<{ project: { project_id: string; state: ProjectUiState }; next: Question }>('/projects', {
-        method: 'POST', body: JSON.stringify({ ...pedido, request_key: envio.chave }),
+        method: 'POST', body: JSON.stringify({ ...pedido, request_key: envio.key }),
       })
       // A tarefa existe: a intenção terminou. A próxima é outra, e leva chave
       // nova — senão o segundo aplicativo da pessoa seria recusado por conflito
       // com o primeiro.
-      intencao.current = null
       setProjectId(created.project.project_id); rememberProject(created.project.project_id); setProjectState(created.project.state); setQuestion(created.next)
       /*
         ENVIAR ABRE A CONVERSA. Não há passo intermediário e não há wizard: a
@@ -350,6 +334,7 @@ export function App() {
         },
         current_run: null, next: created.next,
       })
+      await acknowledgePlanIntent(envio)
       setRascunho(''); setPainel(null)
       // A lateral precisa saber que nasceu uma tarefa: o endereço muda por
       // `replaceState` e a casca não remonta.
@@ -375,7 +360,7 @@ export function App() {
    * resposta vazia, e não esta tela.
    */
   async function submitAnswer(recommend: boolean, confirmSensitive?: boolean, texto?: string) {
-    if (projectId === null) return
+    if (projectId === null) return false
     /*
       A impressão local carrega o que a PESSOA mandou, e não a pergunta aberta:
       o servidor calcula a pergunta a partir do que já foi respondido, então o
@@ -389,15 +374,15 @@ export function App() {
     const material = [recommend ? '@recomendado' : (texto ?? ''), String(confirmSensitive ?? '')].join('|')
     const envio = intencaoPorImpressao(intencaoDaResposta.current, impressaoDoEnvioLocal('resposta', projectId, material))
     intencaoDaResposta.current = envio
-    await safely(async () => {
+    return safelyWithResult(async () => {
       const response = await api<{ next?: Question | null; spec?: unknown; blocked?: boolean; message?: string }>(`/projects/${projectId}/intake/answer`, {
         method: 'POST', body: JSON.stringify({ answer: texto ?? '', recommend, request_key: envio.chave, ...(confirmSensitive === undefined ? {} : { confirm_sensitive: confirmSensitive }) }),
       })
-      intencaoDaResposta.current = null
-      if (response.blocked === true) { setError(response.message ?? t.health.attention); return }
+      if (response.blocked === true) { setError(response.message ?? t.health.attention); return false }
       setQuestion(response.next ?? null)
       if (response.next == null) setProjectState('SPEC_READY')
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      if (intencaoDaResposta.current?.chave === envio.chave) intencaoDaResposta.current = null
     })
   }
   /**
@@ -410,14 +395,18 @@ export function App() {
    * diz, e de nada mais.
    */
   async function refreshDetalhes(id: string | null = projectId) {
-    if (id === null) return
+    if (id === null) return false
     try {
       const lido = await api<ProjectDetails>(`/projects/${id}`)
       setDetalhes(lido)
       setProjectState(lido.project.state)
       setPlan(lido.plan ?? null)
       setQuestion(lido.next ?? null)
-    } catch { /* A falha de leitura aparece na próxima ação explícita; a conversa fica como estava. */ }
+      return true
+    } catch (cause) {
+      setError(apiFailureText(cause, navigator.onLine, 'read', t.health.attention))
+      return false
+    }
   }
   /**
    * Pede uma alteração depois de um resultado — na MESMA tarefa.
@@ -428,18 +417,39 @@ export function App() {
    * isso que o aceite VIS-03 confere.
    */
   async function ajustar(texto: string) {
-    if (projectId === null) return
-    const envio = intencaoPorImpressao(intencaoDaRevisao.current, impressaoDoEnvioLocal('revisao', projectId, texto))
-    intencaoDaRevisao.current = envio
-    await safely(async () => {
-      await api(`/projects/${projectId}/revise`, {
-        method: 'POST', body: JSON.stringify({ request: texto, request_key: envio.chave }),
-      })
-      intencaoDaRevisao.current = null
+    if (projectId === null) return false
+    return safelyWithResult(async () => {
+      const scope = await currentSessionScope()
+      if (scope === null) throw new Error(enviosTexto.identidade)
+      let envio: PendingIntent
+      try { envio = await prepareRevisionIntent(scope, projectId, texto) }
+      catch (cause) {
+        throw new Error(cause instanceof Error && cause.message === 'REVISION_INTENT_MISMATCH'
+          ? enviosTexto.revisaoOriginal : enviosTexto.indisponivel)
+      }
+      try {
+        const response = await apiResponse<{ error?: string }>(`/projects/${projectId}/revise`, {
+          method: 'POST', body: JSON.stringify({ request: texto, request_key: envio.key }),
+        })
+        if (response.status !== 200 || response.body === null) {
+          if (response.status === 400 || response.status === 409) {
+            const latest = await api<ProjectDetails>(`/projects/${projectId}`)
+            // Recusa confirmada sem escrita pendente permite corrigir o pedido.
+            if (latest.project.pending_revision === undefined) await acknowledgePlanIntent(envio)
+          }
+          throw new Error(response.body?.error ?? `HTTP ${response.status}`)
+        }
+      } catch (cause) {
+        // A escrita pode ter parado entre especificacao e auditoria. Mostre o marcador do servidor.
+        await refreshDetalhes()
+        throw cause
+      }
       setResult(null); setRunReport(null); setCheckpoints(null)
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      await acknowledgePlanIntent(envio)
     })
   }
+
   /**
    * PERGUNTA sobre a tarefa, sem mexer em nada.
    *
@@ -450,19 +460,21 @@ export function App() {
    * @param texto - a pergunta, como a pessoa escreveu.
    */
   async function perguntar(texto: string) {
-    if (projectId === null) return
-    const envio = intencaoPorImpressao(intencaoDaPergunta.current, impressaoDoEnvioLocal('pergunta', projectId, texto))
-    intencaoDaPergunta.current = envio
-    await safely(async () => {
+    if (projectId === null) return false
+    return safelyWithResult(async () => {
+      const scope = await currentSessionScope()
+      if (scope === null) throw new Error(enviosTexto.identidade)
+      let envio: PendingIntent
+      try { envio = await prepareQuestionIntent(scope, projectId, texto) }
+      catch { throw new Error(enviosTexto.indisponivel) }
       await api(`/projects/${projectId}/ask`, {
-        method: 'POST', body: JSON.stringify({ question: texto, request_key: envio.chave }),
+        method: 'POST', body: JSON.stringify({ question: texto, request_key: envio.key }),
       })
-      // A mensagem existe: a intenção terminou. A próxima pergunta leva chave
-      // nova — senão a segunda seria recusada por conflito com a primeira.
-      intencaoDaPergunta.current = null
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      await acknowledgePlanIntent(envio)
     })
   }
+
   /**
    * CORRIGE uma resposta do questionário (PLAN-01).
    *
@@ -473,28 +485,28 @@ export function App() {
    * @param texto - a resposta nova.
    */
   async function corrigirResposta(perguntaId: string, texto: string) {
-    if (projectId === null) return
+    if (projectId === null) return false
     const material = ['correcao', perguntaId, texto.trim()].join('|')
     const envio = intencaoPorImpressao(intencaoDaResposta.current, impressaoDoEnvioLocal('resposta', projectId, material))
     intencaoDaResposta.current = envio
-    await safely(async () => {
+    return safelyWithResult(async () => {
       await api(`/projects/${projectId}/intake/correct`, {
         method: 'POST', body: JSON.stringify({ question_id: perguntaId, answer: texto.trim(), request_key: envio.chave }),
       })
-      intencaoDaResposta.current = null
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      if (intencaoDaResposta.current?.chave === envio.chave) intencaoDaResposta.current = null
     })
   }
   /** Pede mudança no plano proposto, com o texto do compositor. */
   async function mudarPlanoPelaConversa(texto: string) {
-    if (projectId === null) return
+    if (projectId === null) return false
     const envio = intencaoPorImpressao(intencaoDaMudanca.current, impressaoDoEnvioLocal('mudanca', projectId, texto.trim()))
     intencaoDaMudanca.current = envio
-    await safely(async () => {
+    return safelyWithResult(async () => {
       await api(`/projects/${projectId}/plan/change`, { method: 'POST', body: JSON.stringify({ reason: texto.trim(), request_key: envio.chave }) })
-      intencaoDaMudanca.current = null
       setPlan(null)
-      await refreshDetalhes()
+      if (!await refreshDetalhes()) return false
+      if (intencaoDaMudanca.current?.chave === envio.chave) intencaoDaMudanca.current = null
     })
   }
   async function preparePlan() {
@@ -512,20 +524,35 @@ export function App() {
   /** E-03: manda UMA alteração e adota o plano que voltou, com a revisão nova. */
   async function editPlan(edit: PlanEditRequest) {
     if (projectId === null) return
-    await safely(async () => {
-      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify(edit) })
+    return safelyWithResult(async () => {
+      const { base_revision, ...material } = edit
+      const envio = await preservePlanIntent('edit', JSON.stringify(material), base_revision)
+      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/edit`, { method: 'POST', body: JSON.stringify({ ...material, base_revision: envio.baseRevision, request_key: envio.key }) })
       setPlan(response.plan)
       await refreshDetalhes()
+      await acknowledgePlanIntent(envio)
     })
   }
   /** E-03: a pessoa descreve o que falta; o planejador escreve a etapa. */
   async function addPlanSlice(request: string) {
-    if (projectId === null) return
-    await safely(async () => {
-      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/slice`, { method: 'POST', body: JSON.stringify({ reason: request }) })
+    if (projectId === null || plan === null) return
+    return safelyWithResult(async () => {
+      const envio = await preservePlanIntent('slice', request.trim(), plan.revision ?? 1)
+      const response = await api<{ plan: Plan }>(`/projects/${projectId}/plan/slice`, { method: 'POST', body: JSON.stringify({ reason: request.trim(), base_revision: envio.baseRevision, request_key: envio.key }) })
       setPlan(response.plan)
       await refreshDetalhes()
+      await acknowledgePlanIntent(envio)
     })
+  }
+  async function preservePlanIntent(kind: 'edit' | 'slice', material: string, baseRevision: number): Promise<PendingPlanIntent> {
+    const scope = await currentSessionScope()
+    if (scope === null || projectId === null) throw new Error(enviosTexto.identidade)
+    try { return await preparePlanIntent({ scope, projectId, kind, material, baseRevision }) }
+    catch { throw new Error(enviosTexto.indisponivel) }
+  }
+  async function acknowledgePlanIntent(intent: PendingIntent): Promise<void> {
+    try { await confirmPlanIntent(intent) }
+    catch { setError(enviosTexto.confirmacaoPendente) }
   }
   async function approvePlan() {
     if (projectId === null) return
@@ -604,7 +631,7 @@ export function App() {
         conversa os lê de lá. Duas cópias do mesmo fato é como a tela e o
         registro passam a discordar.
       */
-      if (current?.operation_id === runId && ['PASSED', 'FAILED', 'BLOCKED_EXTERNAL', 'BUDGET_EXCEEDED', 'CANCELLED'].includes(current.state)) {
+      if (generationSettled(details.project.state, current.state)) {
         const finished = resultOfRun(details)!
         const state = finished.state
         setResult(finished)
@@ -947,7 +974,7 @@ export function App() {
  * `button-row` trazem junto a moldura azul-marinho e o título gigante da tela
  * que saiu — reusá-las repintaria o wizard em vez de trocá-lo.
  */
-function AcoesDaPergunta({ question, submit }: { question: Question; submit(recommend: boolean, confirm?: boolean): Promise<void> }) {
+function AcoesDaPergunta({ question, submit }: { question: Question; submit(recommend: boolean, confirm?: boolean): Promise<unknown> }) {
   if (question.id === 'sensitive-confirmation') {
     return <div className="dz-acao">
       <PendingButton className="dz-acao-botao" label={t.questions.confirm} busyLabel={t.questions.confirmBusy} action={() => submit(false, true)} />
@@ -972,7 +999,7 @@ function AcoesDaPergunta({ question, submit }: { question: Question; submit(reco
  * a conversa, onde a tentativa em curso é contada. Desenhá-las nos dois
  * lugares punha a mesma informação duas vezes na tela.
  */
-function Action({ title, detail, button, busyButton, action }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<void> }) {
+function Action({ title, detail, button, busyButton, action }: { title: string; detail: string; button?: string; busyButton?: string; action?: () => Promise<unknown> }) {
   return <div className="dz-acao">
     <div className="dz-acao-texto"><strong>{title}</strong><span>{detail}</span></div>
     {button === undefined || action === undefined ? null : <PendingButton className="dz-acao-botao" label={button} busyLabel={busyButton ?? button} action={action} />}

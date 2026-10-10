@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { studioCreationKeySchema } from '../src/model.js'
 import type { AppSpecV1 } from '../src/appspec.js'
 import type {
   StudioApproval, StudioAppSpecRecord, StudioCreationKey, StudioDesignSpecRecord,
@@ -40,7 +41,7 @@ class MemoryRepository implements PromptToAppRepository {
   putSpec = async (value: StudioAppSpecRecord) => { this.specRows = [...this.specRows, value] }
   putTurn = async (value: StudioIntakeTurn) => { this.turnRows = [...this.turnRows, value] }
   putApproval = async (value: StudioApproval) => { this.approvalRows = [...this.approvalRows, value] }
-  putCreationKey = async (value: StudioCreationKey) => { this.keyRows = [...this.keyRows, value] }
+  putCreationKey = async (value: StudioCreationKey) => { studioCreationKeySchema.parse(value); this.keyRows = [...this.keyRows, value] }
   putDesign = async () => {}
   putPlan = async (value: StudioPlan) => {
     this.planRowsInternos = [...this.planRowsInternos.filter(row => row.plan_id !== value.plan_id), value]
@@ -183,6 +184,154 @@ describe('perguntar com identidade de envio', () => {
 })
 
 describe('pedir alteração com identidade de envio', () => {
+  it('serializa outro pedido enquanto a primeira escrita duravel esta suspensa', async () => {
+    const { service, repository } = fixture()
+    const putProject = repository.putProject
+    let release!: () => void
+    let entered!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    let pendingWrites = 0
+    repository.putProject = async value => {
+      if (value.pending_revision !== undefined && value.state === 'VERIFIED_PROTOTYPE') {
+        pendingWrites++
+        if (pendingWrites === 1) { entered(); await held }
+      }
+      await putProject(value)
+    }
+    const first = service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    await started
+    const second = service.reviseProject(bruno, 'proj-1', 'adicionar um telefone', 'another-revision-0001')
+    const settled = Promise.allSettled([first, second])
+    await new Promise<void>(resolve => { setImmediate(resolve) })
+    const writesWhileHeld = pendingWrites
+    release()
+    const results = await settled
+    expect(writesWhileHeld).toBe(1)
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(repository.specRows).toHaveLength(2)
+  })
+
+  it('a revisao avanca a maior versao mesmo quando faltam registros antigos', async () => {
+    const { service, repository } = fixture()
+    repository.specRows = [{ ...repository.specRows[0]!, version: 7 }]
+    const revised = await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(revised.spec.version).toBe(8)
+    expect((await service.latestSpec(ana, 'proj-1')).spec_id).toBe(revised.spec.spec_id)
+  })
+
+  it('duas intencoes concorrentes nao sobrescrevem a revisao uma da outra', async () => {
+    const { service, repository } = fixture()
+    const results = await Promise.allSettled([
+      service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE),
+      service.reviseProject(ana, 'proj-1', 'adicionar um telefone', 'another-revision-0001'),
+    ])
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(repository.specRows).toHaveLength(2)
+    expect(repository.approvalRows).toHaveLength(1)
+    expect(repository.projectRows[0]!.pending_revision).toBeUndefined()
+  })
+
+  it('recupera reserva anterior a especificacao sem criar outra revisao', async () => {
+    const { service, repository } = fixture()
+    const putSpec = repository.putSpec
+    repository.putSpec = async () => { throw new Error('especificacao indisponivel') }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('especificacao indisponivel')
+    expect(repository.projectRows[0]!.pending_revision).toBeDefined()
+    repository.putSpec = putSpec
+    const replay = await new PromptToAppService({ repository }).reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(replay.project.state).toBe('SPEC_READY')
+    expect(replay.project.pending_revision).toBeUndefined()
+    expect(repository.specRows).toHaveLength(2)
+    expect(replay.spec.spec_id).toBe(repository.keyRows[0]!.result_id)
+  })
+
+  it('falha ao limpar marcador conserva trilha unica e data original no reenvio', async () => {
+    const { service, repository } = fixture()
+    const putProject = repository.putProject
+    repository.putProject = async value => {
+      if (value.state === 'SPEC_READY' && value.pending_revision === undefined) throw new Error('confirmacao indisponivel')
+      await putProject(value)
+    }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('confirmacao indisponivel')
+    expect(repository.approvalRows).toHaveLength(1)
+    expect(repository.projectRows[0]!.pending_revision).toBeDefined()
+    repository.putProject = putProject
+    const replay = await new PromptToAppService({ repository }).reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(replay.project.pending_revision).toBeUndefined()
+    expect(repository.approvalRows).toHaveLength(1)
+    expect(repository.approvalRows[0]).toMatchObject({ approved_at: AGORA, from_state: 'VERIFIED_PROTOTYPE', to_state: 'SPEC_READY' })
+  })
+
+  it('revisao pendente impede outra escrita e arquivamento ate concluir', async () => {
+    const { service, repository } = fixture('BUILD_FAILED')
+    const putApproval = repository.putApproval
+    repository.putApproval = async () => { throw new Error('trilha indisponivel') }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('trilha indisponivel')
+    repository.putApproval = putApproval
+    const before = structuredClone(repository.projectRows)
+    await expect(service.saveSpec(ana, 'proj-1', SPEC, 'intake')).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.transition(ana, 'proj-1', 'PLAN_PROPOSED')).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.archive(ana, 'proj-1')).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.undoToCheckpoint(ana, 'proj-1', 'old-run')).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.reviseProject(bruno, 'proj-1', 'outra revisao', 'other-revision-0001')).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(repository.projectRows).toEqual(before)
+    await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(repository.projectRows[0]!.pending_revision).toBeUndefined()
+  })
+
+  it('reenvio concluido nao desfaz progresso posterior nem duplica trilha', async () => {
+    const { service, repository } = fixture()
+    const original = await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    await service.proposePlan(ana, 'proj-1', [{ slice_id: 's1', title: 'Inicio', description: 'Pagina', acceptance_criteria: ['Abre'], planned_files: ['index.html'] }])
+    const before = structuredClone(repository.projectRows)
+    const approvals = repository.approvalRows.length
+    const replay = await new PromptToAppService({ repository }).reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(replay.spec).toEqual(original.spec)
+    expect(replay.project.state).toBe('PLAN_PROPOSED')
+    expect(repository.projectRows).toEqual(before)
+    expect(repository.approvalRows).toHaveLength(approvals)
+  })
+
+  it('revisao legada sem marcador nem trilha nao presume conclusao', async () => {
+    const { service, repository } = fixture()
+    await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    repository.approvalRows = []
+    const before = structuredClone(repository.projectRows)
+    await expect(new PromptToAppService({ repository }).reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(repository.projectRows).toEqual(before)
+  })
+
+  it('retoma a transicao depois de gravar especificacao e perder a escrita do projeto', async () => {
+    const { service, repository } = fixture()
+    const putProject = repository.putProject
+    repository.putProject = async value => {
+      if (value.state === 'SPEC_READY') throw new Error('queda depois da especificacao')
+      await putProject(value)
+    }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('queda depois da especificacao')
+    repository.putProject = putProject
+    const restarted = new PromptToAppService({ repository })
+    const replay = await restarted.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(replay.project.state).toBe('SPEC_READY')
+    expect(repository.specRows).toHaveLength(2)
+    expect(repository.approvalRows.filter(row => row.subject_id === `revise:${replay.spec.spec_id}`)).toHaveLength(1)
+  })
+
+  it('recupera a trilha depois de gravar a transicao sem duplicar especificacao', async () => {
+    const { service, repository } = fixture()
+    const putApproval = repository.putApproval
+    repository.putApproval = async () => { throw new Error('queda depois da transicao') }
+    await expect(service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)).rejects.toThrow('queda depois da transicao')
+    repository.putApproval = putApproval
+    const restarted = new PromptToAppService({ repository })
+    const replay = await restarted.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(repository.specRows).toHaveLength(2)
+    expect(repository.approvalRows.filter(row => row.subject_id === `revise:${replay.spec.spec_id}`)).toHaveLength(1)
+    await restarted.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
+    expect(repository.approvalRows.filter(row => row.subject_id === `revise:${replay.spec.spec_id}`)).toHaveLength(1)
+  })
+
   it('o mesmo pedido duas vezes deixa UMA revisão, e devolve a mesma', async () => {
     const { service, repository } = fixture()
     const primeira = await service.reviseProject(ana, 'proj-1', 'o botão precisa ficar verde', CHAVE)
@@ -323,17 +472,57 @@ describe('responder o intake com identidade de envio', () => {
     expect(repository.turnRows).toHaveLength(2)
   })
 
-  it('a queda entre a reserva e o turno termina o efeito com o MESMO identificador', async () => {
+  for (const recommended of [false, true]) {
+    for (const failure of ['provider', 'storage'] as const) {
+      it(`nao repete consumo incerto apos ${failure}, recommended=${recommended}`, async () => {
+        const { service, repository, produzir, chamadas } = comModelo()
+        const input = { ...pergunta, recommended }
+        const put = repository.putTurn
+        if (failure === 'storage') repository.putTurn = async () => { throw new Error('resultado perdido') }
+        const attempt = async () => {
+          const answer = await produzir()
+          if (failure === 'provider') throw new Error('resultado perdido')
+          return answer
+        }
+        await expect(service.answerIntakeTurn(ana, 'proj-1', input, attempt, CHAVE)).rejects.toThrow('resultado perdido')
+        repository.putTurn = put
+        const restarted = new PromptToAppService({ repository })
+        await expect(restarted.answerIntakeTurn(ana, 'proj-1', input, produzir, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+        expect(chamadas()).toBe(1)
+        expect(repository.turnRows).toHaveLength(0)
+        expect(repository.keyRows).toHaveLength(1)
+      })
+    }
+  }
+
+  it('nova intencao explicita apos incerteza pode produzir outra resposta', async () => {
+    const { service, produzir, chamadas } = comModelo()
+    await expect(service.answerIntakeTurn(ana, 'proj-1', pergunta, async () => {
+      await produzir(); throw new Error('resultado perdido')
+    }, CHAVE)).rejects.toThrow('resultado perdido')
+    const recovered = await service.answerIntakeTurn(ana, 'proj-1', { ...pergunta, digitada: 'pacientes e acompanhantes' }, produzir, 'nova-intencao-0001')
+    expect(recovered.answer).toBe('pacientes da clínica')
+    expect(chamadas()).toBe(2)
+  })
+
+  it('recusa envio com chave sem armazenamento de recibos antes de chamar modelo', async () => {
+    const { repository, produzir, chamadas } = comModelo()
+    const broken = Object.assign(Object.create(repository), { creationKeys: undefined, putCreationKey: undefined }) as PromptToAppRepository
+    const service = new PromptToAppService({ repository: broken })
+    await expect(service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)).rejects.toMatchObject({ code: 'INVALID' })
+    expect(chamadas()).toBe(0)
+  })
+
+  it.each([undefined, 'turno-reservado'])('reserva legada sem turno permanece incerta, resultado=%s', async resultId => {
     const { service, repository, produzir } = comModelo()
     // A reserva ficou; o turno, não — é o que uma queda no meio deixa.
     repository.keyRows = [{
       request_key: CHAVE, org_id: ana.orgId, tenant_id: ana.tenantId, user_id: ana.userId,
       fingerprint: impressaoDoEnvio({ tipo: 'resposta', projectId: 'proj-1', texto: 'pacientes da clínica' }),
-      project_id: 'proj-1', kind: 'resposta', result_id: 'turno-reservado', created_at: AGORA,
+      project_id: 'proj-1', kind: 'resposta', ...(resultId === undefined ? {} : { result_id: resultId }), created_at: AGORA,
     }]
-    const turno = await service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)
-    expect(turno.turn_id).toBe('turno-reservado')
-    expect(repository.turnRows).toHaveLength(1)
+    await expect(service.answerIntakeTurn(ana, 'proj-1', pergunta, produzir, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(repository.turnRows).toHaveLength(0)
   })
 })
 
@@ -368,6 +557,69 @@ describe('pedir ALTERAÇÃO NO PLANO com identidade de envio', () => {
     expect(segundo.status).toBe('CHANGE_REQUESTED')
     expect(segundo.change_request).toBe(primeiro.change_request)
     expect(segundo.revision).toBe(primeiro.revision)
+  })
+
+  it('reenvio antigo apos nova proposta e reinicio recupera o resultado original sem alterar a atual', async () => {
+    const { service, repository } = comPlano()
+    const original = await service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)
+    const next = { ...original, plan_id: 'proposal-next', revision: (original.revision ?? 1) + 1, status: 'PROPOSED' as const, change_request: null }
+    await repository.putPlan(next)
+    const restarted = new PromptToAppService({ repository })
+    expect(await restarted.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).toEqual(original)
+    expect(await restarted.plan(ana, 'proj-1')).toEqual(next)
+    expect(repository.approvalRows).toHaveLength(0)
+  })
+
+  it('reserva sem resultado nao aplica pedido antigo a proposta atual', async () => {
+    const { service, repository } = comPlano()
+    const original = await service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)
+    repository.planRowsInternos = [{ ...original, plan_id: 'proposal-next', revision: (original.revision ?? 1) + 1, status: 'PROPOSED', change_request: null }]
+    const before = structuredClone(repository.planRowsInternos)
+    const restarted = new PromptToAppService({ repository })
+    await expect(restarted.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(repository.planRowsInternos).toEqual(before)
+  })
+
+  it('preserva a proposta anterior e vincula o recibo a uma nova revisao', async () => {
+    const { service, repository } = comPlano()
+    const before = structuredClone(repository.planRowsInternos[0]!)
+    const changed = await service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)
+    expect(changed.plan_id).not.toBe(before.plan_id)
+    expect(changed.revision).toBe(2)
+    expect(repository.keyRows[0]!.result_id).toBe(changed.plan_id)
+    expect(repository.planRowsInternos.find(row => row.plan_id === before.plan_id)).toEqual(before)
+    expect(await service.plan(ana, 'proj-1')).toEqual(changed)
+    await expect(service.requestPlanChange(deOutroEspaco, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(repository.keyRows).toHaveLength(1)
+  })
+
+  it('queda na escrita do resultado deixa reserva incerta sem reaplicar depois', async () => {
+    const { service, repository } = comPlano()
+    const before = structuredClone(repository.planRowsInternos)
+    const put = repository.putPlan
+    repository.putPlan = async () => { throw new Error('disco indisponivel') }
+    await expect(service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toThrow('disco indisponivel')
+    repository.putPlan = put
+    const restarted = new PromptToAppService({ repository })
+    await expect(restarted.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(repository.planRowsInternos).toEqual(before)
+  })
+
+  it.each([undefined, 'legacy-unlinked-id'])('recibo legado nao altera nova proposta, resultado=%s', async resultId => {
+    const { service, repository } = comPlano()
+    repository.keyRows.push({ request_key: CHAVE, org_id: ana.orgId, tenant_id: ana.tenantId, user_id: ana.userId,
+      fingerprint: impressaoDoEnvio({ tipo: 'mudanca', projectId: 'proj-1', texto: PEDIDO }), project_id: 'proj-1',
+      kind: 'mudanca', ...(resultId === undefined ? {} : { result_id: resultId }), created_at: AGORA })
+    await expect(service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect((await service.plan(ana, 'proj-1')).status).toBe('PROPOSED')
+  })
+
+  it('sem armazenamento de recibos recusa a chave antes de alterar o plano', async () => {
+    const { repository } = comPlano()
+    const broken = Object.assign(Object.create(repository), { creationKeys: undefined, putCreationKey: undefined }) as PromptToAppRepository
+    const service = new PromptToAppService({ repository: broken })
+    await expect(service.requestPlanChange(ana, 'proj-1', PEDIDO, CHAVE)).rejects.toMatchObject({ code: 'INVALID' })
+    expect(repository.planRowsInternos[0]!.status).toBe('PROPOSED')
   })
 
   it('SEM chave, o segundo pedido continua recusado pela guarda de estado', async () => {
@@ -462,4 +714,81 @@ describe('levar consigo o que o espaço guardou', () => {
     expect(levado.projects).toEqual([])
     expect(levado.org_id).toBe('org-z')
   })
+})
+
+describe('edição e etapa com recibo durável', () => {
+  const edit = { base_revision: 1, slices: [{ slice_id: 's1', title: 'Título revisado' }], removed: [] }
+  async function ready() {
+    const f = fixture('SPEC_READY')
+    await f.service.proposePlan(ana, 'proj-1', [{ slice_id: 's1', title: 'Início', description: 'Página inicial', acceptance_criteria: ['A página abre'], planned_files: ['src/GeneratedApp.tsx'] }])
+    return f
+  }
+  function restart(repository: MemoryRepository) {
+    return new PromptToAppService({ repository, now: () => new Date(AGORA) })
+  }
+  it('recupera a edição após reinício, mesmo depois de outra edição', async () => {
+    const { service, repository } = await ready()
+    const first = await service.editPlan(ana, 'proj-1', edit, CHAVE)
+    const latest = await service.editPlan(ana, 'proj-1', { ...edit, base_revision: 2, slices: [{ slice_id: 's1', title: 'Outra revisão' }] })
+    const count = repository.approvalRows.length
+    const recovered = restart(repository)
+    expect(await recovered.editPlan(ana, 'proj-1', edit, CHAVE)).toEqual(first)
+    expect(await recovered.plan(ana, 'proj-1')).toEqual(latest)
+    expect(repository.approvalRows).toHaveLength(count)
+  })
+  it('uma chave não aceita outro conteúdo nem outro ator ou inquilino', async () => {
+    const { service } = await ready()
+    await service.editPlan(ana, 'proj-1', edit, CHAVE)
+    await expect(service.editPlan(ana, 'proj-1', { ...edit, removed: ['s1'] }, CHAVE)).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(service.editPlan(bruno, 'proj-1', edit, CHAVE)).rejects.toMatchObject({ code: 'REPLAY' })
+    await expect(service.editPlan(deOutroEspaco, 'proj-1', edit, CHAVE)).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(service.editPlan({ ...ana, role: 'viewer' }, 'proj-1', edit, CHAVE)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+  })
+  it('reenvios concorrentes e reinício não chamam o modelo duas vezes', async () => {
+    const { service, repository } = await ready()
+    let calls = 0
+    const planner = { slice: async () => { calls++; return { slice: { slice_id: 's2', title: 'Contato', description: 'Dados de contato', acceptance_criteria: ['Contato visível'], planned_files: ['src/Contato.tsx'] } } } }
+    const [first, second] = await Promise.all([1, 2].map(() => service.addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)))
+    expect(second).toEqual(first)
+    expect(await restart(repository).addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)).toEqual(first)
+    expect(calls).toBe(1)
+  })
+  it.each([false, true])('não repete modelo incerto, reserva sem id=%s', async withoutId => {
+    const { service, repository } = await ready()
+    let calls = 0
+    const planner = { slice: async (): Promise<never> => { calls++; throw new Error('resposta perdida') } }
+    await expect(service.addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)).rejects.toThrow('resposta perdida')
+    if (withoutId) delete repository.keyRows[0]!.result_id
+    await expect(restart(repository).addPlanSlice(ana, 'proj-1', 'Adicionar contato', planner, 'any', CHAVE, 1)).rejects.toMatchObject({ code: 'REPLAY' })
+    expect(calls).toBe(1)
+  })
+  it('reconcilia auditoria se o processo cair depois de gravar o plano', async () => {
+    const { service, repository } = await ready()
+    const save = repository.putApproval
+    repository.putApproval = async () => { throw new Error('queda depois do plano') }
+    await expect(service.editPlan(ana, 'proj-1', edit, CHAVE)).rejects.toThrow('queda depois do plano')
+    repository.putApproval = save
+    const recovered = restart(repository)
+    const result = await recovered.editPlan(ana, 'proj-1', edit, CHAVE)
+    expect(result.revision).toBe(2)
+    expect(repository.approvalRows.filter(row => row.subject === 'plan')).toHaveLength(1)
+    await recovered.editPlan(ana, 'proj-1', edit, CHAVE)
+    expect(repository.approvalRows.filter(row => row.subject === 'plan')).toHaveLength(1)
+  })
+  it('a reconciliação mantém a data da edição mesmo após aprovação posterior', async () => {
+    const { repository } = await ready()
+    const editTime = '2026-09-17T13:00:00.000Z'
+    const editor = new PromptToAppService({ repository, now: () => new Date(editTime) })
+    const save = repository.putApproval
+    repository.putApproval = async () => { throw new Error('queda na trilha') }
+    await expect(editor.editPlan(ana, 'proj-1', edit, CHAVE)).rejects.toThrow('queda na trilha')
+    repository.putApproval = save
+    const later = new PromptToAppService({ repository, now: () => new Date('2026-09-17T14:00:00.000Z') })
+    await later.approvePlan(ana, 'proj-1')
+    const replayed = await later.editPlan(ana, 'proj-1', edit, CHAVE)
+    expect(replayed.status).toBe('APPROVED')
+    const audit = repository.approvalRows.find(row => row.approval_id.startsWith('plan-edit-'))
+    expect(audit?.approved_at).toBe(editTime)
+  })
+
 })

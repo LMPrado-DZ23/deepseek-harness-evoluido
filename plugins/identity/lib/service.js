@@ -166,8 +166,11 @@ export class StudioIdentityService {
             await Promise.all(this.#repository.magicCodes()
                 .filter(previous => previous.email === normalized && previous.consumed_at === null)
                 .map(previous => this.#repository.putMagicCode({ ...previous, consumed_at: now.toISOString() })));
-            const orgId = existing?.org_id ?? grant?.orgId ?? this.#defaultOrgId;
-            const tenantId = existing?.tenant_id ?? grant?.tenantId ?? this.#defaultTenantId;
+            // O primeiro titular local assume o escopo já usado pelo trabalho pessoal.
+            // Convites e instalações de servidor mantêm a autoridade que já tinham.
+            const personal = existing === undefined && grant === undefined ? this.personalPrincipal(this.#bindHost) : undefined;
+            const orgId = existing?.org_id ?? grant?.orgId ?? personal?.orgId ?? this.#defaultOrgId;
+            const tenantId = existing?.tenant_id ?? grant?.tenantId ?? personal?.tenantId ?? this.#defaultTenantId;
             const record = {
                 magic_code_id: this.#createId(),
                 email: normalized,
@@ -270,19 +273,41 @@ export class StudioIdentityService {
             throw new IdentityError('invalid', t('auth.codeInvalidOrExpired'));
         }
         const source = validGrant ? 'invitation' : 'bootstrap';
-        const user = existing ?? {
-            user_id: this.#createId(),
+        const personal = existing === undefined && source === 'bootstrap' ? this.personalPrincipal(this.#bindHost) : undefined;
+        if (existing === undefined && source === 'bootstrap') {
+            const orgId = personal?.orgId ?? this.#defaultOrgId;
+            const tenantId = personal?.tenantId ?? this.#defaultTenantId;
+            // Um código emitido em outro modo/escopo não transfere dados ao mudar a configuração.
+            if (candidate.org_id !== orgId || candidate.tenant_id !== tenantId) {
+                await this.#audit('login_failed', null, null, candidate.org_id, candidate.tenant_id, 'failure', t('auth.codeInvalidOrExpired'));
+                throw new IdentityError('invalid', t('auth.codeInvalidOrExpired'));
+            }
+        }
+        let user = existing ?? {
+            user_id: personal?.userId ?? this.#createId(),
             email: normalized,
             display_name: normalized.split('@')[0],
             bootstrap_owner: source === 'bootstrap',
+            ...(source === 'bootstrap' ? { bootstrap_provisioning_pending: true } : {}),
             org_id: candidate.org_id,
             tenant_id: candidate.tenant_id,
             created_at: now.toISOString(),
         };
-        if (existing === undefined) {
+        const pendingBootstrap = user.bootstrap_owner === true && user.bootstrap_provisioning_pending === true;
+        if (existing === undefined)
             await this.#repository.putUser(user);
-            await this.#userProvisioner(user, source);
-            if (source === 'bootstrap') {
+        if (existing === undefined || pendingBootstrap) {
+            // O marcador pertence a esta matricula, nao a um convite posterior. So
+            // removemos depois do provisionamento; falha de disco permite retomar
+            // no proximo login sem repetir matriculas ja concluidas ou papeis alterados.
+            const provisioningSource = pendingBootstrap ? 'bootstrap' : source;
+            await this.#userProvisioner(user, provisioningSource);
+            if (pendingBootstrap) {
+                const { bootstrap_provisioning_pending: _pending, ...completed } = user;
+                await this.#repository.putUser(completed);
+                user = completed;
+            }
+            if (provisioningSource === 'bootstrap') {
                 await this.#audit('personal_mode_disabled', user.user_id, null, user.org_id, user.tenant_id, 'success', t('auth.firstAccessRegistered'));
                 await this.#audit('enrollment_closed', user.user_id, null, user.org_id, user.tenant_id, 'success', t('auth.bootstrapClosedAfterOwner'));
             }
